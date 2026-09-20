@@ -3,12 +3,14 @@
 **Send shielded money as a link. No wallet, no address, no amount on screen.**
 
 ## What it is
-Zenvelope is the first production implementation of ZIP-324, Zcash's own
-"URI-encapsulated payment" standard, drafted in 2019 by the Zcash core team and
-never shipped. A sender funds a link from a shielded ZEC balance. The recipient
-opens the link in any browser and takes the money out. No wallet install, no
-address exchange, and the amount is hidden from everyone, including the
-recipient, until the envelope is opened.
+Zenvelope takes the idea behind ZIP-324, Zcash's 2019 draft for
+URI-encapsulated payments, to the open web and to the Ironwood pool. A sender
+funds a link from a shielded ZEC balance. The recipient opens the link in any
+browser and takes the money out. No wallet, no install, no address exchange,
+and the amount is not in the link: it stays hidden from everyone, including the
+recipient, until the envelope is opened. Prior art we build on: zplash (2026,
+ZIP-324 on Sapling with browser proving) and Vizor gift links (2026, recipient
+installs Vizor). See DECISIONS.md.
 
 ## How it works, in one paragraph
 The link contains a secret in the URL fragment. That secret derives a shielded

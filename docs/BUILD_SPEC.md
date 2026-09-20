@@ -1,19 +1,27 @@
 # Zenvelope build spec
 
+Superseded items are recorded in DECISIONS.md.
+
 No calendar. Milestones in dependency order. Each is shippable on its own.
 Cut from the bottom if time runs out.
 
 ## Architecture
 - **Web app**, static, open source, MIT. Any host. No backend that touches keys.
-- **Zcash in the browser**: WASM light client (zcash_client_backend compiled to
-  WASM, as zplash proved works) talking gRPC-web to a public lightwalletd
-  (zec.rocks:443, fallback zec-node.cakewallet.com:443).
+- **Zcash in the browser**: WASM light client, a fork of
+  ZcashCommunityGrants/WebZjs (zcash_client_backend 0.24, orchard 0.15.5), talking
+  gRPC-web to https://zjs.zec.rocks/mainnet, failover
+  https://zcash-mainnet.chainsafe.dev. Hosted with COOP/COEP for WASM threads.
 - **Link format**: `https://<host>/e#<secret>`. Secret is 32 random bytes,
-  base64url. Derives a Sapling/Orchard spending key and unified address. The
-  fragment is never sent to the server by browsers.
-- **Sender side**: show a ZIP-321 URI and QR for the link's address with the
-  amount, plus a second output for the flat fee to our address. Works with
-  Zodl, Ywallet, Zingo. Optional Noir wallet connect for desktop.
+  base64url, from the browser CSPRNG. Derives a spending key and a unified
+  address with an Ironwood-receiving Orchard receiver (typecode 0x03); Orchard
+  outputs are invalid after NU6.3. The fragment is never sent to the server by
+  browsers.
+- **Sender side**: show a single-output ZIP-321 URI and QR for the link's
+  address, for the envelope amount plus the flat fee. The fee is taken as a
+  second output of the recipient's sweep transaction, not of the sender's
+  payment, because multi-output ZIP-321 is not portable across wallets. Works
+  with Zodl, Zingo, ZKool2, Vizor and Cake. Optional Noir wallet connect for
+  desktop.
 - **Recipient side**: browser scans for notes to the link's address using the
   viewing key, reveals the amount with an "open the envelope" animation, then
   spends to the destination the recipient picks.
@@ -30,14 +38,14 @@ Cut from the bottom if time runs out.
 ## Milestones
 M0 Repo, README with the one-pager, license, arena project draft, first builder
    update posted.
-M1 Create a link on testnet: secret, derived address, ZIP-321 URI, QR, fee
-   output. Verify with Zodl testnet.
-M2 Open a link on testnet: scan, decrypt, show amount. This proves the viewing
+M1 Create a link on mainnet: secret, derived address, ZIP-321 URI, QR, fee in
+   the amount. Verify with Zodl on mainnet.
+M2 Open a link on mainnet: scan, decrypt, show amount. This proves the viewing
    path and the hidden-amount reveal.
-M3 Spend from the link to a pasted Zcash address in the browser. WASM proving.
-   This completes ZIP-324 end to end. Demo video 1 recorded here.
-M4 Mainnet switch, drainer-safe copy, trust-boundary screens, in-browser fresh
-   wallet with seed export for recipients who have nothing.
+M3 Spend from the link to a pasted Zcash address in the browser, on mainnet.
+   In-browser Ironwood proving. End to end. Demo video 1 recorded here.
+M4 Drainer-safe copy, trust-boundary screens, in-browser fresh wallet with seed
+   export for recipients who have nothing.
 M5 Solana receive option via 1Click, with the warning screen and a fresh Solana
    keypair path. Demo video 2 recorded here.
 M6 Group envelopes and CSV export.
@@ -48,7 +56,7 @@ M7 Submission pack: 3-minute pitch video, 3-minute demo video, GitHub, Colosseum
 M6 first, then M5, then Noir connect. M0 to M4 are the product.
 
 ## Dependencies to verify at M1, not later
-- Live gRPC-web handshake to zec.rocks:443 from a browser.
+- Live gRPC-web handshake to https://zjs.zec.rocks/mainnet from a browser.
 - WASM prover size and proving time on a mid-range phone.
 - 1Click quote for ZEC in, USDC-on-Solana out, minimum amount and fee.
 
@@ -58,5 +66,5 @@ M6 first, then M5, then Noir connect. M0 to M4 are the product.
 - One named user of group envelopes, with a quote, before submission.
 
 ## Names and handles to secure before M0
-zenvelope on GitHub and npm, zenvelope.xyz or .app, @zenvelope on X if the
+zenvelope on GitHub and npm, zenvelope.app (.xyz is taken), @zenvelope on X if the
 dead squat can be reclaimed, otherwise @zenvelope_xyz.
