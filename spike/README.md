@@ -7,6 +7,28 @@ cost in time and memory?**
 Answer: **yes.** Nothing needed threads, nothing needed nightly, and the whole thing
 fits in ~101 MB of wasm linear memory. It is just slow.
 
+## Measured
+
+Playwright chromium 153.0.8010.12, 8-core x86_64 Linux host, one thread. Every row is a
+real proof that verified (`verified=true`, 2 actions, 7264 proof bytes).
+
+| Build | CPU | pk build | vk build | bundle build | proof | verify | peak wasm mem |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| default release (`opt-level = "z"`) | 1x | 35.6 s | 29.0 s | 0.41 s | 52.1 s | 0.39 s | 100.8 MB |
+| optimized (`opt-level = 3`, `lto = "fat"`, `cgu = 1`) | 1x | 33.0 s | 27.1 s | 0.40 s | 50.4 s | 0.40 s | 100.8 MB |
+| default release | 4x throttle | 148.8 s | 119.4 s | 1.75 s | 228.5 s | 1.62 s | 100.8 MB |
+| optimized | 4x throttle | 141.3 s | 117.7 s | 1.70 s | 207.6 s | 1.53 s | 100.8 MB |
+
+Peak wasm linear memory is **105,644,032 bytes (100.8 MB)** in every single run, and the
+growth is a staircase: 1.4 MB at load, 32.2 MB after the proving key, 36.3 MB after the
+verifying key, 100.8 MB after the proof. Nowhere near 1 GB, let alone the 4 GB wasm32
+ceiling. Re-running under `--js-flags=--wasm-max-mem-pages=32768` (a hard 2 GB cap)
+changes nothing: 35.3 s / 51.0 s / 100.8 MB, proof verified.
+
+The optimized profile buys ~5-9% and costs 1.0 MB more wasm (1.50 MB -> 2.53 MB raw,
+646 KB -> 972 KB gzipped). wasm-opt ran at `-O3` in both, so `opt-level = "z"` is
+already most of the way there; the profile is not where the time is.
+
 ## What it does
 
 `crates/spike-prove` is a `wasm-bindgen`, `--target web` crate exporting:

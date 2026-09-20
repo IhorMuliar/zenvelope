@@ -26,3 +26,4 @@ spike/pkg-*/
 spike/package-lock.json
 spike/test-results/
 target-opt/
+test-results/
