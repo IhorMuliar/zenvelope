@@ -113,11 +113,14 @@ prover sees the transaction but cannot spend, and it stays opt-in and labelled.
 
 ### D9 Hosting
 
-**Decision.** Host on Cloudflare Pages or Netlify. Domain: `zenvelope.app`.
+**Decision.** Host on Cloudflare Pages or Netlify. Domain deferred: no domain is
+registered to us and none is planned before submission; ship on the host's own
+subdomain.
 
 **Why.** Both let us set COOP and COEP response headers, which cross-origin isolation and
-therefore WASM threads require. GitHub Pages cannot set custom headers at all.
-`zenvelope.xyz` is registered by a third party.
+therefore WASM threads require. GitHub Pages cannot set custom headers at all. A
+custom domain buys nothing the milestones need, and `zenvelope.xyz` is in any case
+registered by a third party.
 
 **Evidence.** Host header-configuration docs, 2026-09-20.
 

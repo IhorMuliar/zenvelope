@@ -98,13 +98,13 @@ product one-pager in [docs/PRODUCT.md](docs/PRODUCT.md), decision log in
 [docs/DECISIONS.md](docs/DECISIONS.md).
 
 - [x] **M0** Repo, README one-pager, license, arena project draft, first builder update posted.
-- [ ] **M1** Create a link on mainnet: secret, derived address, ZIP-321 URI, QR, fee in the amount.
+- [ ] **M1** *(in progress)* Create a link on mainnet: secret, derived address, ZIP-321 URI, QR, fee in the amount.
 - [ ] **M2** Open a link on mainnet: scan, decrypt, show the amount.
-- [ ] **M3** Spend from the link to a pasted Zcash address in the browser, with WASM proving. End to end.
+- [ ] **M3** Spend from the link to a pasted Zcash address in the browser, on mainnet, with in-browser Ironwood proving. End to end.
 - [ ] **M4** Drainer-safe copy, trust-boundary screens, fresh in-browser wallet with seed export.
 - [ ] **M5** Solana receive option via a third-party rail, with the warning screen and a fresh keypair path.
 - [ ] **M6** Group envelopes and CSV export.
-- [ ] **M7** Submission pack: pitch video, demo video, listings.
+- [ ] **M7** Submission pack: 3-minute pitch video, 3-minute demo video, GitHub, Colosseum form, Earn listings, Ukraine demo day slot.
 
 ## ZIP-324
 
@@ -143,8 +143,9 @@ Coming with M1. Planned stack:
 - Zcash in the browser: a WASM light client based on the
   [ZcashCommunityGrants/WebZjs](https://github.com/ZcashCommunityGrants/WebZjs) fork,
   on `zcash_client_backend` 0.24 and `orchard` 0.15.5.
-- gRPC-web to <https://zjs.zec.rocks> (mainnet), failover
-  <https://zcash-mainnet.chainsafe.dev>.
+- gRPC-web to <https://zjs.zec.rocks/mainnet>, failover
+  <https://zcash-mainnet.chainsafe.dev>. (Plain `zec.rocks:443` is gRPC only, for
+  native CLI tools; a browser cannot use it.)
 - Ironwood proving in the browser.
 - Hosted with COOP/COEP headers so WASM threads are available.
 - Mainnet from the first milestone.

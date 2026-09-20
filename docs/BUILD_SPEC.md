@@ -10,7 +10,9 @@ Cut from the bottom if time runs out.
 - **Zcash in the browser**: WASM light client, a fork of
   ZcashCommunityGrants/WebZjs (zcash_client_backend 0.24, orchard 0.15.5), talking
   gRPC-web to https://zjs.zec.rocks/mainnet, failover
-  https://zcash-mainnet.chainsafe.dev. Hosted with COOP/COEP for WASM threads.
+  https://zcash-mainnet.chainsafe.dev. Plain zec.rocks:443 is a native gRPC
+  endpoint for CLI tools only: no gRPC-web bridge, no CORS, unusable from a
+  browser. Hosted with COOP/COEP for WASM threads.
 - **Link format**: `https://<host>/e#<secret>`. Secret is 32 random bytes,
   base64url, from the browser CSPRNG. Derives a spending key and a unified
   address with an Ironwood-receiving Orchard receiver (typecode 0x03); Orchard
@@ -21,7 +23,8 @@ Cut from the bottom if time runs out.
   second output of the recipient's sweep transaction, not of the sender's
   payment, because multi-output ZIP-321 is not portable across wallets. Works
   with Zodl, Zingo, ZKool2, Vizor and Cake. Optional Noir wallet connect for
-  desktop.
+  desktop; Noir is single-recipient, so it builds one single-output payment
+  per envelope and never a multi-output transaction.
 - **Recipient side**: browser scans for notes to the link's address using the
   viewing key, reveals the amount with an "open the envelope" animation, then
   spends to the destination the recipient picks.
@@ -30,14 +33,15 @@ Cut from the bottom if time runs out.
   ZEC deposit address, and the browser spends the note to it. Destination is a
   Solana address the recipient pastes or a fresh keypair generated in-browser
   with import instructions. Trust warning shown before the quote.
-- **Group envelopes**: client generates N secrets, N links, one ZIP-321 URI
-  with N outputs (or N sequential payments if the wallet lacks multi-output).
-  Sender downloads a CSV of links.
+- **Group envelopes**: client generates N secrets and N links, and the sender
+  makes N single-output payments, one per link, each for that envelope's
+  amount plus the flat fee. No multi-output URI: it is not portable across
+  wallets (D5). Sender downloads a CSV of links.
 - **Telemetry**: none that identifies a link. Count of links created only.
 
 ## Milestones
-M0 Repo, README with the one-pager, license, arena project draft, first builder
-   update posted.
+M0 (done) Repo, README with the one-pager, license, arena project draft, first
+   builder update posted.
 M1 Create a link on mainnet: secret, derived address, ZIP-321 URI, QR, fee in
    the amount. Verify with Zodl on mainnet.
 M2 Open a link on mainnet: scan, decrypt, show amount. This proves the viewing
@@ -65,6 +69,9 @@ M6 first, then M5, then Noir connect. M0 to M4 are the product.
 - ZIP-324 linked in the README with the draft date and author list.
 - One named user of group envelopes, with a quote, before submission.
 
-## Names and handles to secure before M0
-zenvelope on GitHub and npm, zenvelope.app (.xyz is taken), @zenvelope on X if the
-dead squat can be reclaimed, otherwise @zenvelope_xyz.
+## Names and handles
+- GitHub: done, https://github.com/IhorMuliar/zenvelope.
+- Domain: deferred. No domain is ours. Until that is decided, the app runs on the
+  host's own subdomain (Cloudflare Pages or Netlify), which is enough for the
+  milestones and the demo.
+- npm name and @zenvelope on X: deferred, not on any milestone's critical path.

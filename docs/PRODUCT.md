@@ -35,9 +35,12 @@ payouts, community distributions, and holiday gifting. Fixed split only, no
 random split, no payment by the recipient to open.
 
 ## What we charge
-A flat fee per link, paid by the sender at creation as a separate shielded
-output to our address. The fee covers hosting and sponsored costs. It is a
-service fee, not a percentage of the amount. Recipients pay nothing.
+A flat fee per link. The sender's ZIP-321 URI has a single output, for
+*envelope amount + flat fee*, which keeps it compatible with every sender
+wallet. The fee reaches us as a second output of the sweep transaction when
+the recipient opens the envelope, not as an output of the sender's payment.
+The fee covers hosting and sponsored costs. It is a service fee, not a
+percentage of the amount. Recipients pay nothing extra.
 
 ## What we are not
 Not a custodian, not an exchange, not a bridge. No float, no conversion in-house,
