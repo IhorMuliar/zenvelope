@@ -20,3 +20,10 @@ web/src/wasm/
 # Playwright
 web/test-results/
 web/playwright-report/
+
+# M3 proving spike (throwaway): built wasm and its playwright deps
+spike/pkg-*/
+spike/package-lock.json
+spike/test-results/
+target-opt/
+test-results/

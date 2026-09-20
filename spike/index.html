@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Zenvelope M3 proving spike</title>
+  </head>
+  <body>
+    <pre id="log">loading…</pre>
+    <script type="module">
+      const pkg = new URLSearchParams(location.search).get("pkg") ?? "pkg-default";
+      try {
+        const mod = await import(`./${pkg}/zenvelope_spike_prove.js`);
+        await mod.default();
+        window.spike = mod;
+        window.spikeError = null;
+        window.spikeReady = true;
+        document.getElementById("log").textContent = `${pkg} loaded`;
+      } catch (e) {
+        window.spikeError = String(e && e.stack ? e.stack : e);
+        window.spikeReady = true;
+        document.getElementById("log").textContent = window.spikeError;
+      }
+    </script>
+  </body>
+</html>

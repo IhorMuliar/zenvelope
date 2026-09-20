@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/core", "crates/spike-witness"]
+members = ["crates/core", "crates/spike-witness", "crates/spike-prove"]
 
 [workspace.package]
 version = "0.1.0"
