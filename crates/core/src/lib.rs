@@ -12,6 +12,11 @@
 //! Everything here is pure computation over bytes. Nothing reaches the network, and the
 //! secret never leaves the caller's memory.
 
+pub mod scan;
+
+#[cfg(target_arch = "wasm32")]
+mod grpc;
+
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use wasm_bindgen::prelude::*;
@@ -20,7 +25,7 @@ use zcash_address::{
     unified::{Container, Receiver},
     ConversionError, TryFromAddress, ZcashAddress,
 };
-use zcash_keys::keys::{UnifiedAddressRequest, UnifiedSpendingKey};
+use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey};
 use zcash_protocol::consensus::{Network, NetworkType};
 use zcash_protocol::value::{Zatoshis, COIN, MAX_MONEY};
 use zip32::AccountId;
@@ -94,16 +99,40 @@ pub fn encode_secret(secret: &[u8; SECRET_BYTES]) -> String {
     URL_SAFE_NO_PAD.encode(secret)
 }
 
+/// Derives the envelope's unified full viewing key from a link secret, carrying the
+/// Orchard full viewing key and nothing else.
+///
+/// ZIP-32 derivation from a seed produces key material for every pool the build knows
+/// about, and M2 links in `zcash_client_backend`, which requires `zcash_keys`'s Sapling
+/// support. Left alone, the UFVK would silently grow a Sapling item and its `uview1…`
+/// encoding would change. The envelope address has exactly one receiver, so its viewing
+/// key has exactly one key: the reduction here keeps the two in step, keeps the encoding
+/// stable across builds, and keeps the scan from trial-decrypting a pool no envelope can
+/// ever be paid in.
+pub fn ufvk_from_secret(
+    secret_b64url: &str,
+    network: Network,
+) -> Result<UnifiedFullViewingKey, String> {
+    let seed = decode_secret(secret_b64url)?;
+
+    let usk = UnifiedSpendingKey::from_seed(&network, &seed, AccountId::ZERO)
+        .map_err(|e| format!("could not derive spending key from secret: {e:?}"))?;
+    let derived = usk.to_unified_full_viewing_key();
+    let orchard = derived
+        .orchard()
+        .ok_or("derived viewing key carries no Orchard key")?
+        .clone();
+
+    UnifiedFullViewingKey::from_orchard_fvk(orchard)
+        .map_err(|e| format!("could not build an Orchard-only viewing key: {e:?}"))
+}
+
 /// Derives the envelope address and viewing key from a link secret.
 ///
 /// The 32-byte secret is used directly as the ZIP-32 seed. The account is always
 /// [`AccountId::ZERO`]: one envelope, one secret, one account.
 pub fn derive_from_secret(secret_b64url: &str, network: Network) -> Result<Derived, String> {
-    let seed = decode_secret(secret_b64url)?;
-
-    let usk = UnifiedSpendingKey::from_seed(&network, &seed, AccountId::ZERO)
-        .map_err(|e| format!("could not derive spending key from secret: {e:?}"))?;
-    let ufvk = usk.to_unified_full_viewing_key();
+    let ufvk = ufvk_from_secret(secret_b64url, network)?;
 
     let (address, diversifier_index) = ufvk
         .default_address(UnifiedAddressRequest::ORCHARD)
