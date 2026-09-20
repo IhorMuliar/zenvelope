@@ -1,0 +1,3 @@
+# Single-page app: /e and /how are client-rendered. The URL fragment is never
+# sent to the server, so nothing about an envelope reaches the host.
+/*  /index.html  200
