@@ -98,8 +98,8 @@ product one-pager in [docs/PRODUCT.md](docs/PRODUCT.md), decision log in
 [docs/DECISIONS.md](docs/DECISIONS.md).
 
 - [x] **M0** Repo, README one-pager, license, arena project draft, first builder update posted.
-- [ ] **M1 (built, awaiting first mainnet funding)** Create a link on mainnet: secret, derived address, ZIP-321 URI, QR, fee in the amount. Verification transcript in [web/docs/M1-VERIFICATION.md](web/docs/M1-VERIFICATION.md).
-- [ ] **M2** Open a link on mainnet: scan, decrypt, show the amount.
+- [x] **M1 (done)** Create a link on mainnet: secret, derived address, ZIP-321 URI, QR, fee in the amount. M1 done 2026-09-20: first envelope funded from Zodl on mainnet, Ironwood note confirmed by zcash-devtool (tx 281e9f7b…341d43, block 3490472). Verification transcript in [web/docs/M1-VERIFICATION.md](web/docs/M1-VERIFICATION.md).
+- [ ] **M2 (in progress)** Open a link on mainnet: scan, decrypt, show the amount.
 - [ ] **M3** Spend from the link to a pasted Zcash address in the browser, on mainnet, with in-browser Ironwood proving. End to end.
 - [ ] **M4** Drainer-safe copy, trust-boundary screens, fresh in-browser wallet with seed export.
 - [ ] **M5** Solana receive option via a third-party rail, with the warning screen and a fresh keypair path.
@@ -163,7 +163,9 @@ The rest of the stack, still to come:
 - Sender flow driven by a ZIP-321 payment URI and QR, so existing wallets work as-is:
   Zodl, Zingo, ZKool2, Vizor and Cake are Ironwood-capable.
 
-The web app itself does not exist yet.
+The web app exists and runs the real core: it creates an envelope on mainnet, shows the
+ZIP-321 URI and QR, and re-derives the address from the link alone. Opening an envelope
+(M2) and spending from it (M3) are next.
 
 ## License
 

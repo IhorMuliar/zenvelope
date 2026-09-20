@@ -42,10 +42,14 @@ Cut from the bottom if time runs out.
 ## Milestones
 M0 (done) Repo, README with the one-pager, license, arena project draft, first
    builder update posted.
-M1 Create a link on mainnet: secret, derived address, ZIP-321 URI, QR, fee in
-   the amount. Verify with Zodl on mainnet.
-M2 Open a link on mainnet: scan, decrypt, show amount. This proves the viewing
-   path and the hidden-amount reveal.
+M1 (done 2026-09-20) Create a link on mainnet: secret, derived address, ZIP-321
+   URI, QR, fee in the amount. Verified with Zodl on mainnet: the first envelope
+   was funded from a shielded balance by scanning the QR, and the Ironwood note
+   was confirmed independently by zcash-devtool from the browser-generated
+   viewing key (tx 281e9f7b…341d43, block 3490472). Transcript in
+   web/docs/M1-VERIFICATION.md.
+M2 (in progress) Open a link on mainnet: scan, decrypt, show amount. This proves
+   the viewing path and the hidden-amount reveal.
 M3 Spend from the link to a pasted Zcash address in the browser, on mainnet.
    In-browser Ironwood proving. End to end. Demo video 1 recorded here.
 M4 Drainer-safe copy, trust-boundary screens, in-browser fresh wallet with seed
@@ -61,8 +65,12 @@ M6 first, then M5, then Noir connect. M0 to M4 are the product.
 
 ## Dependencies to verify at M1, not later
 - Live gRPC-web handshake to https://zjs.zec.rocks/mainnet from a browser.
-- WASM prover size and proving time on a mid-range phone.
-- 1Click quote for ZEC in, USDC-on-Solana out, minimum amount and fee.
+  **Done at M1**: the browser reads the chain tip over gRPC-web and uses it as the
+  link's birthday height.
+- WASM prover size and proving time on a mid-range phone. Still open; the M1 core
+  is derivation only, 435,317 bytes (253 KB gzip), and carries no prover.
+- 1Click quote for ZEC in, USDC-on-Solana out, minimum amount and fee. Still open,
+  needed at M5.
 
 ## Judge-facing proof points
 - "We never hold funds" shown as a diagram in the pitch, first 20 seconds.

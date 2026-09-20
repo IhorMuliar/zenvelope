@@ -1,8 +1,9 @@
 # M1 verification
 
 Evidence that the web app runs the real `zenvelope-core` WASM build, that the addresses
-it produces are valid mainnet Zcash unified addresses, and that an independent reference
-client accepts the viewing key the browser derived.
+it produces are valid mainnet Zcash unified addresses, that an independent reference
+client accepts the viewing key the browser derived, and that a real mainnet payment from
+an ordinary mobile wallet lands on one of those addresses as an Ironwood note (§5).
 
 Run on 2026-09-20. Everything below is a transcript of commands that were actually
 executed, not a description of what they would do.
@@ -10,8 +11,9 @@ executed, not a description of what they would do.
 - Repo: `/root/Projects/web3-sweep/zenvelope`, branch `main`
 - Oracle: `zcash-devtool` @ `5a26ee854e634a4e88d1d79dab13f8fbb1eac6b8`
   (see `/root/Projects/web3-sweep/tools/DEVTOOL.md`)
-- Network: **mainnet**. No funds were sent as part of this verification; the oracle
-  wallet is view-only and its balance is zero by construction.
+- Network: **mainnet** throughout. The oracle wallet is view-only in every section: it
+  can see notes, it can never spend them. Sections 1 to 4 move no funds; §5 records the
+  first real funded envelope.
 
 ## 1. The WASM build
 
@@ -199,6 +201,71 @@ Proved: the browser derives real, well-formed mainnet Zcash key material; a refe
 light client accepts it, agrees on the address, and syncs to the chain tip against a
 production lightwalletd without errors.
 
-Not proved yet: that a payment to that address is detected and can be moved out. That
-needs a real funded envelope, which is the next step — see `M1-FUND.md` (private,
-gitignored).
+Not proved by §4 alone: that a payment to that address is detected. That needed a real
+funded envelope — done, in §5 below. Moving the funds back out is M3.
+
+## 5. Mainnet funding, verified
+
+Run on **2026-09-20**, on **mainnet**, with real funds. This is the step §4 left open.
+
+A fresh envelope was created in the browser for **0.001 ZEC**, giving a single-output
+ZIP-321 URI for **0.0013 ZEC** (0.001 envelope + 0.0003 flat fee) and its QR. **Zodl**,
+a mobile wallet, scanned that QR and paid it from a shielded balance — no address was
+typed, no amount was entered by hand, and the wallet needed nothing from us beyond the
+URI.
+
+The envelope's address, and the transaction that funded it, are public on-chain facts
+and are recorded here. The link secret and the viewing key are not, and are not in any
+tracked file.
+
+| | |
+| --- | --- |
+| Envelope address | `u1frjy4qdnx30dwk42kf058w2f3fys4e02dz39nxymn9d7hmmfdyv0lj0snd77snjwddjk595mdepq7m5800nuys0ua2ugnm0tdvpjzcp9` |
+| Sender | Zodl, mobile, shielded balance, paid by scanning the ZIP-321 QR |
+| Amount | 0.0013 ZEC = 0.001 envelope + 0.0003 flat fee, **one output** |
+| Birthday height | 3,490,437 |
+| Txid | `281e9f7bffa5bffc8ee1287cc6e245cc59eee302727ea9d93c7f8e5a99341d43` |
+| Mined at height | **3,490,472** (2026-09-20 22:40:10 UTC) |
+| Pool | **IRONWOOD**, one output, value **0.00130000 ZEC** |
+
+### Independent confirmation by the oracle
+
+The confirmation was not made by any Zenvelope code. A **view-only** wallet was built in
+`zcash-devtool` — the reference client — from the **unified full viewing key the browser
+generated**, and nothing else. It cannot spend, and it has never seen the link secret.
+
+```sh
+B=/root/Projects/web3-sweep/tools/zcash-devtool/target/release/zcash-devtool
+W=/root/Projects/web3-sweep/tools/wallets/m1-fund
+rm -rf "$W" && mkdir -p "$W"
+
+# the UFVK is the one the browser derived; it is not recorded in this repo
+$B wallet -w "$W" init-fvk --name m1-fund \
+    --fvk uview1… \
+    --birthday 3490437 -s zecrocks
+
+$B wallet -w "$W" sync -s zecrocks
+$B wallet -w "$W" balance --json
+$B wallet -w "$W" list-tx
+```
+
+`sync` walked **30 blocks** from the birthday to the chain tip in **~1.5 s**, exit 0, no
+errors. `balance --json` then reported the note in the Ironwood pool, and `list-tx`
+showed exactly one transaction: txid `281e9f7b…341d43`, mined at height **3490472**, one
+output of **0.00130000 ZEC** in **IRONWOOD**, received by the envelope address above.
+
+So: a shielded payment made from an ordinary mobile wallet, to an address a browser
+derived from 32 random bytes in a URL fragment, lands as an Ironwood note, and a client
+with no Zenvelope code in it finds that note from the browser's viewing key alone.
+
+### Build state at this point
+
+| | |
+| --- | --- |
+| Wasm core | **435,317 bytes** raw, 253 KB gzip |
+| `cargo test` | 22 passed |
+| `vitest` | 44 passed |
+| Playwright e2e | 3 passed |
+
+**M1 is done.** M2 is the other half: opening the envelope in the browser — scan,
+decrypt, reveal the amount and the sender's message.
