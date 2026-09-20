@@ -16,12 +16,21 @@
  */
 
 import { expect, test, type Page } from "@playwright/test";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DOCS = resolve(HERE, "../docs");
+
+/**
+ * This file only means anything against the real wasm core. A checkout without
+ * `./scripts/build-core.sh` run is on the MOCK, so the whole group is skipped
+ * rather than failing on an address it was never going to produce. M2's
+ * `m2-open.spec.ts` runs on the MOCK and always runs.
+ */
+const REAL_CORE = existsSync(resolve(HERE, "../src/wasm/core/zenvelope_core.js"));
+const describeOnRealCore = REAL_CORE ? test.describe : test.describe.skip;
 
 /** From crates/core/TEST_VECTORS.md: the 32 bytes 0x01..0x20, base64url. */
 const VECTOR_SECRET = "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA";
@@ -66,7 +75,7 @@ async function expectRealCore(page: Page) {
   await expect(page.getByTestId("mock-badge")).toHaveCount(0);
 }
 
-test.describe("M1: the web app on the real wasm core", () => {
+describeOnRealCore("M1: the web app on the real wasm core", () => {
   test("serves the wasm cross-origin isolated", async ({ page }) => {
     const res = await page.goto("/");
     expect(res?.status()).toBe(200);
@@ -125,7 +134,11 @@ test.describe("M1: the web app on the real wasm core", () => {
     await page.screenshot({ path: resolve(DOCS, "m1-real-create.png"), fullPage: true });
 
     // Opening the link must re-derive the same address from the fragment alone.
+    // M2 made /e the sealed-envelope screen, so the address sits behind its
+    // "check the envelope address" disclosure, and nothing scans until asked.
     await page.goto(`/e#${fragment}`);
+    await expect(page.getByTestId("open-envelope")).toBeVisible();
+    await page.getByTestId("open-address-toggle").click();
     await expect(page.getByTestId("open-address")).toBeVisible();
     await expectRealCore(page);
     expect((await page.getByTestId("open-address").textContent())!.trim()).toBe(address);
@@ -143,6 +156,7 @@ test.describe("M1: the web app on the real wasm core", () => {
 
   test("derives the documented address for the fixed test vector", async ({ page }) => {
     await page.goto(`/e#${VECTOR_SECRET}`);
+    await page.getByTestId("open-address-toggle").click();
     await expect(page.getByTestId("open-address")).toBeVisible();
     await expectRealCore(page);
     expect((await page.getByTestId("open-address").textContent())!.trim()).toBe(

@@ -7,7 +7,15 @@
  * addresses it produces are not spendable.
  */
 
-import type { Derived, LoadedCore, Network, ParsedFragment, ZatLike } from "./types";
+import type {
+  Derived,
+  LoadedCore,
+  Network,
+  OpenResult,
+  ParsedFragment,
+  ProgressFn,
+  ZatLike,
+} from "./types";
 import { toZat } from "./types";
 
 const SECRET_BYTES = 32;
@@ -124,6 +132,67 @@ export function derive(secret_b64url: string, network: Network): Derived {
   };
 }
 
+
+/**
+ * MOCK scan. Four seconds of progress, then one note.
+ *
+ * It touches no network and reads no key material: `lightwalletd_url` is
+ * accepted and ignored so the call shape matches the real core exactly. The
+ * fixed note is the M1 envelope from web/docs/M1-VERIFICATION.md.
+ */
+export const MOCK_SCAN_MS = 4000;
+const MOCK_TICK_MS = 100;
+/** Ticks reported before the mock "knows" the span, so the bar starts indeterminate. */
+const MOCK_UNKNOWN_TICKS = 4;
+export const MOCK_TIP_HEIGHT = 3490500;
+const MOCK_DEFAULT_SPAN = 12400;
+
+export const MOCK_NOTE = {
+  amount_zat: "130000",
+  memo: "Zenvelope M1",
+  height: 3490472,
+  txid: "0b7e2a1c9d4f6835e1a0c72b5d9f4e6183a7c02d5be914f7308cd62a1f4b8e57",
+  pool: "ironwood",
+} as const;
+
+export async function openEnvelope(
+  secret_b64url: string,
+  birthday: number | undefined,
+  network: Network,
+  _lightwalletd_url: string,
+  on_progress: ProgressFn,
+): Promise<OpenResult> {
+  // Derive first, so a bad secret fails the same way the real core would.
+  derive(secret_b64url, network);
+  const total =
+    birthday !== undefined && birthday < MOCK_TIP_HEIGHT
+      ? MOCK_TIP_HEIGHT - birthday + 1
+      : MOCK_DEFAULT_SPAN;
+  const ticks = Math.round(MOCK_SCAN_MS / MOCK_TICK_MS);
+
+  return new Promise((resolve) => {
+    let tick = 0;
+    const timer = setInterval(() => {
+      tick += 1;
+      if (tick >= ticks) {
+        clearInterval(timer);
+        on_progress(total, total);
+        resolve({
+          found: true,
+          notes: [{ ...MOCK_NOTE }],
+          total_zat: MOCK_NOTE.amount_zat,
+          tip_height: MOCK_TIP_HEIGHT,
+        });
+        return;
+      }
+      // The span is unknown for the first few ticks: total 0 keeps the bar
+      // indeterminate, exactly as it is while the real scanner fetches the tip.
+      if (tick <= MOCK_UNKNOWN_TICKS) on_progress(0, 0);
+      else on_progress(Math.floor((total * tick) / ticks), total);
+    }, MOCK_TICK_MS);
+  });
+}
+
 export const mockCore: LoadedCore = {
   isMock: true,
   derive,
@@ -133,4 +202,5 @@ export const mockCore: LoadedCore = {
   payment_uri: paymentUri,
   zat_to_zec_string: zatToZecString,
   zec_string_to_zat: zecStringToZat,
+  open_envelope: openEnvelope,
 };

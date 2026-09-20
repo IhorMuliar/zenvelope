@@ -13,7 +13,15 @@
  * is an empty map at build time instead of a build error.
  */
 
-import type { Derived, LoadedCore, Network, ParsedFragment, ZatLike } from "./types";
+import type {
+  Derived,
+  LoadedCore,
+  Network,
+  OpenResult,
+  ParsedFragment,
+  ProgressFn,
+  ZatLike,
+} from "./types";
 import { mockCore } from "./mock";
 
 const WASM_ENTRY = "../wasm/core/zenvelope_core.js";
@@ -32,6 +40,7 @@ const REQUIRED = [
   "payment_uri",
   "zat_to_zec_string",
   "zec_string_to_zat",
+  "open_envelope",
 ] as const;
 
 /**
@@ -74,6 +83,13 @@ interface WasmModule {
   payment_uri(address: string, amount_zat: ZatLike, message?: string): string;
   zat_to_zec_string(zat: ZatLike): string;
   zec_string_to_zat(s: string): ZatLike;
+  open_envelope(
+    secret_b64url: string,
+    birthday: number | undefined,
+    network: Network,
+    lightwalletd_url: string,
+    on_progress: ProgressFn,
+  ): Promise<OpenResult>;
 }
 
 async function load(): Promise<LoadedCore> {
@@ -114,6 +130,10 @@ async function load(): Promise<LoadedCore> {
         : core.payment_uri(address, amount, message),
     zat_to_zec_string: (zat) => core.zat_to_zec_string(zat),
     zec_string_to_zat: (s) => core.zec_string_to_zat(s),
+    // The scan is the one call that touches the network. The secret is passed
+    // straight through to WASM and is never copied anywhere else.
+    open_envelope: (secret, birthday, network, url, onProgress) =>
+      core.open_envelope(secret, birthday, network, url, onProgress),
   };
 }
 

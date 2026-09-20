@@ -1,18 +1,42 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { LIGHTWALLETD, LIGHTWALLETD_FALLBACK } from "../config";
 import { loadCore } from "../core";
-import type { Network } from "../core/types";
+import type { FoundNote, LoadedCore, Network } from "../core/types";
+import {
+  BAD_FRAGMENT_COPY,
+  NO_FRAGMENT_COPY,
+  initialOpenState,
+  openReducer,
+  progressLabel,
+  runOpen,
+} from "../lib/openFlow";
+import { formatCount, formatZecAmount, poolLabel, sumZat, truncateTxid } from "../lib/format";
+import { CopyField } from "../components/CopyField";
+import { Envelope } from "../components/Envelope";
 
-interface Found {
+interface Link {
+  /** The address the sender paid. Safe to show: it reveals nothing and cannot spend. */
   address: string;
   birthday?: number;
   network: Network;
-  isMock: boolean;
 }
 
 export function Open() {
-  const [found, setFound] = useState<Found | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [state, dispatch] = useReducer(openReducer, initialOpenState);
+  const [link, setLink] = useState<Link | null>(null);
+  const [isMock, setIsMock] = useState(false);
 
+  /**
+   * The secret lives in this ref and in the URL fragment, nowhere else: not in
+   * storage, not in a query string, not in any link this page renders, and never
+   * logged. It is handed to the core and to nothing else.
+   */
+  const secret = useRef<string | null>(null);
+  const core = useRef<LoadedCore | null>(null);
+  /** Bumped per scan, so a superseded run cannot write over a newer one. */
+  const runId = useRef(0);
+
+  // The wasm core loads while the recipient is still reading the sealed screen.
   useEffect(() => {
     let alive = true;
     const frag = window.location.hash.replace(/^#/, "");
@@ -20,30 +44,23 @@ export function Open() {
       new URLSearchParams(window.location.search).get("net") === "test" ? "test" : "main";
 
     if (frag.trim() === "") {
-      setError(
-        "This link has no envelope in it. Links look like /e#… and the part after the # " +
-          "is dropped by some chat apps, so copy the whole link and try again.",
-      );
+      dispatch({ type: "invalid", message: NO_FRAGMENT_COPY });
       return;
     }
 
     loadCore()
-      .then((core) => {
-        // parse and derive locally; the fragment never leaves the browser
-        const parsed = core.parse_fragment(frag);
-        const derived = core.derive(parsed.secret, network);
+      .then((c) => {
         if (!alive) return;
-        setFound({
-          address: derived.address,
-          birthday: parsed.birthday,
-          network,
-          isMock: core.isMock,
-        });
+        const parsed = c.parse_fragment(frag);
+        const derived = c.derive(parsed.secret, network);
+        core.current = c;
+        secret.current = parsed.secret;
+        setIsMock(c.isMock);
+        setLink({ address: derived.address, birthday: parsed.birthday, network });
+        dispatch({ type: "parsed" });
       })
       .catch(() => {
-        if (alive) {
-          setError("This link does not contain a valid envelope. Check that you copied all of it.");
-        }
+        if (alive) dispatch({ type: "invalid", message: BAD_FRAGMENT_COPY });
       });
 
     return () => {
@@ -51,11 +68,50 @@ export function Open() {
     };
   }, []);
 
-  if (error) {
+  const scan = useCallback(async () => {
+    const c = core.current;
+    const s = secret.current;
+    if (!c || !s || !link) return;
+    const id = ++runId.current;
+    try {
+      const result = await runOpen({
+        core: c,
+        secret: s,
+        birthday: link.birthday,
+        network: link.network,
+        hosts: [LIGHTWALLETD[link.network], LIGHTWALLETD_FALLBACK[link.network]],
+        onProgress: (scanned, total) => {
+          if (id === runId.current) dispatch({ type: "progress", scanned, total });
+        },
+        onAttempt: (attempt) => {
+          if (id === runId.current) dispatch({ type: "attempt", attempt });
+        },
+      });
+      if (id === runId.current) dispatch({ type: "result", result });
+    } catch (err) {
+      if (id === runId.current) dispatch({ type: "failed", message: (err as Error).message });
+    }
+  }, [link]);
+
+  const onOpen = () => {
+    dispatch({ type: "open" });
+    void scan();
+  };
+
+  const onRetry = () => {
+    dispatch({ type: "retry" });
+    void scan();
+  };
+
+  const badge = isMock ? <MockBadge /> : null;
+
+  if (state.phase === "invalid") {
     return (
       <section className="stack">
         <h1>We could not read this link</h1>
-        <p className="error">{error}</p>
+        <p className="error" data-testid="open-error">
+          {state.message}
+        </p>
         <p>
           <a href="/">Create an envelope instead</a>
         </p>
@@ -63,7 +119,7 @@ export function Open() {
     );
   }
 
-  if (!found) {
+  if (state.phase === "reading" || !link) {
     return (
       <section className="stack">
         <h1>Reading the link…</h1>
@@ -71,30 +127,243 @@ export function Open() {
     );
   }
 
+  if (state.phase === "sealed") {
+    return (
+      <section className="stack center">
+        <h1>You have an envelope</h1>
+        {badge}
+        <Envelope />
+        <p className="lede">Open it to see what is inside. Only you can.</p>
+        <button type="button" className="primary" onClick={onOpen} data-testid="open-envelope">
+          Open envelope
+        </button>
+        <p className="fine" data-testid="open-fineprint">
+          Opening scans the Zcash chain from your browser. Nothing leaves this page.
+        </p>
+        <details className="sealed-details">
+          <summary data-testid="open-address-toggle">Check the envelope address</summary>
+          <code className="value mono" data-testid="open-address">
+            {link.address}
+          </code>
+          <p className="hint">
+            The sender paid this address. It is derived from your link, here in this browser.
+            {link.birthday !== undefined ? ` Birthday height ${link.birthday}.` : ""}
+            {link.network === "test" ? " Testnet." : ""}
+          </p>
+        </details>
+      </section>
+    );
+  }
+
+  if (state.phase === "scanning") {
+    const line = progressLabel(state, formatCount);
+    return (
+      <section className="stack center">
+        <h1 data-testid="scanning">Looking for your envelope…</h1>
+        {badge}
+        <Envelope busy />
+        <progress
+          className="scan-bar"
+          max={state.total > 0 ? state.total : undefined}
+          value={state.total > 0 ? state.scanned : undefined}
+          data-testid="scan-bar"
+        />
+        <p className="hint" aria-live="polite" data-testid="scan-progress">
+          {line ?? "Starting the scan…"}
+        </p>
+        <p className="fine">
+          Every block is checked here, in your browser.
+          {state.attempt > 0 ? " The first Zcash node did not answer, so we moved to the backup." : ""}
+        </p>
+      </section>
+    );
+  }
+
+  if (state.phase === "opened" && state.result) {
+    return (
+      <Opened
+        notes={state.result.notes}
+        tipHeight={state.result.tip_height}
+        badge={badge}
+      />
+    );
+  }
+
+  // empty and failed both end here: a wait-and-see screen with a retry.
+  const failed = state.phase === "failed";
   return (
     <section className="stack">
-      <h1>Envelope found</h1>
-      {found.isMock ? (
-        <p className="badge" data-testid="mock-badge">
-          MOCK CORE — no WASM build found. This address is a placeholder.
-        </p>
-      ) : null}
+      <h1>{failed ? "We could not finish looking" : "Nothing here yet"}</h1>
+      {badge}
       <div className="card stack">
-        <p data-testid="open-placeholder">Envelope found, opening arrives in the next milestone.</p>
-        <span className="label">Envelope address</span>
-        <code className="value mono" data-testid="open-address">
-          {found.address}
-        </code>
+        <p className={failed ? "error" : ""} data-testid={failed ? "scan-error" : "not-found"}>
+          {state.message}
+        </p>
+        <button type="button" className="primary" onClick={onRetry} data-testid="retry">
+          Try again
+        </button>
+      </div>
+      <div className="card stack">
+        <CopyField label="Waiting for" value={link.address} testId="waiting-address" />
         <p className="hint">
-          {found.birthday !== undefined
-            ? `Birthday height ${found.birthday}.`
-            : "No birthday in this link."}
-          {found.network === "test" ? " Testnet." : ""}
+          This is the address the envelope is paid to. Send it to whoever gave you this link
+          so they can check they paid the right place.
+          {link.birthday !== undefined ? ` Scanned from block ${formatCount(link.birthday)}.` : ""}
         </p>
       </div>
       <p className="fine">
         The secret in this link stayed in your browser. Nothing about it was sent anywhere.
       </p>
     </section>
+  );
+}
+
+function Opened({
+  notes,
+  tipHeight,
+  badge,
+}: {
+  notes: FoundNote[];
+  tipHeight: number;
+  badge: React.ReactNode;
+}) {
+  const total = sumZat(notes.map((n) => n.amount_zat));
+  const memo = notes.find((n) => n.memo && n.memo.trim() !== "")?.memo ?? null;
+  const single = notes.length === 1 ? notes[0] : null;
+
+  return (
+    <section className="stack">
+      <h1>Your envelope is open</h1>
+      {badge}
+
+      <div className="unwrap">
+        <Envelope open />
+        <p className="unwrap-amount" data-testid="amount">
+          {formatZecAmount(total)}
+        </p>
+        <FiatReveal amount={formatZecAmount(total)} />
+      </div>
+
+      {memo ? (
+        <div className="card stack">
+          <h2>Their message</h2>
+          <p className="memo" data-testid="memo">
+            {memo}
+          </p>
+        </div>
+      ) : null}
+
+      <div className="card stack">
+        {single ? (
+          <>
+            <Row label="Pool" value={poolLabel(single.pool)} testId="pool" />
+            <Row label="Block" value={formatCount(single.height)} testId="height" />
+            <CopyField
+              label="Transaction"
+              value={single.txid}
+              display={truncateTxid(single.txid)}
+              testId="txid"
+            />
+          </>
+        ) : (
+          <>
+            <Row label="Payments" value={`${notes.length} notes, added up above`} testId="note-count" />
+            <details data-testid="note-details">
+              <summary>Details</summary>
+              <ul className="notes">
+                {notes.map((n) => (
+                  <li key={`${n.txid}-${n.height}`} className="stack">
+                    <strong>{formatZecAmount(BigInt(n.amount_zat))}</strong>
+                    <span className="hint">
+                      {poolLabel(n.pool)} · block {formatCount(n.height)}
+                    </span>
+                    <CopyField
+                      label="Transaction"
+                      value={n.txid}
+                      display={truncateTxid(n.txid)}
+                    />
+                  </li>
+                ))}
+              </ul>
+            </details>
+          </>
+        )}
+        <p className="hint">Chain tip {formatCount(tipHeight)} when this scan finished.</p>
+      </div>
+
+      <NextSteps />
+
+      <p className="fine">
+        The secret in this link stayed in your browser. Nothing about this envelope was sent
+        anywhere.
+      </p>
+    </section>
+  );
+}
+
+function Row({ label, value, testId }: { label: string; value: string; testId?: string }) {
+  return (
+    <p className="row">
+      <span className="label">{label}</span>
+      <span data-testid={testId}>{value}</span>
+    </p>
+  );
+}
+
+/** No price API in M2: asking one would tell it an envelope was just opened. */
+function FiatReveal({ amount }: { amount: string }) {
+  const [shown, setShown] = useState(false);
+  if (!shown) {
+    return (
+      <button type="button" className="ghost" onClick={() => setShown(true)} data-testid="fiat">
+        What is that worth?
+      </button>
+    );
+  }
+  return (
+    <p className="hint" data-testid="fiat-answer">
+      {amount}, and that is all we will tell you. Asking a price server for a rate would tell
+      it that you just opened an envelope, so this milestone shows ZEC only.
+    </p>
+  );
+}
+
+const NEXT: [string, string][] = [
+  ["A Zcash address", "Paste any Zcash address and the money moves there, still shielded."],
+  [
+    "A new wallet in this browser",
+    "We generate a fresh Zcash wallet here and hand you the seed words to keep.",
+  ],
+  [
+    "USDC or SOL on Solana (leaves the shielded pool)",
+    "This leaves the shielded pool. A third-party rail you pick does the swap, we never hold funds on either side, and you see every cost before you commit.",
+  ],
+];
+
+function NextSteps() {
+  return (
+    <div className="card stack">
+      <h2>Where should it go?</h2>
+      <ul className="next-steps">
+        {NEXT.map(([title, body]) => (
+          <li key={title}>
+            <button type="button" disabled data-testid="next-step">
+              <span className="next-title">{title}</span>
+              <span className="hint">{body}</span>
+              <span className="soon">Coming in the next milestone</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function MockBadge() {
+  return (
+    <p className="badge" data-testid="mock-badge">
+      MOCK CORE — no WASM build found. No chain is read, the scan is simulated, and any
+      amount shown is not real money.
+    </p>
   );
 }
