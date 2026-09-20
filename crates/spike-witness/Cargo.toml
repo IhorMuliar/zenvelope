@@ -1,0 +1,23 @@
+[package]
+name = "spike-witness"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+description = "Throwaway M3 spike: build an Ironwood note witness from lightwalletd data."
+
+[dependencies]
+zcash_client_backend = { version = "0.24.0", default-features = false, features = [
+    "orchard",
+    "lightwalletd-tonic",
+    "lightwalletd-tonic-transport",
+    "lightwalletd-tonic-tls-webpki-roots",
+] }
+orchard = { version = "0.15", default-features = false }
+incrementalmerkletree = "0.8.2"
+tonic = { version = "0.14", default-features = false, features = ["transport", "tls-webpki-roots", "tls-ring", "codegen"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+prost = "0.14"
+hex = "0.4"
+anyhow = "1"
