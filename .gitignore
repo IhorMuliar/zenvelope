@@ -1,0 +1,10 @@
+# private working notes, never commit
+HANDOFF.md
+OUTREACH.md
+
+node_modules/
+dist/
+.env*
+target/
+*.params
+.DS_Store
