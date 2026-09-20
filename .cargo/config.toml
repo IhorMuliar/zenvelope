@@ -1,0 +1,4 @@
+# getrandom 0.3 will not compile for wasm32-unknown-unknown without being told which
+# backend to use. The browser one is `wasm_js`, which calls `crypto.getRandomValues`.
+[target.wasm32-unknown-unknown]
+rustflags = ['--cfg', 'getrandom_backend="wasm_js"']

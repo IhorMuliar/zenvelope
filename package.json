@@ -3,5 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "license": "MIT",
-  "type": "module"
+  "type": "module",
+  "scripts": {
+    "build:core": "./scripts/build-core.sh",
+    "test:core": "cargo test -p zenvelope-core && node scripts/smoke-core.mjs"
+  }
 }
