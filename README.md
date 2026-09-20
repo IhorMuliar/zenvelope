@@ -98,7 +98,7 @@ product one-pager in [docs/PRODUCT.md](docs/PRODUCT.md), decision log in
 [docs/DECISIONS.md](docs/DECISIONS.md).
 
 - [x] **M0** Repo, README one-pager, license, arena project draft, first builder update posted.
-- [ ] **M1** *(in progress)* Create a link on mainnet: secret, derived address, ZIP-321 URI, QR, fee in the amount.
+- [ ] **M1 (built, awaiting first mainnet funding)** Create a link on mainnet: secret, derived address, ZIP-321 URI, QR, fee in the amount. Verification transcript in [web/docs/M1-VERIFICATION.md](web/docs/M1-VERIFICATION.md).
 - [ ] **M2** Open a link on mainnet: scan, decrypt, show the amount.
 - [ ] **M3** Spend from the link to a pasted Zcash address in the browser, on mainnet, with in-browser Ironwood proving. End to end.
 - [ ] **M4** Drainer-safe copy, trust-boundary screens, fresh in-browser wallet with seed export.

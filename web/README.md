@@ -12,6 +12,7 @@ npm run dev      # http://localhost:5173
 npm test         # vitest unit tests
 npm run build    # type check + production build into web/dist
 npm run preview  # serve the build with the same COOP/COEP headers
+npm run e2e      # build, then the Playwright proof in e2e/ against the real core
 ```
 
 Node 20+ is required (Node 22 is what this was built on).
@@ -29,11 +30,24 @@ the only network shown otherwise (DECISIONS D4).
 
 ## The WASM core
 
-`src/core/index.ts` dynamically imports `src/wasm/core/core.js` and calls its
-`default()` init. That directory is produced by the Rust crate. **If it is
-absent, the app falls back to a MOCK core** (`src/core/mock.ts`) so the UI is
-testable now. The MOCK is loud about it: a badge on every screen, and every
-address it produces contains the string `mock` and is not spendable.
+`src/core/index.ts` dynamically imports `src/wasm/core/zenvelope_core.js` and
+calls its `default()` init. That directory is produced by `wasm-pack` from
+`crates/core`, is gitignored, and is rebuilt with:
+
+```sh
+../scripts/build-core.sh     # from the repo root: ./scripts/build-core.sh
+```
+
+**If the build is absent, the app falls back to a MOCK core**
+(`src/core/mock.ts`) so the UI stays testable. The MOCK is loud about it: a
+badge on every screen, and every address it produces contains the string `mock`
+and is not spendable. The badge is driven by `core.isMock`, so it disappears the
+moment a real build is present. A build that is present but *fails to load* is a
+bug, not a reason to fall back — the loader throws instead.
+
+The wasm-bindgen glue returns `derive()` and `parse_fragment()` as objects
+holding WASM memory. The loader copies their fields into plain objects and calls
+`.free()`, so nothing past `src/core/index.ts` has to think about it.
 
 The interface both implementations satisfy is in `src/core/types.ts`:
 
@@ -48,6 +62,16 @@ zec_string_to_zat(s) -> zat
 ```
 
 Fragment format: `<secret>` optionally followed by `.<decimal birthday height>`.
+
+## End-to-end proof
+
+`e2e/m1.spec.ts` drives the production build in Playwright chromium and asserts
+the app is on the real core: a mainnet `u1…` address that is not the MOCK's, the
+single-output ZIP-321 URI, a birthday height cross-checked against a live
+`GetLatestBlock` call, re-derivation of the same address from `/e#<fragment>`,
+and the fixed vector from `crates/core/TEST_VECTORS.md`. It needs the network, so
+it is not part of `npm test`. The recorded run is in
+[docs/M1-VERIFICATION.md](docs/M1-VERIFICATION.md).
 
 ## Handling of the secret
 

@@ -2,6 +2,10 @@
 HANDOFF.md
 OUTREACH.md
 
+# the first real envelope: the link fragment in here IS the money
+M1-FUND.md
+M1-FUND-qr.png
+
 node_modules/
 dist/
 .env*
@@ -12,3 +16,7 @@ dist/
 target/
 pkg/
 web/src/wasm/
+
+# Playwright
+web/test-results/
+web/playwright-report/

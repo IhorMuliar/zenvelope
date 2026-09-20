@@ -19,6 +19,8 @@ interface Envelope {
   /** Held in memory only: never stored, never in a query string, never logged. */
   link: string;
   address: string;
+  /** Full viewing key. Reveals amounts and memos; it cannot spend. */
+  ufvk: string;
   uri: string;
   breakdown: Breakdown;
   birthday: number | null;
@@ -89,6 +91,7 @@ export function Create() {
       setEnvelope({
         link: `${window.location.origin}/e#${fragment}`,
         address: derived.address,
+        ufvk: derived.ufvk,
         uri,
         breakdown,
         birthday: chain?.height ?? null,
@@ -258,6 +261,17 @@ function Result({
           <summary>Envelope address</summary>
           <code className="value mono" data-testid="envelope-address">
             {envelope.address}
+          </code>
+        </details>
+        <details data-testid="advanced-ufvk">
+          <summary>Advanced: viewing key</summary>
+          <p className="hint">
+            This full viewing key lets a light client watch the envelope: it reveals the
+            amounts and memos that arrive at this address. It cannot spend, and it cannot
+            open the envelope. Share it only with someone you want watching.
+          </p>
+          <code className="value mono" data-testid="envelope-ufvk">
+            {envelope.ufvk}
           </code>
         </details>
       </div>

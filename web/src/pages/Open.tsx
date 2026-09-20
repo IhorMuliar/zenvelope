@@ -75,7 +75,7 @@ export function Open() {
     <section className="stack">
       <h1>Envelope found</h1>
       {found.isMock ? (
-        <p className="badge">
+        <p className="badge" data-testid="mock-badge">
           MOCK CORE — no WASM build found. This address is a placeholder.
         </p>
       ) : null}
