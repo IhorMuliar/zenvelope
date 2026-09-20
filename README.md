@@ -137,7 +137,18 @@ and the recipient moves them to their own wallet with an ordinary on-chain trans
 
 ## Building
 
-Coming with M1. Planned stack:
+`crates/core` is the key-derivation core: a link secret in, an Orchard-only unified
+address and a ZIP-321 payment URI out. It compiles to WASM for the browser.
+
+```sh
+./scripts/build-core.sh   # wasm-pack build into web/src/wasm/core
+cargo test -p zenvelope-core && node scripts/smoke-core.mjs
+```
+
+Spec and JS API: [crates/core/README.md](crates/core/README.md). Fixed vectors:
+[crates/core/TEST_VECTORS.md](crates/core/TEST_VECTORS.md).
+
+The rest of the stack, still to come:
 
 - Static web app, open source, MIT, hostable anywhere. No backend that touches keys.
 - Zcash in the browser: a WASM light client based on the
@@ -152,7 +163,7 @@ Coming with M1. Planned stack:
 - Sender flow driven by a ZIP-321 payment URI and QR, so existing wallets work as-is:
   Zodl, Zingo, ZKool2, Vizor and Cake are Ironwood-capable.
 
-There is no product code in this repo yet. M0 is the skeleton.
+The web app itself does not exist yet.
 
 ## License
 

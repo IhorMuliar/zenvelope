@@ -1,0 +1,40 @@
+[package]
+name = "zenvelope-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Zenvelope key derivation core: link secret to Orchard-only unified address, plus ZIP-321 URIs."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+zcash_keys = { version = "0.16.1", default-features = false, features = ["orchard"] }
+zcash_protocol = "0.10.6"
+zcash_address = "0.13.0"
+zip32 = "0.2"
+zip321 = "0.9.0"
+base64 = "0.22"
+getrandom = "0.3"
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+
+# The browser CSPRNG. getrandom 0.3 reaches `crypto.getRandomValues` only when the
+# `wasm_js` feature is on AND the matching backend cfg is set; the cfg lives in
+# .cargo/config.toml so every build gets it, not just the ones that remember a flag.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.3", features = ["wasm_js"] }
+
+# rustc emits post-MVP wasm (bulk memory, sign extension, and friends) by default, and
+# the wasm-opt build wasm-pack ships with rejects those unless each one is named.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = [
+    "-Oz",
+    "--enable-bulk-memory",
+    "--enable-sign-ext",
+    "--enable-mutable-globals",
+    "--enable-nontrapping-float-to-int",
+    "--enable-reference-types",
+    "--enable-multivalue",
+]
