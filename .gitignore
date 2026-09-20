@@ -8,3 +8,4 @@ dist/
 target/
 *.params
 .DS_Store
+.claude/
