@@ -3,12 +3,14 @@ import { useEffect, useRef, useState } from "react";
 interface Props {
   label: string;
   value: string;
+  /** Shown instead of `value` when the full string is too long to read. Copy still copies `value`. */
+  display?: string;
   /** A secret-bearing value is never selected into a URL bar or logged. */
   mono?: boolean;
   testId?: string;
 }
 
-export function CopyField({ label, value, mono = true, testId }: Props) {
+export function CopyField({ label, value, display, mono = true, testId }: Props) {
   const [copied, setCopied] = useState(false);
   const timer = useRef<number | undefined>(undefined);
 
@@ -39,7 +41,7 @@ export function CopyField({ label, value, mono = true, testId }: Props) {
         </button>
       </div>
       <code className={mono ? "value mono" : "value"} data-testid={testId}>
-        {value}
+        {display ?? value}
       </code>
     </div>
   );

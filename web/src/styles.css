@@ -338,3 +338,291 @@ details summary {
     padding: 1.25rem;
   }
 }
+
+/* ---------------------------------------------------------------- open flow */
+
+.stack.center {
+  align-items: center;
+  text-align: center;
+}
+
+.stack.center .primary {
+  max-width: 22rem;
+}
+
+/* The envelope illustration: inline SVG, no image request, page colours. */
+.envelope {
+  width: min(16rem, 70vw);
+  margin: 0.5rem auto;
+}
+
+.envelope svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.env-body {
+  fill: var(--surface);
+  stroke: var(--accent);
+  stroke-width: 3;
+}
+
+.env-pocket {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 3;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.env-flap {
+  fill: var(--accent);
+  stroke: var(--accent);
+  stroke-width: 3;
+  stroke-linejoin: round;
+  transform-box: fill-box;
+  transform-origin: top center;
+}
+
+.env-note {
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.env-note rect {
+  fill: var(--bg);
+  stroke: var(--line);
+  stroke-width: 3;
+}
+
+.env-note path {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 5;
+  stroke-linecap: round;
+}
+
+@keyframes zv-flap {
+  from {
+    transform: scaleY(1);
+  }
+  to {
+    transform: scaleY(-1);
+  }
+}
+
+@keyframes zv-note {
+  from {
+    opacity: 0;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+    transform: translateY(-46px);
+  }
+}
+
+@keyframes zv-rise {
+  from {
+    opacity: 0;
+    transform: translateY(0.6rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes zv-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes zv-slide {
+  from {
+    background-position: 130% 0;
+  }
+  to {
+    background-position: -30% 0;
+  }
+}
+
+.envelope.is-open .env-flap {
+  animation: zv-flap 600ms cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+}
+
+.envelope.is-open .env-note {
+  animation: zv-note 750ms 320ms cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+}
+
+.envelope.is-busy .env-flap {
+  animation: zv-breathe 1.8s ease-in-out infinite;
+}
+
+.sealed-details {
+  width: 100%;
+  max-width: 24rem;
+  text-align: left;
+}
+
+.sealed-details summary {
+  text-align: center;
+}
+
+.sealed-details .value {
+  margin: 0.5rem 0;
+}
+
+.unwrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.unwrap-amount {
+  margin: 0;
+  font-size: 2.1rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  animation: zv-rise 500ms 720ms both;
+}
+
+/* Scan progress. Indeterminate until the scanner knows the span. */
+progress.scan-bar {
+  width: 100%;
+  max-width: 22rem;
+  height: 10px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--line);
+  appearance: none;
+  -webkit-appearance: none;
+  overflow: hidden;
+}
+
+progress.scan-bar::-webkit-progress-bar {
+  background: var(--line);
+  border-radius: 999px;
+}
+
+progress.scan-bar::-webkit-progress-value {
+  background: var(--accent);
+  border-radius: 999px;
+}
+
+progress.scan-bar::-moz-progress-bar {
+  background: var(--accent);
+  border-radius: 999px;
+}
+
+progress.scan-bar:indeterminate,
+progress.scan-bar:indeterminate::-webkit-progress-bar {
+  background-image: linear-gradient(
+    90deg,
+    var(--line) 0 35%,
+    var(--accent) 35% 65%,
+    var(--line) 65% 100%
+  );
+  background-size: 260% 100%;
+  animation: zv-slide 1.3s linear infinite;
+}
+
+.row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 0;
+}
+
+.memo {
+  margin: 0;
+  font-size: 1.05rem;
+  overflow-wrap: anywhere;
+}
+
+.notes {
+  list-style: none;
+  padding: 0;
+  margin: 0.6rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.next-steps {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.next-steps button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.8rem;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.next-steps button[disabled] {
+  opacity: 0.72;
+  cursor: not-allowed;
+}
+
+.next-title {
+  font-weight: 600;
+}
+
+.soon {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+}
+
+/* Reduced motion: the same end state, reached instantly. The selectors match the
+   animated ones class for class, so they win without !important. */
+@media (prefers-reduced-motion: reduce) {
+  .envelope.is-open .env-flap,
+  .envelope.is-busy .env-flap,
+  .envelope.is-open .env-note,
+  .unwrap .unwrap-amount,
+  progress.scan-bar:indeterminate,
+  progress.scan-bar:indeterminate::-webkit-progress-bar {
+    animation: none;
+  }
+  .envelope.is-open .env-flap {
+    transform: scaleY(-1);
+  }
+  .envelope.is-open .env-note {
+    opacity: 1;
+    transform: translateY(-46px);
+  }
+  .unwrap .unwrap-amount {
+    opacity: 1;
+    transform: none;
+  }
+  progress.scan-bar:indeterminate,
+  progress.scan-bar:indeterminate::-webkit-progress-bar {
+    background-position: 50% 0;
+  }
+}

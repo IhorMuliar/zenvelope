@@ -26,6 +26,40 @@ export interface ParsedFragment {
 /** A zatoshi amount. The WASM boundary may hand back a string instead of a bigint. */
 export type ZatLike = bigint | string | number;
 
+/**
+ * Which shielded pool a found note sits in. Ironwood is what we send to
+ * (DECISIONS D2); the other two can only turn up on an envelope funded by an
+ * older wallet.
+ */
+export type Pool = "ironwood" | "orchard" | "sapling";
+
+/** One note found at the envelope address. */
+export interface FoundNote {
+  /** Zatoshi, as a decimal string: the WASM boundary does not carry u64 safely. */
+  amount_zat: string;
+  /** The sender's message, decrypted from the note memo. null when the memo is empty. */
+  memo: string | null;
+  height: number;
+  txid: string;
+  pool: Pool;
+}
+
+/** What a finished scan hands back. */
+export interface OpenResult {
+  found: boolean;
+  notes: FoundNote[];
+  /** Sum of the notes, zatoshi as a decimal string. */
+  total_zat: string;
+  /** Chain tip the scan reached. */
+  tip_height: number;
+}
+
+/**
+ * Scan progress. `total` is 0 until the scanner knows how many blocks it has to
+ * cover, which is what puts the progress bar in its indeterminate state.
+ */
+export type ProgressFn = (scanned: number, total: number) => void;
+
 export interface ZenvelopeCore {
   derive(secret_b64url: string, network: Network): Derived;
   /** 32 bytes of CSPRNG output, base64url, 43 chars. */
@@ -37,6 +71,22 @@ export interface ZenvelopeCore {
   payment_uri(address: string, amount_zat: ZatLike, message?: string): string;
   zat_to_zec_string(zat: ZatLike): string;
   zec_string_to_zat(s: string): ZatLike;
+  /**
+   * Scans the chain for notes sent to the address derived from `secret_b64url`
+   * and decrypts them. Runs entirely in the browser: the secret never leaves it,
+   * and the only outbound traffic is gRPC-web to `lightwalletd_url`.
+   *
+   * `birthday` is the height the link was created at, so the scan can start
+   * there; undefined means scan from the pool activation height. `on_progress`
+   * is called as blocks are scanned. Throws if the light client is unreachable.
+   */
+  open_envelope(
+    secret_b64url: string,
+    birthday: number | undefined,
+    network: Network,
+    lightwalletd_url: string,
+    on_progress: ProgressFn,
+  ): Promise<OpenResult>;
 }
 
 export interface LoadedCore extends ZenvelopeCore {
