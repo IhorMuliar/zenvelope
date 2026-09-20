@@ -36,6 +36,10 @@ const LIGHTWALLETD = "https://zjs.zec.rocks/mainnet";
  * into the note. The oracle agrees — `list-tx` prints "received 1 notes, 0 memos" and
  * `Memo: Memo::Empty` — so an empty memo is the correct answer here, and asserting it
  * keeps the test honest about what a ZIP-321 message does and does not carry.
+ *
+ * That finding is what moved the create flow onto the ZIP-321 `memo=` parameter, which
+ * the sending wallet does write into the note: see web/docs/M2-VERIFICATION.md §4. The
+ * M1 envelope cannot be re-funded, so this vector stays as it is.
  */
 const ORACLE = {
   amount_zat: "130000",

@@ -44,7 +44,12 @@ export interface FoundNote {
   pool: Pool;
 }
 
-/** What a finished scan hands back. */
+/**
+ * What a finished scan hands back.
+ *
+ * This is the object the wasm `open_envelope` resolves with, field for field:
+ * see `to_js` in crates/core/src/grpc.rs.
+ */
 export interface OpenResult {
   found: boolean;
   notes: FoundNote[];
@@ -52,6 +57,12 @@ export interface OpenResult {
   total_zat: string;
   /** Chain tip the scan reached. */
   tip_height: number;
+  /** The height the scan actually started at, after defaulting and clamping. */
+  birthday: number;
+  /** True when the link carried no birthday and the default lookback was used. */
+  birthday_defaulted: boolean;
+  /** Blocks streamed: `tip_height - birthday + 1`. */
+  scanned_blocks: number;
 }
 
 /**
@@ -67,8 +78,12 @@ export interface ZenvelopeCore {
   /** Fragment format: `<secret>` optionally followed by `.<decimal birthday height>`. */
   parse_fragment(frag: string): ParsedFragment;
   build_fragment(secret: string, birthday?: number): string;
-  /** Single-output ZIP-321 URI. */
-  payment_uri(address: string, amount_zat: ZatLike, message?: string): string;
+  /**
+   * Single-output ZIP-321 URI. `memo` is the sender's text: it is carried in the
+   * ZIP-321 `memo=` parameter as base64url of its UTF-8 bytes (at most 512), so
+   * the sending wallet writes it into the note and it is encrypted on-chain.
+   */
+  payment_uri(address: string, amount_zat: ZatLike, memo?: string): string;
   zat_to_zec_string(zat: ZatLike): string;
   zec_string_to_zat(s: string): ZatLike;
   /**
@@ -85,7 +100,7 @@ export interface ZenvelopeCore {
     birthday: number | undefined,
     network: Network,
     lightwalletd_url: string,
-    on_progress: ProgressFn,
+    on_progress?: ProgressFn,
   ): Promise<OpenResult>;
 }
 

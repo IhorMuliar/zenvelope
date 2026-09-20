@@ -3,7 +3,7 @@ import {
   FLAT_FEE_ZAT,
   LIGHTWALLETD,
   LIGHTWALLETD_FALLBACK,
-  MAX_MESSAGE_LEN,
+  MAX_MEMO_BYTES,
   SENDER_WALLETS,
   TAGLINE,
 } from "../config";
@@ -11,6 +11,7 @@ import type { Network } from "../core/types";
 import { loadCore } from "../core";
 import type { LoadedCore } from "../core/types";
 import { breakdownLines, feeBreakdown, validateAmount, type Breakdown } from "../lib/amount";
+import { memoByteLength } from "../lib/format";
 import { fetchChainHeight } from "../lib/grpcweb";
 import { CopyField } from "../components/CopyField";
 import { Qr } from "../components/Qr";
@@ -54,6 +55,8 @@ export function Create() {
   }, []);
 
   const validation = amount.trim() === "" ? null : validateAmount(amount);
+  // The memo limit is a byte limit, so the counter has to encode to count.
+  const messageBytes = memoByteLength(message.trim());
   const preview =
     validation && validation.ok ? feeBreakdown(validation.zat, FLAT_FEE_ZAT) : null;
 
@@ -65,8 +68,10 @@ export function Create() {
       setError(v.error);
       return;
     }
-    if (message.length > MAX_MESSAGE_LEN) {
-      setError(`The message can be at most ${MAX_MESSAGE_LEN} characters.`);
+    if (memoByteLength(message.trim()) > MAX_MEMO_BYTES) {
+      setError(
+        `The message is too long: ${memoByteLength(message.trim())} of ${MAX_MEMO_BYTES} bytes.`,
+      );
       return;
     }
     setBusy(true);
@@ -150,19 +155,25 @@ export function Create() {
         </label>
 
         <label className="field">
-          <span className="label">Message (optional)</span>
+          <span className="label">Message to the recipient (encrypted on-chain, revealed when opened)</span>
           <input
             autoComplete="off"
-            maxLength={MAX_MESSAGE_LEN}
             placeholder="Happy birthday"
             value={message}
             data-testid="message"
+            aria-invalid={messageBytes > MAX_MEMO_BYTES}
             onChange={(e) => setMessage(e.target.value)}
           />
-          <span className="hint">
-            Shown to the recipient when the envelope is opened. {message.length}/
-            {MAX_MESSAGE_LEN}
-          </span>
+          {messageBytes > MAX_MEMO_BYTES ? (
+            <span className="error" data-testid="message-error">
+              The message is too long: {messageBytes} of {MAX_MEMO_BYTES} bytes.
+            </span>
+          ) : (
+            <span className="hint" data-testid="message-count">
+              It travels in the payment itself, encrypted, and only the person who opens
+              the envelope can read it. {messageBytes}/{MAX_MEMO_BYTES} bytes.
+            </span>
+          )}
         </label>
 
         {testnetUnlocked ? (
@@ -281,7 +292,9 @@ function Result({
         <p>
           Once the payment confirms, whoever opens the link unwraps the envelope in their
           browser and moves the money where they want it.
-          {envelope.message ? ` They will see your message: “${envelope.message}”.` : ""}
+          {envelope.message
+            ? ` Your message travels inside the payment, encrypted: “${envelope.message}”.`
+            : ""}
         </p>
       </div>
 

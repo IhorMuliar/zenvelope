@@ -69,3 +69,14 @@ export function poolLabel(pool: Pool): string {
 export function sumZat(amounts: readonly string[]): bigint {
   return amounts.reduce((acc, a) => acc + BigInt(a.trim()), 0n);
 }
+
+/**
+ * UTF-8 byte length of the sender's message.
+ *
+ * The message ends up in the note's 512-byte memo field, so the limit is a byte
+ * limit: "🎁" is one character and four bytes, and counting characters would let
+ * a message through that the memo cannot hold.
+ */
+export function memoByteLength(text: string): number {
+  return new TextEncoder().encode(text).length;
+}

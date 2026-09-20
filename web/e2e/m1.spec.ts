@@ -6,7 +6,8 @@
  * What it proves:
  *   - the app loads the wasm core, not the MOCK (no MOCK badge, real bech32m address)
  *   - creating an envelope produces a mainnet `u1...` Orchard-only unified address
- *   - the ZIP-321 URI carries envelope + flat fee as one output, with the message
+ *   - the ZIP-321 URI carries envelope + flat fee as one output, with the message in
+ *     the `memo=` parameter so it reaches the chain
  *   - the link fragment carries a birthday height fetched live from lightwalletd
  *   - opening `/e#<fragment>` re-derives the same address from the fragment alone
  *   - the fixed vector in crates/core/TEST_VECTORS.md derives the documented address
@@ -118,8 +119,11 @@ describeOnRealCore("M1: the web app on the real wasm core", () => {
     expect(ufvk).toMatch(/^uview1[a-z0-9]{100,}$/);
     expect(ufvk).not.toContain("mock");
 
-    // 0.001 ZEC envelope + 0.0003 ZEC flat fee, one ZIP-321 output.
-    expect(uri).toBe(`zcash:${address}?amount=0.0013&message=hello`);
+    // 0.001 ZEC envelope + 0.0003 ZEC flat fee, one ZIP-321 output. The sender's text
+    // rides in `memo=` as base64url of its UTF-8 bytes, so the wallet writes it into the
+    // note instead of keeping it as a local label (see web/docs/M2-VERIFICATION.md).
+    expect(uri).toBe(`zcash:${address}?amount=0.0013&memo=aGVsbG8`);
+    expect(uri).not.toContain("message=");
 
     // The fragment is <43-char secret>.<birthday>, and the birthday is the height
     // lightwalletd was reporting while this test ran.

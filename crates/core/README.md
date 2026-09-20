@@ -95,7 +95,7 @@ Exactly one output. Per [D5](../../docs/DECISIONS.md), multi-output ZIP-321 is n
 portable across sender wallets, so the URI carries a single payment:
 
 ```
-zcash:<address>?amount=<ZEC>[&message=<percent-encoded>]
+zcash:<address>?amount=<ZEC>[&memo=<base64url>]
 ```
 
 `amount` is the **envelope amount plus the flat fee**, summed by the caller in zatoshi
@@ -110,9 +110,25 @@ as a `u64`. No float ever touches the money. It is rendered as decimal ZEC with 
 | `150000000` | `1.5` |
 | `1234567891` | `12.34567891` |
 
-Amounts of zero, and amounts above `MAX_MONEY` (2.1e15 zatoshi), are rejected. `message`
-is percent-encoded to the ZIP-321 `qchar` set, so a space becomes `%20` and an `&`
-becomes `%26` and cannot split the query into extra parameters.
+Amounts of zero, and amounts above `MAX_MONEY` (2.1e15 zatoshi), are rejected.
+
+### Why `memo=` and not `message=`
+
+The sender's text rides in the ZIP-321 **`memo`** parameter: base64url of its UTF-8
+bytes, no padding, at most 512 bytes (the size of the memo field). The sending wallet
+puts those bytes in the note, where they are encrypted, and `open_envelope` decrypts them
+and hands them back as `notes[].memo`. base64url is already URL-safe, so nothing in the
+text can split the query into extra parameters.
+
+`message=` was what M1 used and it is now gone. A ZIP-321 `message` is a human-readable
+label *for the sending wallet's own history*: nothing in the spec puts it on the chain,
+and nothing did. The funded M1 envelope was created with `message=Zenvelope%20M1` and the
+zcash-devtool oracle reports `Memo: Memo::Empty` for the note it produced — the text
+never left the sender's wallet. A message that the recipient can never see is a promise
+the product cannot keep, so `payment_uri` does not offer one.
+
+Text over 512 UTF-8 bytes is rejected rather than truncated, and the limit is counted in
+bytes: one emoji is four of them.
 
 Built with the [`zip321`](https://crates.io/crates/zip321) crate (0.9.0), which tracks
 the same `zcash_address` 0.13 as the rest of the stack. Spec:
@@ -150,8 +166,10 @@ Scanning starts at the birthday in the link fragment. Without one it starts at
 rejected: a link made seconds ago can legitimately name a height the server has not
 served yet.
 
-Measured on 2026-09-20 against `zjs.zec.rocks`, Playwright chromium, the funded M1
-envelope: **57 blocks in 1.8 s wall**, tip included, from a cold page.
+Measured on 2026-09-21 against `zjs.zec.rocks`, Playwright chromium, the funded M1
+envelope: **63 blocks (3490437..3490499) in 1.9 s wall**, tip included, from a cold page;
+2.7 s through the `/e` page, which also boots React and the app's own copy of the wasm.
+See [web/docs/M2-VERIFICATION.md](../../web/docs/M2-VERIFICATION.md).
 
 ### How Ironwood notes are detected
 
@@ -229,7 +247,7 @@ const fragment = core.build_fragment(secret, 3490400);
 const { secret: s, birthday } = core.parse_fragment(location.hash);
 
 const uri = core.payment_uri(address, 10_000n + 100_000n, "Coffee");
-// "zcash:u1...?amount=0.0011&message=Coffee"
+// "zcash:u1...?amount=0.0011&memo=Q29mZmVl"
 ```
 
 | Export | Signature |
@@ -238,11 +256,16 @@ const uri = core.payment_uri(address, 10_000n + 100_000n, "Coffee");
 | `generate_secret` | `() => string` — 43 base64url chars from the CSPRNG |
 | `parse_fragment` | `(fragment: string) => { secret: string, birthday?: number }` |
 | `build_fragment` | `(secret: string, birthday?: number) => string` |
-| `payment_uri` | `(address: string, amount_zat: bigint \| string \| number, message?: string) => string` |
+| `payment_uri` | `(address: string, amount_zat: bigint \| string \| number, memo?: string) => string` — `memo` is the sender's text, base64url'd into the ZIP-321 `memo=` parameter |
+| `memo_byte_length` | `(text: string) => number` — UTF-8 bytes, which is what the 512-byte limit counts |
+| `max_memo_bytes` | `() => number` — 512 |
 | `zat_to_zec_string` | `(zat: bigint \| string \| number) => string` |
 | `zec_string_to_zat` | `(zec: string) => bigint` |
 | `is_orchard_only` | `(address: string) => boolean` — decodes the address and confirms one receiver, Orchard |
 | `open_envelope` | `(secret: string, birthday: number \| undefined, network: "main" \| "test", lightwalletd_url: string, on_progress?: (scanned: number, total: number) => void) => Promise<Opened>` |
+
+The `Opened` object below is the field-for-field contract `web/src/core/types.ts`
+declares, including `birthday`, `birthday_defaulted` and `scanned_blocks`.
 
 ```ts
 interface Opened {
@@ -313,7 +336,8 @@ cd web && ZENV_M1_FRAGMENT='<secret>.<birthday>' npm run e2e
 The unit tests cover derivation determinism, the one-Orchard-receiver invariant on both
 networks, fragment round-trips, ZIP-321 amount formatting and parsing edge cases, amount
 overflow, and for M2 the scan range rules (birthday given, defaulted, clamped past the
-tip), memo rendering, pool naming, total overflow, endpoint normalisation, the
+tip), memo rendering, the ZIP-321 memo round trip (base64url in, the sender's text back out)
+and its 512-byte limit, pool naming, total overflow, endpoint normalisation, the
 Orchard-only shape of the scan keys, and that a compact block of actions that are not
 ours decrypts to nothing. The Node smoke test loads the actual `--target web` artifact and checks
 that `derive()` reproduces the Rust vectors byte for byte.

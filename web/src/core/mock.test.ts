@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { mockCore } from "./mock";
+import { base64UrlToBytes, memoToBase64Url, mockCore } from "./mock";
+import { memoByteLength } from "../lib/format";
 
 const SECRET = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"; // 43 base64url chars
 
@@ -101,9 +102,24 @@ describe("payment_uri", () => {
     expect(uri.match(/amount=/g)).toHaveLength(1);
   });
 
-  it("appends an encoded message", () => {
-    const uri = mockCore.payment_uri(addr, 1030000n, "Happy birthday & thanks");
-    expect(uri).toBe(`zcash:${addr}?amount=0.0103&message=Happy%20birthday%20%26%20thanks`);
+  it("carries the message as a base64url memo, not a message", () => {
+    const text = "Happy birthday & thanks";
+    const uri = mockCore.payment_uri(addr, 1030000n, text);
+    expect(uri).toBe(`zcash:${addr}?amount=0.0103&memo=${memoToBase64Url(text)}`);
+    // A ZIP-321 message never reaches the chain, so it is not offered at all.
+    expect(uri).not.toContain("message=");
+    // base64url without padding: no '+', no '/', no '='.
+    const param = uri.split("&memo=")[1];
+    expect(param).toMatch(/^[A-Za-z0-9_-]+$/);
+    // And it decodes back to what the sender typed.
+    expect(new TextDecoder().decode(base64UrlToBytes(param))).toBe(text);
+  });
+
+  it("counts the memo in UTF-8 bytes and rejects an over-long one", () => {
+    expect(memoByteLength("🎁")).toBe(4);
+    expect(() => mockCore.payment_uri(addr, 1030000n, "a".repeat(512))).not.toThrow();
+    expect(() => mockCore.payment_uri(addr, 1030000n, "a".repeat(513))).toThrow();
+    expect(() => mockCore.payment_uri(addr, 1030000n, "🎁".repeat(129))).toThrow();
   });
 
   it("omits an empty message", () => {

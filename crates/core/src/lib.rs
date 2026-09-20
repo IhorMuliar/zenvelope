@@ -27,6 +27,7 @@ use zcash_address::{
 };
 use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey};
 use zcash_protocol::consensus::{Network, NetworkType};
+use zcash_protocol::memo::MemoBytes;
 use zcash_protocol::value::{Zatoshis, COIN, MAX_MONEY};
 use zip32::AccountId;
 use zip321::{Payment, TransactionRequest};
@@ -39,6 +40,10 @@ pub const SECRET_B64_LEN: usize = 43;
 
 /// The separator between the secret and the birthday height in a link fragment.
 const FRAGMENT_SEP: char = '.';
+
+/// The most a Zcash memo field can carry, in bytes. The sender's text is counted in
+/// UTF-8 bytes, not characters: one emoji is four of these.
+pub const MAX_MEMO_BYTES: usize = 512;
 
 // ---------------------------------------------------------------------------
 // Pure Rust core. Every wasm export below is a thin wrapper over these.
@@ -272,11 +277,16 @@ pub fn zec_string_to_zat(zec: &str) -> Result<u64, String> {
 ///
 /// One output only. The amount is the envelope amount plus the flat fee, already summed
 /// in zatoshi by the caller, so no float ever touches the money.
-pub fn payment_uri(
-    address: &str,
-    amount_zat: u64,
-    message: Option<&str>,
-) -> Result<String, String> {
+///
+/// `memo` is the sender's text for the recipient. It goes in the ZIP-321 `memo=`
+/// parameter, base64url of its UTF-8 bytes without padding, so the sending wallet writes
+/// it into the note itself: it is encrypted on-chain and the open flow decrypts it.
+///
+/// There is deliberately no `message=` here. M2 proved on mainnet that a ZIP-321
+/// `message` is a label the sending wallet keeps for its own history and never puts on
+/// the chain — the funded M1 envelope arrived with `Memo::Empty` — so a `message` would
+/// promise the sender something the recipient can never see.
+pub fn payment_uri(address: &str, amount_zat: u64, memo: Option<&str>) -> Result<String, String> {
     let amount = checked_zatoshis(amount_zat)?;
     if amount.is_zero() {
         return Err("amount must be greater than zero".to_string());
@@ -285,20 +295,30 @@ pub fn payment_uri(
     let recipient = ZcashAddress::try_from_encoded(address)
         .map_err(|e| format!("{address:?} is not a Zcash address: {e}"))?;
 
-    let payment = Payment::new(
-        recipient,
-        Some(amount),
-        None,
-        None,
-        message.map(str::to_string),
-        vec![],
-    )
-    .map_err(|e| format!("could not build the payment output: {e:?}"))?;
+    let memo = memo.filter(|m| !m.is_empty()).map(memo_bytes).transpose()?;
+
+    let payment = Payment::new(recipient, Some(amount), memo, None, None, vec![])
+        .map_err(|e| format!("could not build the payment output: {e:?}"))?;
 
     let request = TransactionRequest::new(vec![payment])
         .map_err(|e| format!("could not build the ZIP-321 request: {e:?}"))?;
 
     Ok(request.to_uri())
+}
+
+/// Turns the sender's text into memo bytes, rejecting anything over the 512-byte field.
+///
+/// The bytes are the UTF-8 encoding of the text and nothing else: no prefix, no padding
+/// that survives encoding. `zip321` renders them as base64url without padding.
+pub fn memo_bytes(text: &str) -> Result<MemoBytes, String> {
+    let bytes = text.as_bytes();
+    if bytes.len() > MAX_MEMO_BYTES {
+        return Err(format!(
+            "the message is {} bytes; the most a memo can carry is {MAX_MEMO_BYTES}",
+            bytes.len()
+        ));
+    }
+    MemoBytes::from_bytes(bytes).map_err(|e| format!("could not build the memo: {e:?}"))
 }
 
 /// Decodes a unified address and confirms it carries exactly one receiver, Orchard.
@@ -411,15 +431,29 @@ pub fn build_fragment_js(secret: &str, birthday: Option<u32>) -> Result<String, 
 
 /// Builds the single-output ZIP-321 URI the sender's wallet consumes.
 ///
-/// `amount_zat` accepts a BigInt, a decimal string, or a safe-integer number.
+/// `amount_zat` accepts a BigInt, a decimal string, or a safe-integer number. `memo` is
+/// the sender's text: it rides in the ZIP-321 `memo=` parameter, so it ends up encrypted
+/// in the note rather than in the sending wallet's local history.
 #[wasm_bindgen(js_name = payment_uri)]
 pub fn payment_uri_js(
     address: &str,
     amount_zat: &JsValue,
-    message: Option<String>,
+    memo: Option<String>,
 ) -> Result<String, JsValue> {
     let amount = js_to_u64(amount_zat).map_err(throw)?;
-    payment_uri(address, amount, message.as_deref()).map_err(throw)
+    payment_uri(address, amount, memo.as_deref()).map_err(throw)
+}
+
+/// The UTF-8 byte length of a string, which is what the 512-byte memo limit counts.
+#[wasm_bindgen(js_name = memo_byte_length)]
+pub fn memo_byte_length_js(text: &str) -> usize {
+    text.len()
+}
+
+/// The maximum number of bytes a memo can carry.
+#[wasm_bindgen(js_name = max_memo_bytes)]
+pub fn max_memo_bytes_js() -> usize {
+    MAX_MEMO_BYTES
 }
 
 /// Renders a zatoshi amount as a decimal ZEC string.
@@ -731,20 +765,61 @@ mod tests {
         assert_eq!(uri, format!("zcash:{address}?amount=1.5"));
     }
 
+    /// The whole point of the memo change: what the sender typed comes back out of the
+    /// URI byte for byte, so the sending wallet puts it in the note and the recipient
+    /// reads it when the envelope is opened.
     #[test]
-    fn payment_uri_message_is_percent_encoded() {
+    fn payment_uri_memo_round_trips_through_base64url() {
         let address = derive_from_secret(&vector_secret(), Network::MainNetwork)
             .unwrap()
             .address;
-        let uri = payment_uri(&address, 10_000, Some("Happy birthday & thanks!")).unwrap();
-        // Space and '&' must be escaped or the URI would split into extra parameters.
-        // '!' is a qchar in ZIP-321 and is left as-is.
-        assert_eq!(
-            uri,
-            format!("zcash:{address}?amount=0.0001&message=Happy%20birthday%20%26%20thanks!")
+        let text = "Happy birthday & thanks! 🎁";
+        let uri = payment_uri(&address, 10_000, Some(text)).unwrap();
+
+        // base64url without padding, per ZIP-321: no '+', no '/', no '='.
+        let param = uri.split("&memo=").nth(1).expect("memo param: {uri}");
+        assert!(
+            param.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
+            "{param}"
         );
+        assert_eq!(uri, format!("zcash:{address}?amount=0.0001&memo={param}"));
+
+        // Decoding the parameter gives the sender's text back.
+        let decoded = URL_SAFE_NO_PAD.decode(param).unwrap();
+        assert_eq!(String::from_utf8(decoded).unwrap(), text);
+
+        // And the ZIP-321 parser agrees it is the memo of the one payment.
+        let parsed = TransactionRequest::from_uri(&uri).unwrap();
+        let memo = parsed.payments()[&0].memo().expect("a memo");
+        assert_eq!(std::str::from_utf8(memo.as_slice()).unwrap(), text);
+
+        // A URI never grows a second parameter out of the text.
         assert!(!uri.contains(' '));
         assert_eq!(uri.matches('&').count(), 1, "{uri}");
+        assert!(!uri.contains("message="), "{uri}");
+    }
+
+    #[test]
+    fn payment_uri_memo_limits() {
+        let address = derive_from_secret(&vector_secret(), Network::MainNetwork)
+            .unwrap()
+            .address;
+
+        // 512 bytes is the field, and one byte more is not.
+        let full = "a".repeat(MAX_MEMO_BYTES);
+        assert!(payment_uri(&address, 10_000, Some(&full)).is_ok());
+        let over = "a".repeat(MAX_MEMO_BYTES + 1);
+        let err = payment_uri(&address, 10_000, Some(&over)).unwrap_err();
+        assert!(err.contains("513 bytes"), "{err}");
+
+        // The limit is bytes, not characters: 128 four-byte emoji fill the field and 129
+        // overflow it, even though 129 characters is nothing.
+        assert!(payment_uri(&address, 10_000, Some(&"🎁".repeat(128))).is_ok());
+        assert!(payment_uri(&address, 10_000, Some(&"🎁".repeat(129))).is_err());
+
+        // An empty message is no memo at all, not an empty one.
+        let uri = payment_uri(&address, 10_000, Some("")).unwrap();
+        assert!(!uri.contains("memo="), "{uri}");
     }
 
     #[test]

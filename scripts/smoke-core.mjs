@@ -108,10 +108,25 @@ check("accepts a BigInt, a string and a number alike", () => {
   assert.equal(core.payment_uri(VECTORS.main.address, "10000"), expected);
   assert.equal(core.payment_uri(VECTORS.main.address, 10000), expected);
 });
-check("percent-encodes the message and keeps one output", () => {
-  const uri = core.payment_uri(VECTORS.main.address, 100000000n, "coffee & cake");
-  assert.equal(uri, `zcash:${VECTORS.main.address}?amount=1&message=coffee%20%26%20cake`);
+check("carries the message as a base64url memo and keeps one output", () => {
+  const text = "coffee & cake";
+  const memo = Buffer.from(text, "utf8").toString("base64url");
+  const uri = core.payment_uri(VECTORS.main.address, 100000000n, text);
+  assert.equal(uri, `zcash:${VECTORS.main.address}?amount=1&memo=${memo}`);
   assert.equal(uri.split("&").length, 2);
+  // A ZIP-321 message never reaches the chain, so the core does not offer one.
+  assert.ok(!uri.includes("message="));
+  // The memo parameter decodes back to exactly what the sender typed.
+  assert.equal(Buffer.from(uri.split("&memo=")[1], "base64url").toString("utf8"), text);
+});
+check("rejects a memo over 512 bytes, counted in UTF-8 bytes", () => {
+  assert.ok(core.payment_uri(VECTORS.main.address, 10000n, "a".repeat(512)).includes("&memo="));
+  assert.throws(
+    () => core.payment_uri(VECTORS.main.address, 10000n, "a".repeat(513)),
+    (e) => typeof e === "string" && e.includes("513 bytes"),
+  );
+  assert.equal(core.max_memo_bytes(), 512);
+  assert.equal(core.memo_byte_length("\u{1F381}"), 4);
 });
 check("rejects a zero and an over-range amount", () => {
   assert.throws(() => core.payment_uri(VECTORS.main.address, 0n), (e) => typeof e === "string");

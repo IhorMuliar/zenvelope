@@ -99,8 +99,8 @@ product one-pager in [docs/PRODUCT.md](docs/PRODUCT.md), decision log in
 
 - [x] **M0** Repo, README one-pager, license, arena project draft, first builder update posted.
 - [x] **M1 (done)** Create a link on mainnet: secret, derived address, ZIP-321 URI, QR, fee in the amount. M1 done 2026-09-20: first envelope funded from Zodl on mainnet, Ironwood note confirmed by zcash-devtool (tx 281e9f7b…341d43, block 3490472). Verification transcript in [web/docs/M1-VERIFICATION.md](web/docs/M1-VERIFICATION.md).
-- [ ] **M2 (in progress)** Open a link on mainnet: scan, decrypt, show the amount.
-- [ ] **M3** Spend from the link to a pasted Zcash address in the browser, on mainnet, with in-browser Ironwood proving. End to end.
+- [x] **M2 (done)** Open a link on mainnet: scan, decrypt, show the amount. M2 done 2026-09-21: envelope opened in the browser on mainnet, Ironwood note found and amount revealed — 64 blocks scanned from the link's birthday to the chain tip in 2.0 s, the note matching the zcash-devtool oracle field for field (tx 281e9f7b…341d43, block 3490472, 0.0013 ZEC). The scan also proved that a ZIP-321 `message=` never reaches the chain, so the sender's text now travels in the `memo=` parameter and is encrypted on-chain. Verification transcript in [web/docs/M2-VERIFICATION.md](web/docs/M2-VERIFICATION.md).
+- [ ] **M3 (in progress)** Spend from the link to a pasted Zcash address in the browser, on mainnet, with in-browser Ironwood proving. End to end.
 - [ ] **M4** Drainer-safe copy, trust-boundary screens, fresh in-browser wallet with seed export.
 - [ ] **M5** Solana receive option via a third-party rail, with the warning screen and a fresh keypair path.
 - [ ] **M6** Group envelopes and CSV export.
@@ -164,8 +164,9 @@ The rest of the stack, still to come:
   Zodl, Zingo, ZKool2, Vizor and Cake are Ironwood-capable.
 
 The web app exists and runs the real core: it creates an envelope on mainnet, shows the
-ZIP-321 URI and QR, and re-derives the address from the link alone. Opening an envelope
-(M2) and spending from it (M3) are next.
+ZIP-321 URI and QR, re-derives the address from the link alone, and opens a funded
+envelope — scanning and decrypting the Ironwood note in the browser, with the secret
+never leaving the tab. Spending from the link (M3) is next.
 
 ## License
 

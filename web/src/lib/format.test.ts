@@ -4,6 +4,7 @@ import {
   formatZec,
   formatZecAmount,
   groupThousands,
+  memoByteLength,
   poolLabel,
   sumZat,
   truncateTxid,
@@ -97,5 +98,16 @@ describe("sumZat", () => {
     expect(sumZat(["130000", "70000"])).toBe(200000n);
     expect(sumZat([])).toBe(0n);
     expect(sumZat(["2099999999999999", "1"])).toBe(2100000000000000n);
+  });
+});
+
+describe("memoByteLength", () => {
+  it("counts UTF-8 bytes, not characters", () => {
+    expect(memoByteLength("")).toBe(0);
+    expect(memoByteLength("hello")).toBe(5);
+    // The memo field is 512 bytes, so an emoji costs four of them.
+    expect(memoByteLength("🎁")).toBe(4);
+    expect(memoByteLength("дякую")).toBe(10);
+    expect(memoByteLength("🎁".repeat(128))).toBe(512);
   });
 });

@@ -17,6 +17,7 @@ import type {
   ZatLike,
 } from "./types";
 import { toZat } from "./types";
+import { memoByteLength } from "../lib/format";
 
 const SECRET_BYTES = 32;
 const SECRET_CHARS = 43; // ceil(32 * 4 / 3) with padding stripped
@@ -83,12 +84,35 @@ export function zecStringToZat(s: string): bigint {
   return neg ? -zat : zat;
 }
 
-/** Single-output ZIP-321 URI: zcash:<address>?amount=<zec>[&message=<text>] */
-export function paymentUri(address: string, amount_zat: ZatLike, message?: string): string {
+/** The memo parameter carries at most 512 bytes, per ZIP-321. */
+export const MAX_MEMO_BYTES = 512;
+
+/**
+ * base64url of the UTF-8 bytes, no padding: the ZIP-321 `memo=` encoding.
+ * <https://zips.z.cash/zip-0321>
+ */
+export function memoToBase64Url(text: string): string {
+  if (memoByteLength(text) > MAX_MEMO_BYTES) {
+    throw new Error(
+      `the message is ${memoByteLength(text)} bytes; the most a memo can carry is ${MAX_MEMO_BYTES}`,
+    );
+  }
+  return bytesToBase64Url(new TextEncoder().encode(text));
+}
+
+/**
+ * Single-output ZIP-321 URI: `zcash:<address>?amount=<zec>[&memo=<base64url>]`.
+ *
+ * The sender's text goes in `memo=`, not `message=`: a `message` is a label the
+ * sending wallet keeps to itself, and M2 proved on mainnet that it never reaches
+ * the chain. A `memo` is written into the note, encrypted, and is what the open
+ * flow decrypts.
+ */
+export function paymentUri(address: string, amount_zat: ZatLike, memo?: string): string {
   const amount = zatToZecString(amount_zat);
   let uri = `zcash:${address}?amount=${amount}`;
-  if (message && message.length > 0) {
-    uri += `&message=${encodeURIComponent(message)}`;
+  if (memo && memo.length > 0) {
+    uri += `&memo=${memoToBase64Url(memo)}`;
   }
   return uri;
 }
@@ -160,7 +184,7 @@ export async function openEnvelope(
   birthday: number | undefined,
   network: Network,
   _lightwalletd_url: string,
-  on_progress: ProgressFn,
+  on_progress?: ProgressFn,
 ): Promise<OpenResult> {
   // Derive first, so a bad secret fails the same way the real core would.
   derive(secret_b64url, network);
@@ -176,19 +200,22 @@ export async function openEnvelope(
       tick += 1;
       if (tick >= ticks) {
         clearInterval(timer);
-        on_progress(total, total);
+        on_progress?.(total, total);
         resolve({
           found: true,
           notes: [{ ...MOCK_NOTE }],
           total_zat: MOCK_NOTE.amount_zat,
           tip_height: MOCK_TIP_HEIGHT,
+          birthday: MOCK_TIP_HEIGHT - total + 1,
+          birthday_defaulted: birthday === undefined,
+          scanned_blocks: total,
         });
         return;
       }
       // The span is unknown for the first few ticks: total 0 keeps the bar
       // indeterminate, exactly as it is while the real scanner fetches the tip.
-      if (tick <= MOCK_UNKNOWN_TICKS) on_progress(0, 0);
-      else on_progress(Math.floor((total * tick) / ticks), total);
+      if (tick <= MOCK_UNKNOWN_TICKS) on_progress?.(0, 0);
+      else on_progress?.(Math.floor((total * tick) / ticks), total);
     }, MOCK_TICK_MS);
   });
 }

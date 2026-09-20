@@ -61,17 +61,31 @@ const SECRET = Buffer.from(
 
 ## ZIP-321 URI
 
+The third argument is the **memo**: the sender's text, carried as base64url of its UTF-8
+bytes without padding, so the sending wallet writes it into the note. There is no
+`message=` parameter — M2 proved on mainnet that a ZIP-321 message stays in the sending
+wallet and never reaches the chain.
+
+| | |
+| --- | --- |
+| memo text | `Zenvelope test vector` |
+| UTF-8 bytes | 21 |
+| `memo=` | `WmVudmVsb3BlIHRlc3QgdmVjdG9y` |
+
 `payment_uri(<mainnet address>, 10000000n, "Zenvelope test vector")`
 
 ```
-zcash:u1nxx35rnvjqzuz03fcg4yur2atgm3j2yl4xsl6l93u5nxw8mxw0t5gxqlqfxruppsy7akehfj5h63j7mqx6z6uzvl0n7f3v08kszpwv4f?amount=0.1&message=Zenvelope%20test%20vector
+zcash:u1nxx35rnvjqzuz03fcg4yur2atgm3j2yl4xsl6l93u5nxw8mxw0t5gxqlqfxruppsy7akehfj5h63j7mqx6z6uzvl0n7f3v08kszpwv4f?amount=0.1&memo=WmVudmVsb3BlIHRlc3QgdmVjdG9y
 ```
 
 `payment_uri(<testnet address>, 10000000n, "Zenvelope test vector")`
 
 ```
-zcash:utest1ythf7gkem8m6hna5mvvjntgvwc2rujaza72dec08azu45xdl60es6jp8h2g2693dx7afwzrz5lp9tfk43exx9ce3s38tt958pq5cxp0c?amount=0.1&message=Zenvelope%20test%20vector
+zcash:utest1ythf7gkem8m6hna5mvvjntgvwc2rujaza72dec08azu45xdl60es6jp8h2g2693dx7afwzrz5lp9tfk43exx9ce3s38tt958pq5cxp0c?amount=0.1&memo=WmVudmVsb3BlIHRlc3QgdmVjdG9y
 ```
+
+`payment_uri(<address>, 10000000n, undefined)` omits the parameter entirely, and a memo
+over 512 UTF-8 bytes is rejected.
 
 ## Amount formatting
 

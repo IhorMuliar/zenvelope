@@ -48,10 +48,17 @@ M1 (done 2026-09-20) Create a link on mainnet: secret, derived address, ZIP-321
    was confirmed independently by zcash-devtool from the browser-generated
    viewing key (tx 281e9f7b…341d43, block 3490472). Transcript in
    web/docs/M1-VERIFICATION.md.
-M2 (in progress) Open a link on mainnet: scan, decrypt, show amount. This proves
-   the viewing path and the hidden-amount reveal.
-M3 Spend from the link to a pasted Zcash address in the browser, on mainnet.
-   In-browser Ironwood proving. End to end. Demo video 1 recorded here.
+M2 (done 2026-09-21) Open a link on mainnet: scan, decrypt, show amount. The
+   viewing path and the hidden-amount reveal are proved: the browser derived the
+   viewing key from the link fragment alone, streamed 64 compact blocks from the
+   link's birthday to the chain tip over gRPC-web in 2.0 s, trial-decrypted the
+   Ironwood note and showed 0.0013 ZEC, matching the zcash-devtool oracle field
+   for field (tx 281e9f7b…341d43, block 3490472). It also proved that a ZIP-321
+   `message=` never reaches the chain — the M1 note arrived with Memo::Empty — so
+   the sender's text now rides in the ZIP-321 `memo=` parameter and is encrypted
+   on-chain. Transcript in web/docs/M2-VERIFICATION.md.
+M3 (in progress) Spend from the link to a pasted Zcash address in the browser, on
+   mainnet. In-browser Ironwood proving. End to end. Demo video 1 recorded here.
 M4 Drainer-safe copy, trust-boundary screens, in-browser fresh wallet with seed
    export for recipients who have nothing.
 M5 Solana receive option via 1Click, with the warning screen and a fresh Solana
@@ -67,8 +74,9 @@ M6 first, then M5, then Noir connect. M0 to M4 are the product.
 - Live gRPC-web handshake to https://zjs.zec.rocks/mainnet from a browser.
   **Done at M1**: the browser reads the chain tip over gRPC-web and uses it as the
   link's birthday height.
-- WASM prover size and proving time on a mid-range phone. Still open; the M1 core
-  is derivation only, 435,317 bytes (253 KB gzip), and carries no prover.
+- WASM prover size and proving time on a mid-range phone. Still open; the M2 core
+  is derivation plus the scanner, 788,781 bytes (390 KB gzip), and carries no
+  prover. M1's derivation-only core was 435,317 bytes (253 KB gzip).
 - 1Click quote for ZEC in, USDC-on-Solana out, minimum amount and fee. Still open,
   needed at M5.
 

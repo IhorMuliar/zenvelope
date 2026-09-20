@@ -26,9 +26,20 @@ const FOUND: OpenResult = {
   notes: [{ amount_zat: "130000", memo: "Zenvelope M1", height: 3490472, txid: "ab", pool: "ironwood" }],
   total_zat: "130000",
   tip_height: 3490500,
+  birthday: 3490437,
+  birthday_defaulted: false,
+  scanned_blocks: 64,
 };
 
-const EMPTY: OpenResult = { found: false, notes: [], total_zat: "0", tip_height: 3490500 };
+const EMPTY: OpenResult = {
+  found: false,
+  notes: [],
+  total_zat: "0",
+  tip_height: 3490500,
+  birthday: 3490437,
+  birthday_defaulted: false,
+  scanned_blocks: 64,
+};
 
 describe("openReducer", () => {
   it("starts by reading the link", () => {

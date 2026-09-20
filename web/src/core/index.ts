@@ -80,7 +80,7 @@ interface WasmModule {
   generate_secret(): string;
   parse_fragment(frag: string): ParsedFragment & Disposable;
   build_fragment(secret: string, birthday?: number): string;
-  payment_uri(address: string, amount_zat: ZatLike, message?: string): string;
+  payment_uri(address: string, amount_zat: ZatLike, memo?: string): string;
   zat_to_zec_string(zat: ZatLike): string;
   zec_string_to_zat(s: string): ZatLike;
   open_envelope(
@@ -88,7 +88,7 @@ interface WasmModule {
     birthday: number | undefined,
     network: Network,
     lightwalletd_url: string,
-    on_progress: ProgressFn,
+    on_progress?: ProgressFn,
   ): Promise<OpenResult>;
 }
 
@@ -124,10 +124,12 @@ async function load(): Promise<LoadedCore> {
       birthday === undefined || birthday === null
         ? core.build_fragment(secret)
         : core.build_fragment(secret, birthday),
-    payment_uri: (address, amount, message) =>
-      message === undefined || message === ""
+    // The third argument is Option<String> on the Rust side: pass the memo only
+    // when there is one, never an empty string and never null.
+    payment_uri: (address, amount, memo) =>
+      memo === undefined || memo === ""
         ? core.payment_uri(address, amount)
-        : core.payment_uri(address, amount, message),
+        : core.payment_uri(address, amount, memo),
     zat_to_zec_string: (zat) => core.zat_to_zec_string(zat),
     zec_string_to_zat: (s) => core.zec_string_to_zat(s),
     // The scan is the one call that touches the network. The secret is passed
