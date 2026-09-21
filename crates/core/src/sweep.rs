@@ -54,20 +54,25 @@ use crate::{memo_bytes, ufvk_from_secret};
 
 /// The most blocks the witness replay ever walks past the newest note.
 ///
-/// 120 blocks is about two and a half hours of mainnet at 75 s per block. The anchor is
+/// 24 blocks is about half an hour of mainnet at 75 s per block. The anchor is
 /// `min(tip, newest note height + this)`, so the walk is bounded no matter how old the
 /// envelope is, and the block stream the replay consumes is bounded with it.
 ///
 /// **This is a privacy/latency trade-off, not a correctness one.** Zebra accepts a spend
-/// against the root of any finalized Ironwood tree state, so an anchor 120 blocks past
-/// the note is as consensus-valid as the tip — the M3 spike verified a same-block anchor
-/// against mainnet, which is the extreme case of the same thing. What the cap costs is
-/// anonymity-set freshness: an observer reading the anchor learns the transaction was
-/// built against a tree state no later than `note + 120`, which for an old envelope is a
-/// narrower window than "somewhere at the tip". What it buys is a sweep whose witness
-/// stage does not grow without bound as an envelope ages: before the cap, a 777-block-old
-/// envelope replayed all 777 blocks, and a month-old one would replay 35,000.
-pub const ANCHOR_WALK_CAP: u32 = 120;
+/// against the root of any finalized Ironwood tree state, so an anchor 24 blocks past the
+/// note is as consensus-valid as the tip — the M3 spike verified a same-block anchor
+/// against mainnet, which is the extreme case of the same thing. The walk therefore
+/// exists for one reason only: so the anchor does not pin the exact funding block. Any
+/// distance past the note buys that, and every block of it is paid for in Sinsemilla
+/// hashing — about 2 s for 24 blocks on a desktop and under 1 s on a recent phone, where
+/// 120 blocks cost about 10 s (web/docs/PERF-2026-09-21.md §9 and §10). What the cap
+/// costs is anonymity-set freshness: an observer reading the anchor learns the
+/// transaction was built against a tree state no later than `note + 24`, which for an old
+/// envelope is a narrower window than "somewhere at the tip". What it buys is a sweep
+/// whose witness stage does not grow without bound as an envelope ages: before the cap, a
+/// 777-block-old envelope replayed all 777 blocks, and a month-old one would replay
+/// 35,000.
+pub const ANCHOR_WALK_CAP: u32 = 24;
 
 /// Wall-clock milliseconds, wherever this crate is compiled.
 ///
@@ -752,7 +757,7 @@ mod tests {
 
     #[test]
     fn a_young_envelope_gets_a_tip_anchor() {
-        assert_eq!(anchor_height(3_490_472, 3_490_500), 3_490_500);
+        assert_eq!(anchor_height(3_490_472, 3_490_490), 3_490_490);
         assert_eq!(
             anchor_height(3_490_472, 3_490_472 + ANCHOR_WALK_CAP),
             3_490_472 + ANCHOR_WALK_CAP
@@ -776,8 +781,8 @@ mod tests {
 
     #[test]
     fn the_cap_is_the_documented_one() {
-        // 120 blocks, about 2.5 hours of mainnet. D18.
-        assert_eq!(ANCHOR_WALK_CAP, 120);
+        // 24 blocks, about half an hour of mainnet. D18.
+        assert_eq!(ANCHOR_WALK_CAP, 24);
     }
 
     #[test]
