@@ -41,15 +41,18 @@ made in the tab, a table of single-output URIs, and a CSV whose amount columns a
 Funding them all from one wallet is what M6 owes.
 
 **9. How slow is it on a phone?** Measured, on 2026-09-21, on the live site: an iPhone
-16e in Brave, cross-origin isolated, proving on two threads — 7.6 s to open and scan,
-8.4 s of witnessing and 5.1 s of proving, **13.5 s** from "Send it on" to done, on the
-same 9,166-byte transaction the desktop produces. That was a dry run on a real mainnet
-envelope; nothing was broadcast. One device, one run — an older phone will be slower,
-and delegated proving via ZIP-374 stays the fallback. Transcript:
-`web/docs/M4-VERIFICATION.md`.
+16e in Brave, cross-origin isolated, proving on three threads — 5.5 s to open and scan,
+3.2 s of witnessing and 4.4 s of proving, **7.9 s** from "Send it on" to done — under 8
+seconds, on the same 9,166-byte transaction the desktop produces. The proving key warms
+in the background while the envelope is read, so the wait for it at tap time was 0.0 s.
+That was a dry run on a real mainnet envelope; nothing was broadcast. One device, one
+run — an older phone will be slower, and delegated proving via ZIP-374 stays the
+fallback. For scale, the closest published figure we know of is ChainSafe's 5.4 s
+desktop-browser benchmark on a MacBook Air M2; we are not aware of a prior
+mobile-browser number. Transcript: `web/docs/M4-VERIFICATION.md`.
 
 **10. Safari?** WebKit itself is fine with threads: the iPhone 16e run above was Brave
-on iOS, which is WebKit, and it was cross-origin isolated and proved on two threads. What
+on iOS, which is WebKit, and it was cross-origin isolated and proved on three threads. What
 matters is the headers and the probe, not the engine — without cross-origin isolation or
 wasm threads the core falls back to the single-threaded package, same transaction, and on
 the desktop that is roughly 47 s instead of 23 s. Any probe failure falls back rather

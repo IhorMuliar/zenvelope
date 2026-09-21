@@ -29,8 +29,9 @@ amount in the link.
 > link. It derives a unified address with an Ironwood receiver and that address's viewing
 > and spending keys. The recipient's browser streams compact blocks over gRPC-web,
 > trial-decrypts the note, reveals the amount, then builds and proves a V6 transaction in
-> WASM — a ~750 KB prover: 13.5 seconds tap to done on an iPhone 16e at two threads,
-> about 24 seconds on a desktop at four.
+> WASM — a ~750 KB prover: under 8 seconds tap to done on an iPhone 16e at three
+> threads, 4.4 s of it proving, in a dry run on mainnet; about 28 seconds on a desktop
+> at four.
 >
 > Because the amount is not in the link, a forwarded link discloses nothing until it is
 > opened. Because no backend touches keys, there is nothing for us to freeze, refund or
@@ -89,10 +90,10 @@ retroactive grant.
 1. A browser served without cross-origin isolation, or one whose wasm-threads probe
    fails, falls back to the single-threaded prover: same transaction, roughly 47 s
    instead of 23 s on a desktop. WebKit is not the dividing line — the 2026-09-21 iPhone
-   run was Brave on iOS, isolated, and proved on two threads — the headers are.
+   run was Brave on iOS, isolated, and proved on three threads — the headers are.
 2. Opening an envelope is bound by the public lightwalletd gateway, and that varies
-   widely: the scan and the witness walk took about 8 s on the iPhone run of 2026-09-21
-   and about 28 s on a desktop through the same gateway an hour earlier. Proving is the
+   widely: the scan and the witness walk took about 9 s on the iPhone run of 2026-09-21
+   and about 22 s on a desktop on the same build through the same gateway. Proving is the
    predictable part; the network is not. Pointing the app at your own gateway removes it.
 3. The Solana exit is poor value at small amounts — about 16% spread into USDC at the
    0.00132 ZEC floor against about 1% into SOL. The screen says so, and the shielded way

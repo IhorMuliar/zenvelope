@@ -36,7 +36,8 @@ inside the browser.
 > The secret is thirty-two random bytes after the hash in the URL, and browsers never
 > send that part to a server. It derives a shielded address and its keys. The recipient's
 > browser scans Zcash, decrypts the Ironwood note, and proves the spend right there — a
-> 750-kilobyte prover, about fifteen seconds on an iPhone, five of them proving.
+> 750-kilobyte prover, under eight seconds on an iPhone, four and a half of them
+> proving.
 
 **Prior art, and what is different — 1:25–1:55**
 
@@ -64,8 +65,8 @@ inside the browser.
 **Roadmap and ask — 2:40–3:00**
 
 > Next: group envelopes funded from one wallet. The build is live at
-> `https://zenvelope.netlify.app`, measured on an iPhone 16e at thirteen and a half
-> seconds tap to done. We are asking the Zcash track to back the case where a shielded
+> `https://zenvelope.netlify.app`, measured on an iPhone 16e at just under eight
+> seconds tap to done, in a dry run on mainnet. We are asking the Zcash track to back the case where a shielded
 > payment reaches somebody who has nothing yet. The code is MIT today.
 
 ## Shot list
@@ -75,7 +76,7 @@ inside the browser.
 | 0:00 | The diagram, animated arrow by arrow |
 | 0:20 | A phone chat, "what's your address?", then an abandoned install |
 | 0:40 | `https://zenvelope.netlify.app`: **Create envelope**, the link, QR, breakdown |
-| 1:00 | URL bar, the secret after `#` highlighted, network panel carrying none of it; then `/e` on mainnet — scan bar, reveal; cut to the iPhone 16e screen recording, footer `proving: 2 threads`, the clock at 13.5 s |
+| 1:00 | URL bar, the secret after `#` highlighted, network panel carrying none of it; then `/e` on mainnet — scan bar, reveal; cut to the iPhone 16e screen recording, footer `proving: 3 threads`, the clock at 7.9 s |
 | 1:25 | Three stills: zip-0324, zplash.vercel.app, the Vizor v0.0.55 note |
 | 1:55 | The explorer on 281e9f7b…341d43, then `ba0f91cfe7ca33dd269b692bf80027df2681a321215e90ab28c2a56260fa2aad`; tests green |
 | 2:20 | The review screen's fee lines, then README "What we are not" |

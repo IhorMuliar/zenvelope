@@ -145,35 +145,50 @@ Both runs were dry runs. Nothing was broadcast.
 
 ### Phone measurement
 
-Measured 2026-09-21 on the owner's own device, against the deployed site rather than a
-preview server, on a real mainnet envelope. The sweep took the dry-run path: **nothing
-was broadcast**, and the envelope still holds its money.
+Measured 2026-09-21 at **17:45 UTC** on the owner's own device, on build `6fa7f9f`,
+against the deployed site rather than a preview server, on a real mainnet envelope. The
+sweep took the dry-run path: **nothing was broadcast**, and the envelope still holds its
+money.
 
-- **Device:** iPhone 16e, Brave on iOS (WebKit), `navigator.hardwareConcurrency` **2**
+- **Device:** iPhone 16e, Brave on iOS (WebKit)
 - **Site:** <https://zenvelope.netlify.app> (Netlify). The COOP/COEP headers were
   verified on the live responses, the page was **cross-origin isolated**, and the worker
-  took the threaded package: proving on **2 threads**, as the footer reported.
+  took the threaded package: proving on **3 threads**, as the footer reported.
+- **Gateway:** `zjs.zec.rocks`
 - **Transaction:** the same **9,166-byte** transaction the desktop rows above produce.
 
-| | iPhone 16e, Brave, 2 threads | desktop, same hour, 4 threads |
+| | iPhone 16e, Brave, 3 threads | desktop, same build, 4 threads |
 | --- | --- | --- |
-| open / scan | **7.6 s** | 25.8 s |
-| keys (warm) | **4.9 s** | 15.8 s |
-| `witness` | **8.4 s** | 28.4 s |
-| `proving` | **5.1 s** | 13.8 s |
-| "Send it on" tapped → Done | **13.5 s** | 42.3 s |
+| open / scan | **5.5 s** | 12.0 s |
+| keys (warm, overlapped with reading) | **11.8 s** | 16.7 s |
+| waiting for keys | **0.0 s** | — |
+| `witness` | **3.2 s** | 10.1 s |
+| `proving` | **4.4 s** | 17.9 s |
+| send (dry) | **0.0 s** | — |
+| "Send it on" tapped → Done | **7.9 s** | 28.2 s |
 | raw transaction | 9,166 bytes | 9,166 bytes |
 
-The desktop column is the reference run taken the same hour on the 8-vCPU DigitalOcean
-droplet in Chrome at four threads, through the same live site.
+The desktop column is the reference run on the same build, on the 8-vCPU DigitalOcean
+droplet in Chrome at four threads, through the same live site and the same gateway.
 
-**Read the desktop column as network, not as compute.** Its rows are much larger than
-the same machine's rows in the table above (22.9 s tap to done, `proving` 14.7 s), and
-the difference is mostly latency to the public gateway at that time: `open / scan` and
-`witness` are round trips and a block-range stream, and they are where the gap sits.
-Neither column is a benchmark — one run each, an hour apart, on different networks — so
-what is worth taking from them is the phone's own figures: a recipient on an iPhone 16e
-waited **13.5 s** from "Send it on" to done, **5.1 s** of it proving.
+**The key warm costs the recipient nothing.** It takes 11.8 s, but it runs in the
+background while the envelope is being read, and by the time "Send it on" is tapped the
+wait for it is **0.0 s**. The 7.9 s tap to done is therefore `witness` 3.2 s, no key
+wait, `proving` 4.4 s and a dry send of 0.0 s; the 5.5 s of open and scan happens before
+the tap, and the 11.8 s of key warming is not in the total at all.
+
+**The earlier run the same day.** On build `1d6a771`, two threads, same device and same
+site: **13.5 s** tap to done, **5.1 s** of it proving. Between the two builds the scan
+moved to four threads, the witness walk stopped walking to the tip, and the device
+reported three threads rather than two; the 7.9 s run is what that work measures.
+
+**Read the desktop column as a shared cloud vCPU plus network, not as a verdict on
+desktop browsers.** Its `open / scan` and `witness` rows are round trips and a
+block-range stream, and its `proving` row is a throttled cloud core rather than a
+laptop's. Neither column is a
+benchmark — one run each, on different networks — so what is worth taking from them is
+the phone's own figures: a recipient on an iPhone 16e waited **under 8 seconds** from
+"Send it on" to done, **4.4 s** of it proving.
 
 ### Peak memory
 

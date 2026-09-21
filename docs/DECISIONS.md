@@ -41,27 +41,30 @@ nothing broadcast: [../web/docs/PERF-2026-09-21.md](../web/docs/PERF-2026-09-21.
 
 **Decision.** Publish the phone figure as measured rather than estimated, and stop
 saying phone proving time is unknown. On an **iPhone 16e**, Brave on iOS (WebKit),
-cross-origin isolated and proving on **2 threads** (`hardwareConcurrency` 2), against
-the live site: open and scan **7.6 s**, proving key warm **4.9 s**, `witness` **8.4 s**,
-`proving` **5.1 s**, **13.5 s** from "Send it on" to done, on the same 9,166-byte
-transaction the desktop builds.
+cross-origin isolated and proving on **3 threads**, against the live site on build
+`6fa7f9f`: open and scan **5.5 s**, the proving key warming **11.8 s** in the background
+while the envelope is read, **0.0 s** of actually waiting for it, `witness` **3.2 s**,
+`proving` **4.4 s**, **7.9 s** from "Send it on" to done — under 8 seconds, on the same
+9,166-byte transaction the desktop builds.
 
 **Why it matters.** The open flow was budgeted on desktop numbers, and the phone is
-where a recipient with nothing actually opens a link. At 5.1 s of proving, in-browser
-proving needs no escape hatch on a current phone; delegated proving through ZIP-374 (D8)
-stays optional, for older devices, rather than planned work.
+where a recipient with nothing actually opens a link. At 4.4 s of proving and under 8
+seconds tap to done, in-browser proving needs no escape hatch on a current phone;
+delegated proving through ZIP-374 (D8) stays optional, for older devices, rather than
+planned work.
 
-**The desktop reference the same hour**, 8-vCPU DigitalOcean droplet, Chrome, 4 threads,
-through the same live site: open and scan 25.8 s, keys 15.8 s, `witness` 28.4 s,
-`proving` 13.8 s, total 42.3 s. Those rows are far above the same machine's earlier
-22.9 s, and the gap is mostly latency to the public gateway at that time, not compute.
-Read it as the network varying, and take the phone's figures as the phone's.
+**The desktop reference on the same build**, 8-vCPU DigitalOcean droplet, Chrome, 4
+threads, through the same live site and gateway: open and scan 12.0 s, keys 16.7 s,
+`witness` 10.1 s, `proving` 17.9 s, total 28.2 s. That machine is a shared cloud vCPU
+and its scan and witness rows are mostly gateway round trips, so read the gap as the
+host and the network rather than as a verdict on desktop browsers, and take the phone's
+figures as the phone's.
 
-**Evidence.** Measured 2026-09-21 on the owner's device against
-<https://zenvelope.netlify.app>, headers verified, on a real mainnet envelope. The sweep
-took the dry-run path: **nothing was broadcast**. One device, one run each, not a
-benchmark. Transcript: [../web/docs/M4-VERIFICATION.md](../web/docs/M4-VERIFICATION.md),
-"Phone measurement".
+**Evidence.** Measured 2026-09-21 at 17:45 UTC on the owner's device against
+<https://zenvelope.netlify.app>, gateway `zjs.zec.rocks`, headers verified, on a real
+mainnet envelope. The sweep took the dry-run path: **nothing was broadcast**. One
+device, one run each, not a benchmark. Transcript:
+[../web/docs/M4-VERIFICATION.md](../web/docs/M4-VERIFICATION.md), "Phone measurement".
 
 ### D16 Host: Netlify, by direct upload
 

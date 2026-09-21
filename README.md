@@ -149,8 +149,8 @@ Milestones, in dependency order. Full spec in [docs/BUILD_SPEC.md](docs/BUILD_SP
 product one-pager in [docs/PRODUCT.md](docs/PRODUCT.md), decision log in
 [docs/DECISIONS.md](docs/DECISIONS.md).
 
-Measured on an iPhone 16e (Brave, 2 threads): proof in 5 s, whole send-on in 13.5 s —
-2026-09-21, dry run against the live site, nothing broadcast
+Measured on an iPhone 16e (Brave on iOS, 3 threads): under 8 seconds from "Send it on"
+to done, 4.4 s of it proving — 2026-09-21, dry run against the live site, nothing broadcast
 ([web/docs/M4-VERIFICATION.md](web/docs/M4-VERIFICATION.md)).
 
 - [x] **M0** Repo, README one-pager, license, arena project draft, first builder update posted.
