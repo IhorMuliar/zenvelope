@@ -7,6 +7,28 @@
 //! `crates/spike-prove/src/lib.rs`, so the only variables are `orchard/multicore` (which
 //! turns on rayon inside halo2) and the pool this module starts.
 //!
+//! Measured, Playwright chromium, 8-core x86_64 Linux, cross-origin-isolated page,
+//! `initThreadPool(navigator.hardwareConcurrency)` = 8 threads, no CPU throttling.
+//! Baseline is the single-threaded spike on the same host (see spike/README.md).
+//!
+//! | | 1 thread | 4 threads | 8 threads |
+//! | --- | --- | --- | --- |
+//! | pk build | 35.6 s | 21.3 s | 20.6 s |
+//! | vk build | 29.0 s | 15.4 s | 15.4 s |
+//! | proof | 52.1 s | 20.3 s | **18.8 s** |
+//! | peak wasm memory | 100.8 MB | 108.8 MB | 116.9 MB |
+//!
+//! So ~2.6x on the proof at 4 threads and ~2.8x at 8: almost all of the win is in the
+//! first four, because only the MSM and FFT inside halo2 are parallel. The pool costs
+//! 128-176 ms to spawn, `crossOriginIsolated` is `true`, and the proof still verifies
+//! (2 actions, 7264 proof bytes). CPU-throttled rows were not measured.
+//!
+//! Without COOP/COEP the wasm still *instantiates*; what fails is the pool, and not
+//! gracefully -- `initThreadPool` rejects with
+//! `DataCloneError: SharedArrayBuffer transfer requires self.crossOriginIsolated`.
+//! A caller has to catch that itself, so shipping this means shipping the
+//! single-threaded package too and choosing between them by feature detection.
+//!
 //! Nothing here is production code. It exists to answer that question and then die.
 
 use std::cell::RefCell;
