@@ -80,7 +80,7 @@ retroactive grant.
 **Links:** Repo `https://github.com/IhorMuliar/zenvelope` · Demo `<DEMO_URL>` · Pitch
 `<PITCH_URL>` · Demo video `<DEMO_VIDEO_URL>` · First funding
 `281e9f7bffa5bffc8ee1287cc6e245cc59eee302727ea9d93c7f8e5a99341d43` · First sweep
-`<M3_TXID>`
+`ba0f91cfe7ca33dd269b692bf80027df2681a321215e90ab28c2a56260fa2aad`
 
 **Known limitations:**
 

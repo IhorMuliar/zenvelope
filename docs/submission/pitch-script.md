@@ -50,7 +50,7 @@ inside the browser.
 
 > Everything is mainnet, never testnet. The first envelope was funded from a phone wallet
 > — transaction 281e9f7b, block 3,490,472. The sweep is broadcast: transaction
-> `<M3_TXID>`, built and proved inside a browser. Three hundred and ten unit tests,
+> `ba0f91cfe7ca33dd269b692bf80027df2681a321215e90ab28c2a56260fa2aad`, built and proved inside a browser. Three hundred and ten unit tests,
 > twenty-seven end-to-end specs, and a verification transcript per milestone carrying the
 > commands behind every number.
 
@@ -77,6 +77,6 @@ inside the browser.
 | 0:40 | `<DEMO_URL>`: **Create envelope**, the link, QR, breakdown |
 | 1:00 | URL bar, the secret after `#` highlighted, network panel carrying none of it; then `/e` on mainnet — scan bar, reveal, footer `proving: 4 threads` |
 | 1:25 | Three stills: zip-0324, zplash.vercel.app, the Vizor v0.0.55 note |
-| 1:55 | The explorer on 281e9f7b…341d43, then `<M3_TXID>`; tests green |
+| 1:55 | The explorer on 281e9f7b…341d43, then `ba0f91cfe7ca33dd269b692bf80027df2681a321215e90ab28c2a56260fa2aad`; tests green |
 | 2:20 | The review screen's fee lines, then README "What we are not" |
 | 2:40 | The group table and CSV, then the `<DEMO_URL>` end card |
