@@ -212,6 +212,134 @@ export const trustBoundary = {
   back: "Keep it shielded instead",
 } as const;
 
+/* ------------------------------------------------------- the Solana exit (M5) */
+
+/**
+ * The words on the Solana exit itself, after the trust boundary above has been
+ * read and ticked.
+ *
+ * The trust boundary says what you give up. These say what it costs and who is
+ * on the other side, in numbers the recipient can check against the quote on the
+ * same screen. Four of them are not optional and are asserted by `en.test.ts`:
+ * what the swap provider sees, the fee the rail hides inside its spread, the
+ * minimum below which it will not trade, and the sentence that we are not the
+ * swap provider and never hold the funds.
+ *
+ * The exit is never the headline. It is the third card of three, behind a
+ * required tick, and every screen of it offers the way back to a shielded
+ * destination.
+ */
+export const solanaExit = {
+  cardTitle: "USDC or SOL on Solana",
+  cardBody:
+    "This leaves the shielded pool. A third-party swap rail does the exchange, we never hold the funds on either side, and you see every cost before you commit.",
+
+  /* ------------------------------------------------------------- the asset */
+
+  assetTitle: "What should arrive?",
+  assetLede: "Both go to the same Solana address. The costs differ, and you will see them next.",
+  usdcTitle: "USDC",
+  usdcBody:
+    "A dollar stablecoin on Solana. Steady in dollars, and the rail's flat withdrawal fee is a bigger slice of a small amount.",
+  solTitle: "SOL",
+  solBody:
+    "Solana's own coin. Its price moves, and the rail's withdrawal fee is much smaller than USDC's.",
+
+  /* --------------------------------------------------------- the destination */
+
+  destinationTitle: "Where on Solana?",
+  pasteTitle: "A Solana address",
+  pasteBody: "Paste an address from Phantom, Solflare or any other Solana wallet.",
+  pasteLabel: "Solana address",
+  invalidCharset:
+    "That is not a Solana address: it has a character no Solana address can contain. Check that you copied all of it and nothing else.",
+  invalidLength:
+    "That is not a Solana address. A Solana address is 32 to 44 characters and decodes to 32 bytes.",
+  valid: "That is a valid Solana address. Check it against your wallet before you go on.",
+
+  generateTitle: "A new Solana keypair in this browser",
+  generateBody:
+    "We make a fresh Solana key here and hand you the secret to keep. Nothing is stored and nothing is sent.",
+  secretLabel: "Secret key",
+  addressLabel: "Solana address",
+  secretOnce:
+    "This key is the money. It is shown here once, it is saved nowhere, and it is gone when this tab closes. Write it down or put it in a password manager now.",
+  importHint:
+    "To use it: install Phantom or Solflare, choose “Import private key”, and paste this key. It is the 64-byte base58 form both of them expect.",
+  savedCheckbox: "I saved this key",
+  savedBlockedHint: "Tick the box above once the key is somewhere safe.",
+
+  /* ------------------------------------------------------------- the refund */
+
+  refundTitle: "If the swap fails",
+  /**
+   * D14. The default refund address is the envelope's own address, which this
+   * link can open again — so a refund is recoverable with nothing but the link.
+   */
+  refundDefault:
+    "A failed swap sends the ZEC back to this envelope's own address, which means this link opens it again. You need nothing else for that to work.",
+  refundOverrideLabel: "Send a refund somewhere else (optional)",
+  refundOverrideHint:
+    "A Zcash address of your own, if you would rather a refund went straight to you. A unified address starting with u1 keeps the refund shielded; a transparent t1 works too. Leave it empty to use the envelope.",
+  refundFeeNote: (fee: string) =>
+    `A refund costs ${fee} ZEC, which the swap service keeps.`,
+
+  /* -------------------------------------------------------------- the quote */
+
+  quoteTitle: "What you would get",
+  quoteButton: "See what you would get",
+  quoteBusy: "Asking the swap service…",
+  amountOutLabel: "You would receive",
+  spreadLabel: "Cost of leaving",
+  timeLabel: "Usually takes",
+  /** The 25 bps the rail folds into the price and does not display. Rule: we do. */
+  feeLine:
+    "Includes a 0.25% service fee to the swap provider. It is charged by the rail, it is not ours, and the rail does not show it.",
+  spreadNote:
+    "The cost of leaving is the whole difference between the dollar value going in and the dollar value arriving: the rail's rate, its Solana withdrawal fee and that service fee, in one number. The Zcash network fee is listed separately above.",
+  /** Shown when the amount is under the rail's floor. The floor is read live. */
+  minimum: (min: string) =>
+    `The swap service will not trade less than ${min} ZEC, and this envelope is under that. Send it on as shielded ZEC instead, or to a Zcash address of your own.`,
+  minimumLabel: "Swap service minimum",
+
+  /** The four things the swap provider learns. Required by the audit test. */
+  providerSeesTitle: "What the swap provider sees",
+  providerSees:
+    "The swap provider sees the amount of ZEC that arrives, the transparent Zcash address it arrives from, the Solana address it pays out to, and the network address of the browser that asked for the quote. It does not see this link, the secret in it, or anything else about the envelope.",
+  notProvider:
+    "Zenvelope is not the swap provider and never holds the funds. Your browser pays the address the rail quotes, and the rail pays you on Solana.",
+
+  /* ------------------------------------------------------ the deposit address */
+
+  depositTitle: "The swap is set up",
+  depositLede:
+    "The swap service has given us a one-time transparent Zcash address for this swap. The next step pays it out of the envelope, from your browser.",
+  depositLabel: "Deposit address",
+  depositNoMemo: "No memo and no tag: the address alone identifies this swap.",
+  deadlineLabel: "Good until",
+  deadlineNote:
+    "The address is watched until then. After that a payment to it is refunded rather than swapped.",
+  depositContinue: "Send the ZEC",
+
+  /* --------------------------------------------------------- after the sweep */
+
+  trackingTitle: "Watching the swap",
+  trackingLede:
+    "The ZEC is on its way to the swap service. This page asks it where things stand every 20 seconds. You can close the tab: the swap carries on without it.",
+  solanaTxLabel: "Solana transaction",
+  trackingLost:
+    "We could not reach the swap service just now. It keeps working either way, and this page will try again.",
+
+  /* ------------------------------------------------------------- the dry run */
+
+  dryRunTitle: "Dry run complete.",
+  dryRunLine: "Dry run: deposit address obtained, transaction built, nothing sent",
+  dryRunNote:
+    "The quote and the deposit address are real and the transaction was really built and proved. Nothing was handed to the Zcash network, so the money is still in the envelope and this link still works.",
+
+  back: "Keep it shielded instead",
+} as const;
+
 /* -------------------------------------------- group envelopes (M6 preview) */
 
 export const group = {
@@ -275,6 +403,16 @@ export function allStrings(): string[] {
       }
     } else if (v && typeof v === "object") Object.values(v).forEach(walk);
   };
-  walk({ landing, footer, how, trustBoundary, group, single, NEVER_ASK, ONLY_ASK });
+  walk({
+    landing,
+    footer,
+    how,
+    trustBoundary,
+    solanaExit,
+    group,
+    single,
+    NEVER_ASK,
+    ONLY_ASK,
+  });
   return out;
 }

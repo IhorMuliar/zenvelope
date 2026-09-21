@@ -5,6 +5,41 @@ the evidence it rests on. If something here contradicts another doc, this file w
 
 ## 2026-09-21
 
+### D14 The Solana swap's refund address is the envelope itself
+
+**Decision.** `refundTo` on every 1Click quote defaults to **the envelope's own unified
+address** — the same `u1…` the link derives and the sweep is spending from. The recipient
+is asked for nothing. A field on the same screen lets them override it with a Zcash
+address of their own, and leaving it empty is the normal case, not a blocked one.
+
+**Why.** A swap that fails sends the ZEC back to `refundTo`, so that address decides who
+can recover the money. Three candidates were considered.
+
+1. **A transparent address derived for the envelope.** The core exposes no transparent
+   key path, so this needs a new core export — and the open page could not spend what
+   landed there, because it finds and spends Ironwood notes at the envelope's shielded
+   address. A refund would be visible on-chain *and* stranded. Rejected.
+2. **Demand a `t1` from the recipient, empty = blocked.** The whole product premise is a
+   recipient who has no wallet and no address; demanding one at the last step to guard
+   against a failure that usually does not happen is the wrong trade. Rejected.
+3. **The envelope's own unified address.** Costs nothing: `derive()` already returns it
+   and `/e` already has it on screen. A refund lands back in the envelope, and **the same
+   link opens it again** — the recipient needs nothing they did not already have. Chosen.
+
+The refund is therefore also the only part of the exit that stays shielded, which is the
+right default for a screen whose whole subject is leaving the shielded pool.
+
+**Evidence.** Probed live on 2026-09-21 against `POST /v0/quote`: `refundTo` set to the
+M1 test vector's unified address `u1nxx35rn…` is **accepted** (HTTP 201, a priced quote
+comes back), a `t1` is accepted, and a Sapling `zs1` and a nonsense string are both
+refused with `{"message":"refundTo is not valid"}`. The rail's `refundFee` is 32,000
+zatoshi, shown on the screen. Transcript in
+[web/docs/M5-VERIFICATION.md](../web/docs/M5-VERIFICATION.md).
+
+**What is not proved.** We never broadcast, so no refund has actually been paid to a
+unified address; the evidence is that the rail's own validator accepts one. The override
+field exists for exactly that residual risk, and the copy explains it.
+
 ### D12 Block explorer for the done screen
 
 **Decision.** Link finished sweeps to `https://mainnet.zcashexplorer.app/transactions/<txid>`,

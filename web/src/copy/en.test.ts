@@ -16,6 +16,7 @@ import {
   how,
   landing,
   single,
+  solanaExit,
   trustBoundary,
 } from "./en";
 
@@ -164,6 +165,59 @@ describe("the trust boundary", () => {
 
   it("explains the block rather than just applying it", () => {
     expect(trustBoundary.blockedHint).toMatch(/tick the box/i);
+  });
+});
+
+describe("the Solana exit", () => {
+  it("says what the swap provider sees, in full", () => {
+    expect(solanaExit.providerSees).toMatch(/amount of ZEC/i);
+    expect(solanaExit.providerSees).toMatch(/Solana address it pays out to/i);
+    expect(solanaExit.providerSees).toMatch(/network address/i);
+    // And what it does not see, because that is the part that matters here.
+    expect(solanaExit.providerSees).toMatch(/does not see this link/i);
+  });
+
+  it("surfaces the 0.25% house fee the rail does not display", () => {
+    expect(solanaExit.feeLine).toMatch(/0\.25%/);
+    expect(solanaExit.feeLine).toMatch(/not ours/i);
+  });
+
+  it("explains the minimum with the live figure in it", () => {
+    const line = solanaExit.minimum("0.00132");
+    expect(line).toContain("0.00132");
+    expect(line).toMatch(/will not trade less/i);
+    // And it offers the shielded way out rather than a dead end.
+    expect(line).toMatch(/shielded ZEC/i);
+  });
+
+  it("states that Zenvelope is not the swap provider and never holds funds", () => {
+    expect(solanaExit.notProvider).toMatch(/not the swap provider/i);
+    expect(solanaExit.notProvider).toMatch(/never holds the funds/i);
+  });
+
+  it("is never the headline: the card leads with what it costs you", () => {
+    expect(solanaExit.cardBody).toMatch(/leaves the shielded pool/i);
+    expect(solanaExit.back).toMatch(/shielded/i);
+  });
+
+  it("tells a generated secret key holder that it is shown once and stored nowhere", () => {
+    expect(solanaExit.secretOnce).toMatch(/once/i);
+    expect(solanaExit.secretOnce).toMatch(/saved nowhere/i);
+    expect(solanaExit.importHint).toMatch(/Phantom/);
+    expect(solanaExit.importHint).toMatch(/Solflare/);
+  });
+
+  it("explains the default refund address rather than demanding one", () => {
+    expect(solanaExit.refundDefault).toMatch(/this envelope's own address/i);
+    expect(solanaExit.refundDefault).toMatch(/this link opens it again/i);
+    expect(solanaExit.refundOverrideHint).toMatch(/optional|Leave it empty/i);
+  });
+
+  it("says plainly what a dry run did and did not do", () => {
+    expect(solanaExit.dryRunLine).toBe(
+      "Dry run: deposit address obtained, transaction built, nothing sent",
+    );
+    expect(solanaExit.dryRunNote).toMatch(/still in the envelope/i);
   });
 });
 

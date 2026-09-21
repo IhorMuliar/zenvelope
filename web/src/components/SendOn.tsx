@@ -29,6 +29,8 @@ import {
 } from "../lib/destination";
 import { DRY_RUN_COPY, isDryRun, rawTxBytes } from "../lib/dryRun";
 import { formatCount, formatZecAmount, truncateMiddle } from "../lib/format";
+import { solanaExit as swapCopy } from "../copy/en";
+import { effectiveCost, formatAssetAmount, formatUsd } from "../lib/oneclick";
 import {
   FUNDS_SAFE_COPY,
   SWEEP_FAILED_COPY,
@@ -39,6 +41,8 @@ import {
   stageChecklist,
 } from "../lib/sweepFlow";
 import { CopyField } from "./CopyField";
+import { SolanaExit, type SwapPlan } from "./SolanaExit";
+import { SwapTracker } from "./SwapTracker";
 
 /** Desktop measurement: the proving key is about 29 s on one thread, about 15 s on four. */
 const WARM_ESTIMATE = "~30 s";
@@ -48,7 +52,7 @@ export const SEND_TIMING_COPY =
 
 export const RESTORE_COPY = "Restore in Zodl or Zingo with these words and this birthday height";
 
-type Choice = "address" | "wallet" | null;
+type Choice = "address" | "wallet" | "solana" | null;
 
 interface Props {
   core: LoadedCore;
@@ -62,9 +66,22 @@ interface Props {
   notes: FoundNote[];
   /** Chain tip at the end of the scan: the birthday a new wallet restores from. */
   tipHeight: number;
+  /**
+   * The envelope's own address, derived from the link. The Solana exit uses it
+   * as the default refund destination, because a refund to it lands back in
+   * this envelope and this same link opens it again (DECISIONS D14).
+   */
+  envelopeAddress: string;
 }
 
-export function SendOn({ core, secret, network, notes, tipHeight }: Props) {
+export function SendOn({
+  core,
+  secret,
+  network,
+  notes,
+  tipHeight,
+  envelopeAddress,
+}: Props) {
   const [state, dispatch] = useReducer(sendReducer, initialSendState);
   const [choice, setChoice] = useState<Choice>(null);
   const [dest, setDest] = useState<DestinationState>(emptyDestination);
@@ -72,6 +89,12 @@ export function SendOn({ core, secret, network, notes, tipHeight }: Props) {
   const [walletDest, setWalletDest] = useState<DestinationState | null>(null);
   const [walletError, setWalletError] = useState<string | null>(null);
   const [wroteDown, setWroteDown] = useState(false);
+  /**
+   * Set once the Solana rail has reserved a deposit address. From that point the
+   * destination is an ordinary transparent `t1` and the sweep below is unchanged;
+   * this only decides what the review, done and tracking screens say about it.
+   */
+  const [swap, setSwap] = useState<SwapPlan | null>(null);
   const [warm, setWarm] = useState<"warming" | "ready" | "failed">("warming");
   const [elapsed, setElapsed] = useState(0);
   const runId = useRef(0);
@@ -129,13 +152,45 @@ export function SendOn({ core, secret, network, notes, tipHeight }: Props) {
     };
   }, [wallet, core, network]);
 
-  const active = choice === "wallet" ? walletDest : choice === "address" ? dest : null;
+  const active =
+    choice === "wallet" ? walletDest : choice === "address" || choice === "solana" ? dest : null;
   const destination = active?.input.trim() ?? "";
   const amounts = sweepAmounts(
     inEnvelopeZat,
     active?.kind ?? "unified_orchard",
     SWEEP_FEE_ZAT,
     notes.length,
+  );
+
+  /**
+   * What the rail would actually be paid: the envelope less the Zcash fees for a
+   * transparent destination, because the deposit address is always a `t1`. The
+   * swap is quoted on this number, never on the envelope amount.
+   */
+  const swapInputZat = sweepAmounts(
+    inEnvelopeZat,
+    "transparent",
+    SWEEP_FEE_ZAT,
+    notes.length,
+  ).receiveZat;
+
+  /**
+   * The rail's deposit address becomes the destination, classified by our own
+   * core like any pasted address: the `t1` the rail sent is not trusted because
+   * the rail sent it.
+   */
+  const onSwapPlan = useCallback(
+    async (plan: SwapPlan) => {
+      setSwap(plan);
+      const classified = await classifyDestinationAsync(
+        plan.reservation.address,
+        core.classify_address,
+        network,
+      );
+      setDest(classified);
+      if (classified.canContinue) dispatch({ type: "review" });
+    },
+    [core, network],
   );
 
   const ready =
@@ -256,52 +311,69 @@ export function SendOn({ core, secret, network, notes, tipHeight }: Props) {
     // The core is the authority on what happened, not the flag that asked for it.
     const dry = state.result.broadcast === false;
     return (
-      <div className="card stack">
-        <h2 data-testid="sent-heading">{dry ? "Dry run complete." : "Sent."}</h2>
-        <p className="sent-amount" data-testid="sent-amount">
-          {formatZecAmount(received)}
-        </p>
-        <CopyField
-          label="Transaction"
-          value={state.result.txid}
-          display={truncateMiddle(state.result.txid, 10)}
-          testId="sent-txid"
-        />
-        {dry ? (
-          <>
-            <p className="warn" data-testid="dry-run-note">
-              {DRY_RUN_COPY}
-            </p>
-            <p className="row">
-              <span className="label">Raw transaction</span>
-              <span data-testid="dry-run-size">
-                {formatCount(rawTxBytes(state.result.raw_tx_hex))} bytes
-              </span>
-            </p>
-          </>
-        ) : (
-          <p>
-            <a
-              href={explorerTxUrl(state.result.txid, network)}
-              rel="noreferrer noopener"
-              target="_blank"
-              data-testid="explorer-link"
-            >
-              See it on {EXPLORER_NAME}
-            </a>
+      <>
+        <div className="card stack">
+          <h2 data-testid="sent-heading">{dry ? "Dry run complete." : "Sent."}</h2>
+          <p className="sent-amount" data-testid="sent-amount">
+            {formatZecAmount(received)}
           </p>
-        )}
-        <p className="hint" data-testid="sent-destination">
-          To {truncateMiddle(destination, 12)}
-        </p>
-        {dry ? (
-          <p data-testid="envelope-intact">
-            Nothing was sent. The money is still in the envelope, and this link still works.
+          <CopyField
+            label="Transaction"
+            value={state.result.txid}
+            display={truncateMiddle(state.result.txid, 10)}
+            testId="sent-txid"
+          />
+          {dry ? (
+            <>
+              {/* A Solana dry run got further: a real deposit address exists. */}
+              <p className="warn" data-testid="dry-run-note">
+                {swap ? swapCopy.dryRunLine : DRY_RUN_COPY}
+              </p>
+              {swap ? (
+                <>
+                  <CopyField
+                    label={swapCopy.depositLabel}
+                    value={swap.reservation.address}
+                    testId="dry-run-deposit-address"
+                  />
+                  <p className="fine" data-testid="dry-run-swap-note">
+                    {swapCopy.dryRunNote}
+                  </p>
+                </>
+              ) : null}
+              <p className="row">
+                <span className="label">Raw transaction</span>
+                <span data-testid="dry-run-size">
+                  {formatCount(rawTxBytes(state.result.raw_tx_hex))} bytes
+                </span>
+              </p>
+            </>
+          ) : (
+            <p>
+              <a
+                href={explorerTxUrl(state.result.txid, network)}
+                rel="noreferrer noopener"
+                target="_blank"
+                data-testid="explorer-link"
+              >
+                See it on {EXPLORER_NAME}
+              </a>
+            </p>
+          )}
+          <p className="hint" data-testid="sent-destination">
+            To {truncateMiddle(destination, 12)}
           </p>
-        ) : (
-          <p data-testid="envelope-empty">The envelope is now empty.</p>
-        )}
-      </div>
+          {dry ? (
+            <p data-testid="envelope-intact">
+              Nothing was sent. The money is still in the envelope, and this link still works.
+            </p>
+          ) : (
+            <p data-testid="envelope-empty">The envelope is now empty.</p>
+          )}
+        </div>
+        {/* Only a real broadcast has anything for the rail to watch for. */}
+        {swap && !dry ? <SwapTracker plan={swap} /> : null}
+      </>
     );
   }
 
@@ -358,6 +430,7 @@ export function SendOn({ core, secret, network, notes, tipHeight }: Props) {
             {truncateMiddle(destination, 12)}
           </span>
         </p>
+        {swap ? <SwapReview plan={swap} /> : null}
         {active.status === "warn" ? (
           <p className="warn" data-testid="review-warning">
             {active.message}
@@ -382,6 +455,19 @@ export function SendOn({ core, secret, network, notes, tipHeight }: Props) {
   }
 
   /* ------------------------------------------------------------ choose phase */
+
+  // The Solana exit owns the whole screen while it runs: a trust boundary that
+  // shares a page with two shielded destinations is a trust boundary nobody reads.
+  if (choice === "solana" && !swap) {
+    return (
+      <SolanaExit
+        amountZat={swapInputZat}
+        envelopeAddress={envelopeAddress}
+        onPlan={(plan) => void onSwapPlan(plan)}
+        onBack={() => setChoice(null)}
+      />
+    );
+  }
 
   const onPickAddress = () => {
     setChoice("address");
@@ -536,14 +622,24 @@ export function SendOn({ core, secret, network, notes, tipHeight }: Props) {
           ) : null}
         </li>
 
+        {/*
+          Third of three, and never the headline. Tapping it does not start a swap:
+          it opens the trust-boundary screen, whose tick is the only way further.
+        */}
         <li>
-          <button type="button" disabled data-testid="dest-solana">
-            <span className="next-title">USDC or SOL on Solana</span>
-            <span className="hint">
-              This leaves the shielded pool. A third-party rail you pick does the swap, we never
-              hold funds on either side, and you see every cost before you commit.
-            </span>
-            <span className="soon">Coming in the next milestone</span>
+          <button
+            type="button"
+            onClick={() => {
+              setChoice("solana");
+              setWallet(null);
+              setWroteDown(false);
+              setDest(emptyDestination);
+            }}
+            aria-pressed={choice === "solana"}
+            data-testid="dest-solana"
+          >
+            <span className="next-title">{swapCopy.cardTitle}</span>
+            <span className="hint">{swapCopy.cardBody}</span>
           </button>
         </li>
       </ul>
@@ -565,5 +661,45 @@ export function SendOn({ core, secret, network, notes, tipHeight }: Props) {
         Continue
       </button>
     </div>
+  );
+}
+
+/**
+ * The swap's own numbers on the review screen, under the Zcash ones.
+ *
+ * The recipient is about to pay a transparent address they have never seen, so
+ * the screen restates what that address is for, what comes back, what it costs
+ * and who is on the other side — the quote they already agreed to, repeated at
+ * the last moment where backing out is still free.
+ */
+function SwapReview({ plan }: { plan: SwapPlan }) {
+  const cost = effectiveCost(plan.reservation.quote);
+  return (
+    <>
+      <p className="row receive">
+        <span className="label">{swapCopy.amountOutLabel}</span>
+        <strong data-testid="review-swap-out">
+          {formatAssetAmount(plan.reservation.quote, plan.asset)}
+        </strong>
+      </p>
+      <p className="row">
+        <span className="label">{swapCopy.spreadLabel}</span>
+        <span data-testid="review-swap-spread">
+          {cost.spreadPct} · {formatUsd(cost.costUsd)}
+        </span>
+      </p>
+      <p className="row">
+        <span className="label">Pays out to</span>
+        <span className="mono" data-testid="review-swap-recipient">
+          {truncateMiddle(plan.recipient, 10)}
+        </span>
+      </p>
+      <p className="fine" data-testid="review-swap-fee">
+        {swapCopy.feeLine}
+      </p>
+      <p className="fine" data-testid="review-swap-not-provider">
+        {swapCopy.notProvider}
+      </p>
+    </>
   );
 }

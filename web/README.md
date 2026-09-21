@@ -221,7 +221,7 @@ The second option generates a wallet here with `new_wallet` at the current chain
 tip, shows the 24 words, the address and the birthday height, and will not go on
 until "I wrote these down" is ticked. **The mnemonic is never stored**: it lives
 in one piece of React state and on the screen, and it is gone with the tab. The
-Solana rail is disabled and says so.
+third is the Solana exit, below.
 
 **Money.** `sweepAmounts` in `src/lib/amount.ts` does every sum in bigint
 zatoshi: envelope − miner fee − flat fee = what the recipient receives. The
@@ -251,6 +251,70 @@ costs no more than one. Unlike the scan, the sweep does not fail over to the
 second lightwalletd host: retrying a broadcast against a different node is not a
 safe thing to do automatically, so a failure is handed to the recipient with a
 retry button instead.
+
+## The Solana exit
+
+The third destination card, and the only place in the product that leaves the
+shielded pool. It is never the headline: it is third of three, and tapping it
+opens `src/components/TrustBoundary.tsx` — four things you give up and a required
+tick — rather than starting anything. `src/components/SolanaExit.tsx` owns the
+screen from there, driven by the reducer in `src/lib/solanaFlow.ts`:
+
+```
+trust -> asset -> destination -> quote -> deposit -> (the ordinary sweep)
+  ^        |           |           |
+  +--------+-----------+-----------+   back, at every step
+```
+
+**The rail** is NEAR Intents 1Click (DECISIONS D10), and `src/lib/oneclick.ts` is
+the only code that talks to it: `GET /tokens`, a dry `POST /quote`, a real one,
+and `GET /status`. Every fetch has a 10-second ceiling and turns every failure
+into a `OneClickError` with the reason kept apart from the sentence. The rail's
+minimum is a moving ~$2, so it is **read out of the 400** —
+`Amount is too low for bridge, try at least 132000` — and never hard-coded.
+
+**What the recipient is told**, on one screen, before committing: what arrives,
+both dollar figures, and the **cost of leaving** as one number — `1 −
+amountOutUsd / amountInUsd`, which covers the rate, the destination withdrawal
+fee (already netted out of `amountOut`) and the rail's 25 bps house fee. That
+house fee rides silently on every unauthenticated quote and the rail does not
+display it; we restate it as a flat line, because a fee folded into a spread is a
+fee nobody sees. Then the time estimate, the refund note, and the floor if the
+envelope is under it.
+
+**Destinations.** A pasted Solana address is validated in `src/lib/solana.ts` by
+decoding base58 and checking it is exactly 32 bytes — not by a regular
+expression, because getting this wrong sends money nowhere recoverable. Or the
+page generates a keypair with `crypto.subtle`'s Ed25519 and exports it as the
+64-byte `seed || pubkey` base58 string Phantom and Solflare import; it is shown
+once, gated behind "I saved this key", and stored nowhere. `@solana/web3.js` is
+deliberately **not** a dependency: megabytes of RPC client and wallet adapters
+for two functions, on a page that holds somebody's spending key.
+
+**The refund address** is the envelope's own unified address, so a failed swap
+lands back in this envelope and the same link opens it again. The recipient is
+asked for nothing, and an override field on the same screen takes a Zcash address
+of their own. 1Click accepts a `u1…` as `refundTo`, which is what makes this
+possible; see DECISIONS D14 and [docs/M5-VERIFICATION.md](docs/M5-VERIFICATION.md).
+
+**Then it stops.** The last thing the exit does is hand the page a transparent
+`t1`. From there it is the ordinary sweep, unchanged, to a transparent
+destination at the ZIP-317 fee of 15,000 zatoshi — the same `sweep_envelope` call
+as a pasted address, and the same review screen with the swap's own numbers added
+under the Zcash ones. The `t1` the rail sent is classified by our own core before
+it is used: it is not trusted because the rail sent it.
+
+**Afterwards**, `src/components/SwapTracker.tsx` polls `GET /status` every 20
+seconds and shows three stages — waiting for the ZEC, swapping, paid out — with
+the Solana txid when the rail gives one. It stops on `SUCCESS`, `REFUNDED` or
+`FAILED`, a failed poll is a line on the screen rather than an error state, and
+`?poll=<ms>` shortens the interval for a test. On `?dry=1` there is nothing to
+watch, so the done screen says "Dry run: deposit address obtained, transaction
+built, nothing sent" and shows the real `t1` instead.
+
+`public/_headers` gained `https://1click.chaindefuser.com` in `connect-src`, and
+nothing else in the CSP changed. The rail's preflight allows `content-type` and
+no other request header, which is why the client sends no other.
 
 ## End-to-end proof
 
@@ -291,6 +355,29 @@ secret, and that the word "claim" is nowhere on any screen. Screenshots:
 stage, so the timing under test is real even though the chain is not. Like the
 M2 MOCK group it skips itself when a wasm build is present: a real sweep is
 somebody's money and does not belong in an unattended test run.
+
+`e2e/m5-solana.spec.ts` is the M5 proof, on the MOCK core, with 1Click answered by
+`page.route` from bodies recorded verbatim off the live API: the checkbox gate
+(including with the `disabled` attribute deleted from the DOM), both destination
+modes, the quote's numbers, the minimum read out of the rail's own 400, the real
+quote's `t1` and its three-day deadline, the sweep to it at the transparent fee,
+the status sequence PENDING_DEPOSIT → PROCESSING → SUCCESS with the Solana txid,
+and the `?dry=1` end screen. It also asserts the rail was quoted on the envelope
+**less** the Zcash fees and that `refundTo` is the envelope's own `u1…`.
+Screenshots: [docs/m5-trust.png](docs/m5-trust.png),
+[docs/m5-quote.png](docs/m5-quote.png).
+
+`e2e/m5-real.spec.ts` is the same flow against the **live** 1Click API and the real
+mainnet envelope, with the quotes made from the page's own origin — which is also
+the CORS proof. It needs `ZENV_M1_FRAGMENT` and a wasm build and skips without
+either. It never broadcasts: `?dry=1` throughout, and the dry-run screen is
+asserted on the way out. Recorded run in
+[docs/M5-VERIFICATION.md](docs/M5-VERIFICATION.md).
+
+```sh
+cd web && ZENV_M1_FRAGMENT='<secret>.<birthday>' ZENVELOPE_E2E_PORT=4197 \
+  npx playwright test e2e/m5-real.spec.ts
+```
 
 `e2e/m2-core.spec.ts` drives the built wasm directly on a bare isolated page and
 checks the note against the zcash-devtool oracle. Same environment variable, same
@@ -343,6 +430,12 @@ on mainnet on 2026-09-21 against the funded M1 envelope
 ([docs/M2-VERIFICATION.md](docs/M2-VERIFICATION.md)). The scan is `open_envelope`
 in the core; with no wasm build present the MOCK simulates it and says so on
 screen.
+
+**M5 is built**: the Solana exit runs end to end against the live 1Click API —
+trust boundary, asset, a pasted address or a keypair made here, a real quote, a
+real transparent deposit address, and the ordinary sweep to it — with the
+broadcast still pending, because every run takes the `?dry=1` path
+([docs/M5-VERIFICATION.md](docs/M5-VERIFICATION.md)).
 
 **M3's web UI is in place**: the whole send-on flow — destination matrix, new
 in-browser wallet, review, the four proving stages and the done screen — runs

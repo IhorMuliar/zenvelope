@@ -77,8 +77,25 @@ M4 (in progress 2026-09-21) Drainer-safe copy, trust-boundary screens, in-browse
    banned outright; the trust boundary is its own screen behind a required tick;
    and group envelopes with a two-column CSV (envelope_zec, send_zec) ship early
    as an M6 preview. Transcript in web/docs/M4-VERIFICATION.md.
-M5 Solana receive option via 1Click, with the warning screen and a fresh Solana
-   keypair path. Demo video 2 recorded here.
+M5 (built 2026-09-21, dry run verified, live swap pending funds) Solana receive
+   option via 1Click, with the warning screen and a fresh Solana keypair path.
+   Built: the third card on "Where should it go?" leads only to the trust-boundary
+   screen, whose tick is the only way past it; then USDC or SOL, then a Solana
+   address pasted or an Ed25519 keypair generated here in crypto.subtle and
+   exported in the 64-byte form Phantom and Solflare import; then a live dry quote
+   that puts the whole cost of leaving on screen — what arrives, both dollar
+   figures, the spread, the ~8 minutes and the rail's own 25 bps house fee that the
+   rail does not display. "Get deposit address" takes a real quote and the ordinary
+   sweep pays the transparent t1 it returns, spending every note the envelope holds
+   in one transaction at the transparent ZIP-317 fee for that spend count; the rail
+   is quoted on the summed envelope less those fees. refundTo is the envelope's own
+   unified address, so a failed swap lands back in the envelope and the same link
+   opens it again (DECISIONS D14). Live swap pending funds: the M1 envelope holds
+   0.0013 ZEC against a rail floor of 0.00132 ZEC, so the product quotes the floor
+   back and leaves the shielded way out on the screen; an envelope of 0.01 ZEC or
+   more is what the end-to-end swap needs. Nothing has been broadcast: every run
+   took the ?dry=1 path with broadcast: false. Transcript in
+   web/docs/M5-VERIFICATION.md. Demo video 2 recorded here.
 M6 Group envelopes and CSV export.
 M7 Submission pack: 3-minute pitch video, 3-minute demo video, GitHub, Colosseum
    form, Earn listings, Ukraine demo day slot.
@@ -101,8 +118,15 @@ M6 first, then M5, then Noir connect. M0 to M4 are the product.
   15 s, 23 s from the tap to the done screen, at a cost of 53,545 bytes of wasm
   (+2.4%). The pool is capped at 4 because the curve flattens there. A phone is
   still unmeasured. See web/docs/M4-VERIFICATION.md.
-- 1Click quote for ZEC in, USDC-on-Solana out, minimum amount and fee. Still open,
-  needed at M5.
+- 1Click quote for ZEC in, USDC-on-Solana out, minimum amount and fee. **Answered
+  at M5**: https://1click.chaindefuser.com/v0, no API key, CORS `*` with
+  `content-type` as the only allowed request header. The minimum is not published —
+  it comes back as an HTTP 400 "Amount is too low for bridge, try at least N", which
+  is the only place the app reads it from (132,000 zatoshi = 0.00132 ZEC on
+  2026-09-21). A real quote reserves a transparent t1 deposit address for three
+  days, with no memo and no tag. Every quote carries the rail's own 25 bps appFee,
+  and the destination withdrawal fee dominates at small amounts: about 16% spread
+  into USDC at the floor against about 1% into SOL. See web/docs/M5-VERIFICATION.md.
 
 ## Judge-facing proof points
 - "We never hold funds" shown as a diagram in the pitch, first 20 seconds.
