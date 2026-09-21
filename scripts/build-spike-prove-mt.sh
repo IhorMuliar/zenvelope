@@ -34,7 +34,13 @@ fi
 # makes the memory shared, `--import-memory` makes the JS glue pass one in (which is what
 # wasm-bindgen-rayon hands each worker), and a shared memory must declare a maximum.
 # Verify with: the memory section must say `shared=true`, or threads are a no-op.
-export RUSTFLAGS='-C target-feature=+atomics,+bulk-memory,+mutable-globals -C link-arg=--shared-memory -C link-arg=--import-memory -C link-arg=--max-memory=2147483648'
+# The four --export= args are the second half of the same story. wasm-ld creates
+# `__wasm_init_tls` and the `__tls_*` globals with HIDDEN visibility, so they do not
+# appear in the module's exports unless asked for by name, and wasm-bindgen's threading
+# pass then dies with `failed to find __wasm_init_tls`. Older rustc added these four
+# automatically alongside --shared-memory; 1.100-nightly does not (it also warns that
+# `-C target-feature=+atomics` is unstable, rust#162235), so they are ours to pass.
+export RUSTFLAGS='-C target-feature=+atomics,+bulk-memory,+mutable-globals -C link-arg=--shared-memory -C link-arg=--import-memory -C link-arg=--max-memory=2147483648 -C link-arg=--export=__wasm_init_tls -C link-arg=--export=__tls_size -C link-arg=--export=__tls_align -C link-arg=--export=__tls_base'
 export CARGO_TARGET_DIR="$repo_root/target-mt"
 
 rustup run nightly wasm-pack build "$repo_root/crates/spike-prove-mt" \
