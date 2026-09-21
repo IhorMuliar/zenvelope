@@ -149,6 +149,10 @@ Milestones, in dependency order. Full spec in [docs/BUILD_SPEC.md](docs/BUILD_SP
 product one-pager in [docs/PRODUCT.md](docs/PRODUCT.md), decision log in
 [docs/DECISIONS.md](docs/DECISIONS.md).
 
+Measured on an iPhone 16e (Brave, 2 threads): proof in 5 s, whole send-on in 13.5 s —
+2026-09-21, dry run against the live site, nothing broadcast
+([web/docs/M4-VERIFICATION.md](web/docs/M4-VERIFICATION.md)).
+
 - [x] **M0** Repo, README one-pager, license, arena project draft, first builder update posted.
 - [x] **M1 (done)** Create a link on mainnet: secret, derived address, ZIP-321 URI, QR, fee in the amount. M1 done 2026-09-20: first envelope funded from Zodl on mainnet, Ironwood note confirmed by zcash-devtool (tx 281e9f7b…341d43, block 3490472). Verification transcript in [web/docs/M1-VERIFICATION.md](web/docs/M1-VERIFICATION.md).
 - [x] **M2 (done)** Open a link on mainnet: scan, decrypt, show the amount. M2 done 2026-09-21: envelope opened in the browser on mainnet, Ironwood note found and amount revealed — 64 blocks scanned from the link's birthday to the chain tip in 2.0 s, the note matching the zcash-devtool oracle field for field (tx 281e9f7b…341d43, block 3490472, 0.0013 ZEC). The scan also proved that a ZIP-321 `message=` never reaches the chain, so the sender's text now travels in the `memo=` parameter and is encrypted on-chain. Verification transcript in [web/docs/M2-VERIFICATION.md](web/docs/M2-VERIFICATION.md).

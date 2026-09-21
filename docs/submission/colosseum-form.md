@@ -17,7 +17,7 @@ amount in the link.
 > the spend on Ironwood. The amount is not in the link. Non-custodial by construction:
 > static site, no keys, no float. MIT, mainnet from day one.
 
-**Longer description (1,388):**
+**Longer description (1,438):**
 
 > Paying someone in ZEC means asking them for an address, which means they install a
 > wallet and write down a seed phrase before they have any money. Zenvelope removes that
@@ -29,7 +29,8 @@ amount in the link.
 > link. It derives a unified address with an Ironwood receiver and that address's viewing
 > and spending keys. The recipient's browser streams compact blocks over gRPC-web,
 > trial-decrypts the note, reveals the amount, then builds and proves a V6 transaction in
-> WASM — a ~750 KB prover on four threads, about 24 seconds on a desktop.
+> WASM — a ~750 KB prover: 13.5 seconds tap to done on an iPhone 16e at two threads,
+> about 24 seconds on a desktop at four.
 >
 > Because the amount is not in the link, a forwarded link discloses nothing until it is
 > opened. Because no backend touches keys, there is nothing for us to freeze, refund or
@@ -80,14 +81,19 @@ retroactive grant.
 **Links:** Repo `https://github.com/IhorMuliar/zenvelope` · Demo `https://zenvelope.netlify.app` · Pitch
 `<PITCH_URL>` · Demo video `<DEMO_VIDEO_URL>` · First funding
 `281e9f7bffa5bffc8ee1287cc6e245cc59eee302727ea9d93c7f8e5a99341d43` · First sweep
-`ba0f91cfe7ca33dd269b692bf80027df2681a321215e90ab28c2a56260fa2aad`
+`ba0f91cfe7ca33dd269b692bf80027df2681a321215e90ab28c2a56260fa2aad` · Week-1 judge video
+`https://youtu.be/GxsZ4AixFj0`
 
 **Known limitations:**
 
-1. Safari, and any browser without cross-origin isolation, falls back to the
-   single-threaded prover: same transaction, roughly 47 s instead of 23 s.
-2. Proving time on a phone is unmeasured; every figure we publish is desktop, 8-core and
-   unthrottled.
+1. A browser served without cross-origin isolation, or one whose wasm-threads probe
+   fails, falls back to the single-threaded prover: same transaction, roughly 47 s
+   instead of 23 s on a desktop. WebKit is not the dividing line — the 2026-09-21 iPhone
+   run was Brave on iOS, isolated, and proved on two threads — the headers are.
+2. Opening an envelope is bound by the public lightwalletd gateway, and that varies
+   widely: the scan and the witness walk took about 8 s on the iPhone run of 2026-09-21
+   and about 28 s on a desktop through the same gateway an hour earlier. Proving is the
+   predictable part; the network is not. Pointing the app at your own gateway removes it.
 3. The Solana exit is poor value at small amounts — about 16% spread into USDC at the
    0.00132 ZEC floor against about 1% into SOL. The screen says so, and the shielded way
    out stays one tap away.

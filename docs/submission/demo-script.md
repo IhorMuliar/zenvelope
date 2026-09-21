@@ -30,7 +30,7 @@ envelope.
 | 3 | 0:32 | **The recipient installs nothing.** The browser scans Zcash itself. |
 | 4 | 0:45 | **0.0013 ZEC revealed.** Never in the link. Ironwood note, block 3,490,472. |
 | 5 | 0:58 | **Where it goes is theirs.** An address pasted, or a wallet made here. 0.0009 received. |
-| 6 | 1:10 | **Proved in this browser — 4 threads.** ~24 s desktop: witness 9 s, proving 15 s. |
+| 6 | 1:10 | **Proved in this browser.** 13.5 s on an iPhone 16e at 2 threads, 5.1 s of it proving; this laptop run, 4 threads: witness 9 s, proving 15 s. |
 | 7 | 1:40 | **Sent, and confirmed on mainnet:** `ba0f91cfe7ca33dd269b692bf80027df2681a321215e90ab28c2a56260fa2aad`. |
 | 8 | 2:05 | **Leaving the shielded pool needs a tick.** Not the swap provider, never holding funds. |
 | 9 | 2:18 | **Dry quote only.** Spread, timing, the rail's own 0.25% fee. Nothing swapped. |

@@ -40,13 +40,20 @@ made in the tab, a table of single-output URIs, and a CSV whose amount columns a
 `envelope_zec`, what the recipient receives, and `send_zec`, what the sender pays.
 Funding them all from one wallet is what M6 owes.
 
-**9. How slow is it on a phone?** We do not know and will not guess. Every number we
-publish is desktop, 8-core, unthrottled: key 15–16 s in the background, 24.4 s from "Send
-it on" to done at four threads. Delegated proving via ZIP-374 is the fallback.
+**9. How slow is it on a phone?** Measured, on 2026-09-21, on the live site: an iPhone
+16e in Brave, cross-origin isolated, proving on two threads — 7.6 s to open and scan,
+8.4 s of witnessing and 5.1 s of proving, **13.5 s** from "Send it on" to done, on the
+same 9,166-byte transaction the desktop produces. That was a dry run on a real mainnet
+envelope; nothing was broadcast. One device, one run — an older phone will be slower,
+and delegated proving via ZIP-374 stays the fallback. Transcript:
+`web/docs/M4-VERIFICATION.md`.
 
-**10. Safari?** It falls back to the single-threaded prover when cross-origin isolation
-or wasm threads are missing: same transaction, roughly 47 s instead of 23 s. Any probe
-failure falls back rather than blocking an envelope; the footer says which won.
+**10. Safari?** WebKit itself is fine with threads: the iPhone 16e run above was Brave
+on iOS, which is WebKit, and it was cross-origin isolated and proved on two threads. What
+matters is the headers and the probe, not the engine — without cross-origin isolation or
+wasm threads the core falls back to the single-threaded package, same transaction, and on
+the desktop that is roughly 47 s instead of 23 s. Any probe failure falls back rather
+than blocking an envelope; the footer says which package won and on how many threads.
 
 **11. What does the lightwalletd gateway see?** An IP, the block ranges a tab asks for,
 and the raw transaction at broadcast — not the secret, the viewing key or the amount,

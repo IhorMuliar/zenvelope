@@ -5,6 +5,32 @@ the evidence it rests on. If something here contradicts another doc, this file w
 
 ## 2026-09-21
 
+### D17 Phone performance measured
+
+**Decision.** Publish the phone figure as measured rather than estimated, and stop
+saying phone proving time is unknown. On an **iPhone 16e**, Brave on iOS (WebKit),
+cross-origin isolated and proving on **2 threads** (`hardwareConcurrency` 2), against
+the live site: open and scan **7.6 s**, proving key warm **4.9 s**, `witness` **8.4 s**,
+`proving` **5.1 s**, **13.5 s** from "Send it on" to done, on the same 9,166-byte
+transaction the desktop builds.
+
+**Why it matters.** The open flow was budgeted on desktop numbers, and the phone is
+where a recipient with nothing actually opens a link. At 5.1 s of proving, in-browser
+proving needs no escape hatch on a current phone; delegated proving through ZIP-374 (D8)
+stays optional, for older devices, rather than planned work.
+
+**The desktop reference the same hour**, 8-vCPU DigitalOcean droplet, Chrome, 4 threads,
+through the same live site: open and scan 25.8 s, keys 15.8 s, `witness` 28.4 s,
+`proving` 13.8 s, total 42.3 s. Those rows are far above the same machine's earlier
+22.9 s, and the gap is mostly latency to the public gateway at that time, not compute.
+Read it as the network varying, and take the phone's figures as the phone's.
+
+**Evidence.** Measured 2026-09-21 on the owner's device against
+<https://zenvelope.netlify.app>, headers verified, on a real mainnet envelope. The sweep
+took the dry-run path: **nothing was broadcast**. One device, one run each, not a
+benchmark. Transcript: [../web/docs/M4-VERIFICATION.md](../web/docs/M4-VERIFICATION.md),
+"Phone measurement".
+
 ### D16 Host: Netlify, by direct upload
 
 **Decision.** Ship on **Netlify**, deployed by `netlify deploy --prod --dir=web/dist`

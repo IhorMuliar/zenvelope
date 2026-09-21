@@ -143,6 +143,38 @@ puts under the table. Same 9,166-byte transaction, and the footer still reads
 
 Both runs were dry runs. Nothing was broadcast.
 
+### Phone measurement
+
+Measured 2026-09-21 on the owner's own device, against the deployed site rather than a
+preview server, on a real mainnet envelope. The sweep took the dry-run path: **nothing
+was broadcast**, and the envelope still holds its money.
+
+- **Device:** iPhone 16e, Brave on iOS (WebKit), `navigator.hardwareConcurrency` **2**
+- **Site:** <https://zenvelope.netlify.app> (Netlify). The COOP/COEP headers were
+  verified on the live responses, the page was **cross-origin isolated**, and the worker
+  took the threaded package: proving on **2 threads**, as the footer reported.
+- **Transaction:** the same **9,166-byte** transaction the desktop rows above produce.
+
+| | iPhone 16e, Brave, 2 threads | desktop, same hour, 4 threads |
+| --- | --- | --- |
+| open / scan | **7.6 s** | 25.8 s |
+| keys (warm) | **4.9 s** | 15.8 s |
+| `witness` | **8.4 s** | 28.4 s |
+| `proving` | **5.1 s** | 13.8 s |
+| "Send it on" tapped → Done | **13.5 s** | 42.3 s |
+| raw transaction | 9,166 bytes | 9,166 bytes |
+
+The desktop column is the reference run taken the same hour on the 8-vCPU DigitalOcean
+droplet in Chrome at four threads, through the same live site.
+
+**Read the desktop column as network, not as compute.** Its rows are much larger than
+the same machine's rows in the table above (22.9 s tap to done, `proving` 14.7 s), and
+the difference is mostly latency to the public gateway at that time: `open / scan` and
+`witness` are round trips and a block-range stream, and they are where the gap sits.
+Neither column is a benchmark — one run each, an hour apart, on different networks — so
+what is worth taking from them is the phone's own figures: a recipient on an iPhone 16e
+waited **13.5 s** from "Send it on" to done, **5.1 s** of it proving.
+
 ### Peak memory
 
 Not instrumented here: `crates/core` exports no memory probe, and adding one is a rebuild
