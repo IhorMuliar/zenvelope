@@ -5,8 +5,10 @@
  * review the numbers, watch the four stages, and land on Sent or on an error that
  * says the money never moved.
  *
- * The secret arrives as a prop, is handed to `sweep_envelope`, and goes nowhere
- * else: not into storage, not into a URL, not into a log. Neither does the
+ * The secret arrives as a **getter**, not as a string: it is read out of the open
+ * page's ref at the moment of the sweep, handed to `sweep_envelope`, and goes
+ * nowhere else — not into storage, not into a URL, not into a log, and not into
+ * a prop the React DevTools inspector would print (I12). Neither does the
  * mnemonic of a wallet generated here — it exists on screen and in one piece of
  * React state, and it is gone when the tab is.
  */
@@ -29,7 +31,7 @@ import {
 } from "../lib/destination";
 import { DRY_RUN_COPY, isDryRun, rawTxBytes } from "../lib/dryRun";
 import { formatCount, formatZecAmount, truncateMiddle } from "../lib/format";
-import { solanaExit as swapCopy } from "../copy/en";
+import { solanaExit as swapCopy, transparentBoundary as transparentCopy } from "../copy/en";
 import { effectiveCost, formatAssetAmount, formatUsd } from "../lib/oneclick";
 import {
   FUNDS_SAFE_COPY,
@@ -38,11 +40,18 @@ import {
   initialSendState,
   needsUnloadWarning,
   sendReducer,
+  showSwapUi,
   stageChecklist,
 } from "../lib/sweepFlow";
+import { checkSwapPlan } from "../lib/solanaFlow";
 import { CopyField } from "./CopyField";
 import { SolanaExit, type SwapPlan } from "./SolanaExit";
 import { SwapTracker } from "./SwapTracker";
+import { TrustBoundary } from "./TrustBoundary";
+
+/** Said when the open page has somehow lost the secret before the sweep ran. */
+export const NO_SECRET_COPY =
+  "This page no longer has the link. Nothing was sent. Open the original link again to send it on.";
 
 /** Desktop measurement: the proving key is about 29 s on one thread, about 15 s on four. */
 const WARM_ESTIMATE = "~30 s";
@@ -56,8 +65,11 @@ type Choice = "address" | "wallet" | "solana" | null;
 
 interface Props {
   core: LoadedCore;
-  /** Lives here only for the length of the sweep call. */
-  secret: string;
+  /**
+   * Reads the secret out of the open page's ref, and is called in one place:
+   * inside the sweep, at the moment the core is handed it (I12).
+   */
+  getSecret: () => string | null;
   network: Network;
   /**
    * Every note the scan found. A sweep spends all of them, in one transaction, so
@@ -76,7 +88,7 @@ interface Props {
 
 export function SendOn({
   core,
-  secret,
+  getSecret,
   network,
   notes,
   tipHeight,
@@ -95,6 +107,21 @@ export function SendOn({
    * this only decides what the review, done and tracking screens say about it.
    */
   const [swap, setSwap] = useState<SwapPlan | null>(null);
+  /**
+   * Why a reserved swap was thrown away: an untrustworthy deposit address, an
+   * echoed request that did not match what we asked for, or a classification
+   * the core refused. It used to be nothing at all — the rail's address was
+   * silently dropped and the recipient was returned to a screen with no
+   * explanation (L9/M6).
+   */
+  const [swapError, setSwapError] = useState<string | null>(null);
+  /**
+   * The transparent trust boundary (M7). A pasted `t1` leaves the shielded pool
+   * as permanently as the Solana exit does, so it goes through the same
+   * component and the same tick before the review screen.
+   */
+  const [transparentAck, setTransparentAck] = useState(false);
+  const [atTransparentGate, setAtTransparentGate] = useState(false);
   const [warm, setWarm] = useState<"warming" | "ready" | "failed">("warming");
   const [elapsed, setElapsed] = useState(0);
   const runId = useRef(0);
@@ -181,14 +208,34 @@ export function SendOn({
    */
   const onSwapPlan = useCallback(
     async (plan: SwapPlan) => {
-      setSwap(plan);
       const classified = await classifyDestinationAsync(
         plan.reservation.address,
         core.classify_address,
         network,
       );
+      // Two checks, and the sweep is only reachable past both: the address is a
+      // transparent one of this network by our own core's reckoning, and the
+      // rail echoed back the payout address, the asset and the refund address we
+      // actually asked for (M6). Either failing throws the reservation away —
+      // nothing is swept to an address we cannot vouch for — and says why (L9).
+      const problem = checkSwapPlan({
+        depositKind: classified.kind,
+        quoteRequest: plan.reservation.quoteRequest,
+        asset: plan.asset,
+        recipient: plan.recipient,
+        refundTo: plan.refundTo,
+      });
+      if (problem !== null) {
+        setSwap(null);
+        setDest(emptyDestination);
+        setChoice(null);
+        setSwapError(problem);
+        return;
+      }
+      setSwapError(null);
+      setSwap(plan);
       setDest(classified);
-      if (classified.canContinue) dispatch({ type: "review" });
+      dispatch({ type: "review" });
     },
     [core, network],
   );
@@ -199,10 +246,25 @@ export function SendOn({
     amounts.ok &&
     (choice !== "wallet" || wroteDown);
 
+  /**
+   * A pasted `t1` has to pass the trust boundary before the review screen (M7).
+   * The rail's own deposit address does not come through here — it arrives from
+   * the Solana exit, which has its own boundary — and a generated wallet is
+   * always unified.
+   */
+  const needsTransparentGate =
+    choice === "address" && active?.kind === "transparent" && !transparentAck;
+
   /* ------------------------------------------------------------- the sweep */
 
   const send = useCallback(async () => {
     const id = ++runId.current;
+    const secret = getSecret();
+    if (secret === null || secret === "") {
+      dispatch({ type: "send", at: Date.now() });
+      dispatch({ type: "failed", message: NO_SECRET_COPY });
+      return;
+    }
     dispatch({ type: "send", at: Date.now() });
     try {
       const result = await core.sweep_envelope(
@@ -231,7 +293,7 @@ export function SendOn({
         dispatch({ type: "failed", message: message ? message : SWEEP_FAILED_COPY });
       }
     }
-  }, [core, secret, network, notes, destination, dryRun]);
+  }, [core, getSecret, network, notes, destination, dryRun]);
 
   /* --------------------------------------------- keep the screen and the tab */
 
@@ -276,6 +338,25 @@ export function SendOn({
     const timer = window.setInterval(() => setElapsed(Date.now() - started), 250);
     return () => window.clearInterval(timer);
   }, [state.phase, state.startedAt]);
+
+  /**
+   * "Choose somewhere else", from the review screen and from a failed sweep.
+   *
+   * It resets the destination as well as the phase. A swap plan that survived
+   * this used to keep the review screen promising USDC on Solana, and the Sent
+   * screen polling a deposit address nobody had paid, after the recipient had
+   * backed out and chosen a Zcash address instead (M3).
+   */
+  const chooseAgain = useCallback(() => {
+    dispatch({ type: "choose" });
+    setSwap(null);
+    setSwapError(null);
+    setChoice(null);
+    setDest(emptyDestination);
+    setWroteDown(false);
+    setTransparentAck(false);
+    setAtTransparentGate(false);
+  }, []);
 
   /* ------------------------------------------------------------- the screens */
 
@@ -327,9 +408,9 @@ export function SendOn({
             <>
               {/* A Solana dry run got further: a real deposit address exists. */}
               <p className="warn" data-testid="dry-run-note">
-                {swap ? swapCopy.dryRunLine : DRY_RUN_COPY}
+                {showSwapUi(choice, swap) ? swapCopy.dryRunLine : DRY_RUN_COPY}
               </p>
-              {swap ? (
+              {showSwapUi(choice, swap) && swap ? (
                 <>
                   <CopyField
                     label={swapCopy.depositLabel}
@@ -371,8 +452,12 @@ export function SendOn({
             <p data-testid="envelope-empty">The envelope is now empty.</p>
           )}
         </div>
-        {/* Only a real broadcast has anything for the rail to watch for. */}
-        {swap && !dry ? <SwapTracker plan={swap} /> : null}
+        {/*
+          Only a real broadcast has anything for the rail to watch for — and only
+          a destination that is still the Solana exit's. Neither the tracker nor
+          the dry-run deposit lines may survive a change of destination (M3).
+        */}
+        {showSwapUi(choice, swap) && !dry ? <SwapTracker plan={swap!} /> : null}
       </>
     );
   }
@@ -390,7 +475,7 @@ export function SendOn({
         <button
           type="button"
           className="ghost"
-          onClick={() => dispatch({ type: "choose" })}
+          onClick={chooseAgain}
           data-testid="send-restart"
         >
           Choose somewhere else
@@ -430,7 +515,7 @@ export function SendOn({
             {truncateMiddle(destination, 12)}
           </span>
         </p>
-        {swap ? <SwapReview plan={swap} /> : null}
+        {showSwapUi(choice, swap) && swap ? <SwapReview plan={swap} /> : null}
         {active.status === "warn" ? (
           <p className="warn" data-testid="review-warning">
             {active.message}
@@ -445,7 +530,7 @@ export function SendOn({
         <button
           type="button"
           className="ghost"
-          onClick={() => dispatch({ type: "choose" })}
+          onClick={chooseAgain}
           data-testid="review-back"
         >
           Choose somewhere else
@@ -463,8 +548,32 @@ export function SendOn({
       <SolanaExit
         amountZat={swapInputZat}
         envelopeAddress={envelopeAddress}
+        classify={core.classify_address}
+        network={network}
         onPlan={(plan) => void onSwapPlan(plan)}
-        onBack={() => setChoice(null)}
+        onBack={() => {
+          setChoice(null);
+          // Backing out of the exit throws the plan away with it (M3).
+          setSwap(null);
+        }}
+      />
+    );
+  }
+
+  // The same screen, the same tick, for a pasted transparent address (M7).
+  if (atTransparentGate) {
+    return (
+      <TrustBoundary
+        content={transparentCopy}
+        testId="transparent-boundary"
+        continueLabel={transparentCopy.continue}
+        acknowledged={transparentAck}
+        onAcknowledgedChange={setTransparentAck}
+        onContinue={() => {
+          setAtTransparentGate(false);
+          dispatch({ type: "review" });
+        }}
+        onBack={() => setAtTransparentGate(false)}
       />
     );
   }
@@ -473,12 +582,17 @@ export function SendOn({
     setChoice("address");
     setWallet(null);
     setWroteDown(false);
+    // A destination that is not the Solana exit's has no swap attached to it.
+    setSwap(null);
+    setSwapError(null);
   };
 
   const onPickWallet = async () => {
     setChoice("wallet");
     setDest(emptyDestination);
     setWroteDown(false);
+    setSwap(null);
+    setSwapError(null);
     if (wallet) return;
     try {
       // The mnemonic is generated in the core worker, lands in React state and on the
@@ -493,6 +607,26 @@ export function SendOn({
   return (
     <div className="card stack">
       <h2>Where should it go?</h2>
+      {/* A swap reservation we refused to sweep to, said out loud, with a way to
+          try the exit again (L9/M6). */}
+      {swapError ? (
+        <div className="stack" data-testid="swap-plan-error">
+          <p className="error" data-testid="swap-plan-error-message">
+            {swapError}
+          </p>
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => {
+              setSwapError(null);
+              setChoice("solana");
+            }}
+            data-testid="swap-plan-retry"
+          >
+            {swapCopy.depositRetry}
+          </button>
+        </div>
+      ) : null}
       <p className="hint" data-testid="warm-status">
         {warm === "warming"
           ? `Preparing keys… ${WARM_ESTIMATE}`
@@ -533,6 +667,9 @@ export function SendOn({
                   onChange={(e) => {
                     const input = e.target.value;
                     const id = ++destId.current;
+                    // The transparent acknowledgement belongs to the address that
+                    // was on screen when it was ticked, so typing takes it back.
+                    setTransparentAck(false);
                     // The typed text has to show at once; the verdict lands when the
                     // worker answers, and only if nothing newer has been typed since.
                     setDest({ ...emptyDestination, input });
@@ -555,6 +692,13 @@ export function SendOn({
                   data-testid="dest-feedback"
                 >
                   {dest.message}
+                </p>
+              ) : null}
+              {/* The core's own words, when it had any: the reason a wrong-network
+                  address is refused is the reason, not a guess at the prefix (L10). */}
+              {dest.reason ? (
+                <p className="fine" data-testid="dest-reason">
+                  {dest.reason}
                 </p>
               ) : null}
             </div>
@@ -634,6 +778,8 @@ export function SendOn({
               setWallet(null);
               setWroteDown(false);
               setDest(emptyDestination);
+              setSwap(null);
+              setSwapError(null);
             }}
             aria-pressed={choice === "solana"}
             data-testid="dest-solana"
@@ -655,7 +801,13 @@ export function SendOn({
         type="button"
         className="primary"
         disabled={!ready}
-        onClick={() => dispatch({ type: "review" })}
+        onClick={() => {
+          // A pasted transparent address goes through the trust boundary first,
+          // exactly as the Solana exit does (M7). A destination that came back
+          // from the exit has already been through it.
+          if (needsTransparentGate) setAtTransparentGate(true);
+          else dispatch({ type: "review" });
+        }}
         data-testid="to-review"
       >
         Continue

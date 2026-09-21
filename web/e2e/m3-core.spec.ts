@@ -26,6 +26,13 @@
  *
  * The key-build and proving wall times are printed, because they are the numbers the
  * open flow is budgeted against.
+ *
+ * **Fixture note (2026-09-21).** The oracle values below describe the **M1** envelope,
+ * which the M3 sweep emptied. They are still the right values for that note — it is on
+ * the chain forever — but this file only means anything when `ZENV_M1_FRAGMENT` is the
+ * M1 fragment. The product-level real runs use the unspent 0.0003 ZEC fee envelope
+ * instead and read `ZENV_EXPECT_ZEC`; see web/README.md, "Which envelope the real runs
+ * use".
  */
 
 import { expect, test } from "@playwright/test";

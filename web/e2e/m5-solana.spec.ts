@@ -11,6 +11,18 @@
  * the rail, through `page.route` — so the run is repeatable and costs nobody
  * anything.
  *
+ * Two deliberate departures from the recording, both of them consequences of the
+ * 2026-09-21 security fixes:
+ *
+ *   - the recorded USD pair costs **18.03%** to leave, because a flat Solana
+ *     withdrawal fee spread over a $1.74 swap is enormous. That is above
+ *     `MAX_SPREAD_BPS`, so the product now refuses it — which is a test of its
+ *     own below. The flow tests use the same body with a healthier
+ *     `amountOutUsd`, so they can reach the deposit address at all.
+ *   - `quoteRequest` is **echoed from the request** rather than hard-coded, as
+ *     the live API does it, because the product now compares the echo with what
+ *     it asked for before it sweeps anything (M6).
+ *
  * What it proves:
  *   - the Solana card is live, and leads to the trust boundary rather than to a
  *     swap: the required tick is the only way past it
@@ -23,6 +35,13 @@
  *   - the minimum, read out of the rail's own 400, blocking the deposit address
  *   - the real quote's `t1` deposit address and its three-day deadline, then the
  *     ordinary sweep to that `t1` at the transparent fee of 15,000 zatoshi
+ *   - the refund override is classified by the core before a quote may be asked
+ *     for, and a bad one blocks it with the reason (M4)
+ *   - a quote above the spread cap cannot be acted on (M5)
+ *   - a deposit address that is not a transparent `t1`, and a rail that echoes
+ *     back something other than what we asked for, are both refused before the
+ *     sweep, with a message and a way to start again (M6/L9)
+ *   - backing out of the exit takes its swap screens with it (M3)
  *   - the status poll: PENDING_DEPOSIT, PROCESSING, SUCCESS, with the Solana txid
  *   - `?dry=1` stops after the real quote and the built transaction, and says so
  *   - the word "claim" is on no screen of any of it
@@ -53,6 +72,8 @@ const SOLANA_ADDRESS = "9XgwdBnkmJzRyQhM3bAkYqekuG9u2w9eJfjCe2T3HyrS";
 /** Right charset, wrong length: 33 bytes, so not a Solana address. */
 const TOO_LONG = "2VfUX6Xj6GfMfF5bAKrkRRhCcmc6xYfkKWLdnGnFn5wVZ";
 const DEPOSIT_T1 = "t1Yqx4HkL1F9CQRfgzG4h9PD1SyZsY96vmd";
+/** A unified address the MOCK core classifies as one: 60 characters of `u1mock…`. */
+const MOCK_UA = `u1mock${"q".repeat(54)}`;
 const SOLANA_TXID = "5j7sQqvxQ3pYhTYVVYd1gWbEtZ6dQeJ8p1bXK2cPqRfN9sTuVwXyZaBcDeFgHiJkLmNoPq";
 
 /** A real wasm build puts the page on the real core, and this group off. */
@@ -61,7 +82,27 @@ const describeOnMock = REAL_CORE ? test.describe.skip : test.describe;
 
 /* ------------------------------------------------------------ the rail, mocked */
 
-function dryQuote(amount: string) {
+/** The recorded USD figures: 1 - 1.424419544/1.737834 = 18.03%, over the cap. */
+const RECORDED_OUT_USD = "1.424419544000";
+/** The same swap at a rate the product will act on: 3.33%. */
+const HEALTHY_OUT_USD = "1.680000000000";
+
+interface QuoteOptions {
+  /** Keep the recorded 18.03% spread instead of the healthy one. */
+  wideSpread?: boolean;
+  /** Answer with a deposit address other than the transparent `t1` (M6). */
+  depositAddress?: string;
+  /** Echo back a request we did not make (M6). */
+  echo?: Record<string, unknown>;
+}
+
+/**
+ * A quote, priced off the request, with `quoteRequest` echoed from it exactly as
+ * the live API does. The echo is load-bearing now: the product compares it with
+ * what it asked for before it sweeps anything to the deposit address.
+ */
+function quoteFor(request: Record<string, unknown>, options: QuoteOptions = {}) {
+  const amount = String(request.amount ?? "");
   return {
     quote: {
       amountIn: amount,
@@ -70,37 +111,37 @@ function dryQuote(amount: string) {
       minAmountIn: amount,
       amountOut: "1424851",
       amountOutFormatted: "1.424851",
-      amountOutUsd: "1.424419544000",
+      amountOutUsd: options.wideSpread ? RECORDED_OUT_USD : HEALTHY_OUT_USD,
       minAmountOut: "1410602",
       timeEstimate: 454,
       refundFee: "32000",
       withdrawFee: "298357",
     },
     quoteRequest: {
-      dry: true,
+      dry: request.dry,
       amount,
-      originAsset: "nep141:zec.omft.near",
-      destinationAsset: "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
-      refundTo: "u1mock",
-      recipient: SOLANA_ADDRESS,
+      originAsset: request.originAsset,
+      destinationAsset: request.destinationAsset,
+      refundTo: request.refundTo,
+      recipient: request.recipient,
       appFees: [{ recipient: "5880ad…47dd", fee: 25 }],
+      ...(options.echo ?? {}),
     },
     signature: "ed25519:mock",
     timestamp: "2026-09-21T02:33:27.939Z",
   };
 }
 
-function realQuote(amount: string) {
-  const body = dryQuote(amount);
+function realQuote(request: Record<string, unknown>, options: QuoteOptions = {}) {
+  const body = quoteFor(request, options);
   return {
     ...body,
     quote: {
       ...body.quote,
       deadline: "2026-09-24T09:00:00.000Z",
       timeWhenInactive: "2026-09-24T09:00:00.000Z",
-      depositAddress: DEPOSIT_T1,
+      depositAddress: options.depositAddress ?? DEPOSIT_T1,
     },
-    quoteRequest: { ...body.quoteRequest, dry: false },
   };
 }
 
@@ -129,7 +170,7 @@ function statusBody(status: string, withTxid = false) {
   };
 }
 
-interface RailOptions {
+interface RailOptions extends QuoteOptions {
   /** true makes every dry quote answer with the minimum error. */
   belowMinimum?: boolean;
   /** Served in order; the last one repeats. */
@@ -158,11 +199,12 @@ async function mockRail(page: Page, options: RailOptions = {}) {
       });
       return;
     }
-    const amount = String(body.amount ?? "");
     await route.fulfill({
       status: 201,
       contentType: "application/json",
-      body: JSON.stringify(body.dry === true ? dryQuote(amount) : realQuote(amount)),
+      body: JSON.stringify(
+        body.dry === true ? quoteFor(body, options) : realQuote(body, options),
+      ),
     });
   });
 
@@ -312,10 +354,13 @@ describeOnMock("M5: the Solana exit", () => {
     await expect(page.getByTestId("swap-amount-in")).toContainText("0.00115 ZEC");
     await expect(page.getByTestId("swap-amount-in")).toContainText("$1.74");
     await expect(page.getByTestId("swap-amount-out")).toHaveText("1.424851 USDC");
-    await expect(page.getByTestId("swap-amount-out-usd")).toHaveText("$1.42");
-    // 1 - 1.424419544 / 1.737834 = 0.18031…
-    await expect(page.getByTestId("swap-spread")).toContainText("18.03%");
-    await expect(page.getByTestId("swap-spread")).toContainText("$0.31");
+    await expect(page.getByTestId("swap-amount-out-usd")).toHaveText("$1.68");
+    // 1 - 1.68 / 1.737834 = 0.03328…
+    await expect(page.getByTestId("swap-spread")).toContainText("3.33%");
+    await expect(page.getByTestId("swap-spread")).toContainText("$0.06");
+    // Under the cap, so there is nothing refusing it and a way on.
+    await expect(page.getByTestId("swap-quote-refused")).toHaveCount(0);
+    await expect(page.getByTestId("swap-get-deposit")).toBeEnabled();
     await expect(page.getByTestId("swap-time")).toHaveText("about 8 minutes");
     await expect(page.getByTestId("swap-fee-line")).toContainText("0.25% service fee");
     await expect(page.getByTestId("swap-not-provider").first()).toContainText(
@@ -338,7 +383,7 @@ describeOnMock("M5: the Solana exit", () => {
     await expect(page.getByTestId("review-network-fee")).toHaveText("0.00015 ZEC");
     await expect(page.getByTestId("review-receive")).toHaveText("0.00115 ZEC");
     await expect(page.getByTestId("review-swap-out")).toHaveText("1.424851 USDC");
-    await expect(page.getByTestId("review-swap-spread")).toContainText("18.03%");
+    await expect(page.getByTestId("review-swap-spread")).toContainText("3.33%");
     await expect(page.getByTestId("review-warning")).toContainText("visible on-chain");
     await noDrainerCopy(page);
 
@@ -489,5 +534,222 @@ describeOnMock("M5: the Solana exit", () => {
     expect(rail.statusRequests.length).toBe(asked);
 
     await noDrainerCopy(page);
+  });
+  /* ------------------------------------------------- the 2026-09-21 fixes */
+
+  /**
+   * M4. The refund override decides who can recover the money when a swap
+   * fails, and it used to be free text that went straight into `refundTo`. It
+   * goes through the core's classifier now, and the quote waits for the answer.
+   */
+  test("classifies the refund address before it will quote anything", async ({ page }) => {
+    const rail = await mockRail(page);
+    await openEnvelope(page, "?dry=1");
+    await throughTrustBoundary(page);
+    await page.getByTestId("swap-asset-usdc").click();
+    await page.getByTestId("swap-mode-paste").click();
+    await page.getByTestId("swap-address-input").fill(SOLANA_ADDRESS);
+    await expect(page.getByTestId("swap-get-quote")).toBeEnabled();
+
+    // A Sapling address cannot take a refund, and the rail would accept it
+    // happily: our own core is what refuses it.
+    await page.getByTestId("swap-refund").click();
+    await page.getByTestId("swap-refund-input").fill(`zs1${"q".repeat(75)}`);
+    await expect(page.getByTestId("swap-refund-feedback")).toHaveAttribute("data-status", "bad");
+    await expect(page.getByTestId("swap-refund-feedback")).toContainText("A refund could not be sent");
+    await expect(page.getByTestId("swap-get-quote")).toBeDisabled();
+    // Nothing was asked of the rail while the address was bad.
+    expect(rail.quoteRequests).toHaveLength(0);
+
+    // Nonsense is refused the same way.
+    await page.getByTestId("swap-refund-input").fill("not-an-address");
+    await expect(page.getByTestId("swap-refund-feedback")).toHaveAttribute("data-status", "bad");
+    await expect(page.getByTestId("swap-get-quote")).toBeDisabled();
+
+    // A unified address of this network is accepted.
+    await page.getByTestId("swap-refund-input").fill(MOCK_UA);
+    await expect(page.getByTestId("swap-refund-feedback")).toHaveAttribute("data-status", "ok");
+    await expect(page.getByTestId("swap-get-quote")).toBeEnabled();
+
+    // And emptying the box goes back to the envelope's own address (D14).
+    await page.getByTestId("swap-refund-input").fill("");
+    await expect(page.getByTestId("swap-refund-feedback")).toHaveCount(0);
+    await page.getByTestId("swap-get-quote").click();
+    await expect(page.getByTestId("swap-quote")).toBeVisible();
+    expect(String(rail.quoteRequests[0].refundTo)).toMatch(/^u1/);
+    await noDrainerCopy(page);
+  });
+
+  /**
+   * M5. The recorded quote for an envelope this small costs 18.03% to leave.
+   * That used to be a percentage on the screen next to a live button; it is a
+   * refusal now.
+   */
+  test("refuses a quote whose spread is over the cap", async ({ page }) => {
+    const rail = await mockRail(page, { wideSpread: true });
+    await openEnvelope(page, "?dry=1");
+    await throughTrustBoundary(page);
+    await page.getByTestId("swap-asset-usdc").click();
+    await page.getByTestId("swap-mode-paste").click();
+    await page.getByTestId("swap-address-input").fill(SOLANA_ADDRESS);
+    await page.getByTestId("swap-get-quote").click();
+
+    await expect(page.getByTestId("swap-quote")).toBeVisible();
+    // The number is still shown in full: the recipient is told what it costs
+    // and why that is too much, not just that something went wrong.
+    await expect(page.getByTestId("swap-spread")).toContainText("18.03%");
+    await expect(page.getByTestId("swap-quote-refused")).toContainText("18.03%");
+    await expect(page.getByTestId("swap-quote-refused")).toContainText("15.00%");
+    await expect(page.getByTestId("swap-get-deposit")).toBeDisabled();
+
+    // Poking the attribute off the button reserves nothing: only one dry quote
+    // was ever asked for.
+    await page.getByTestId("swap-get-deposit").evaluate((el) => {
+      const button = el as HTMLButtonElement;
+      button.removeAttribute("disabled");
+      button.click();
+    });
+    await expect(page.getByTestId("swap-deposit")).toHaveCount(0);
+    expect(rail.quoteRequests.filter((r) => r.dry === false)).toHaveLength(0);
+
+    // The shielded way out is still there.
+    await expect(page.getByTestId("swap-back")).toBeVisible();
+    await noDrainerCopy(page);
+  });
+
+  /**
+   * M6 and L9. The deposit address is about to be paid out of somebody's
+   * envelope. A `u1…` where a `t1…` was promised means this is not the rail's
+   * ordinary answer, and the sweep must not happen — visibly, with a way on.
+   */
+  test("refuses a deposit address that is not a transparent one, and says so", async ({ page }) => {
+    await mockRail(page, { depositAddress: MOCK_UA });
+    await openEnvelope(page, "?dry=1");
+    await throughTrustBoundary(page);
+    await page.getByTestId("swap-asset-usdc").click();
+    await page.getByTestId("swap-mode-paste").click();
+    await page.getByTestId("swap-address-input").fill(SOLANA_ADDRESS);
+    await page.getByTestId("swap-get-quote").click();
+    await page.getByTestId("swap-get-deposit").click();
+    await page.getByTestId("swap-continue").click();
+
+    // Not the review screen: the choose screen, with the reason on it.
+    await expect(page.getByTestId("swap-plan-error")).toBeVisible();
+    await expect(page.getByTestId("swap-plan-error-message")).toContainText(
+      "not a transparent Zcash address",
+    );
+    await expect(page.getByTestId("swap-plan-error-message")).toContainText("Nothing was sent");
+    await expect(page.getByTestId("review-receive")).toHaveCount(0);
+    await expect(page.getByTestId("send-it-on")).toHaveCount(0);
+    // And the swap screens are gone with the plan.
+    await expect(page.getByTestId("review-swap-out")).toHaveCount(0);
+
+    // L9: a retry, not a dead end.
+    await page.getByTestId("swap-plan-retry").click();
+    await expect(page.getByTestId("trust-boundary")).toBeVisible();
+    await noDrainerCopy(page);
+  });
+
+  test("refuses a rail that echoes back a payout address we did not ask for", async ({ page }) => {
+    await mockRail(page, { echo: { recipient: "7Ncx1MipyrmGMD5YhGYZaHcdFN9NtcDBiKk9pBaMr2yL" } });
+    await openEnvelope(page, "?dry=1");
+    await throughTrustBoundary(page);
+    await page.getByTestId("swap-asset-usdc").click();
+    await page.getByTestId("swap-mode-paste").click();
+    await page.getByTestId("swap-address-input").fill(SOLANA_ADDRESS);
+    await page.getByTestId("swap-get-quote").click();
+    await page.getByTestId("swap-get-deposit").click();
+    await page.getByTestId("swap-continue").click();
+
+    await expect(page.getByTestId("swap-plan-error-message")).toContainText("payout address");
+    await expect(page.getByTestId("send-it-on")).toHaveCount(0);
+    await noDrainerCopy(page);
+  });
+
+  test("refuses a rail that echoes back a refund address we did not ask for", async ({ page }) => {
+    await mockRail(page, { echo: { refundTo: "u1somebodyelsesaddress" } });
+    await openEnvelope(page, "?dry=1");
+    await throughTrustBoundary(page);
+    await page.getByTestId("swap-asset-usdc").click();
+    await page.getByTestId("swap-mode-paste").click();
+    await page.getByTestId("swap-address-input").fill(SOLANA_ADDRESS);
+    await page.getByTestId("swap-get-quote").click();
+    await page.getByTestId("swap-get-deposit").click();
+    await page.getByTestId("swap-continue").click();
+
+    await expect(page.getByTestId("swap-plan-error-message")).toContainText("refund address");
+    await expect(page.getByTestId("send-it-on")).toHaveCount(0);
+  });
+
+  /**
+   * M3. A stale swap plan used to survive "Choose somewhere else": the review
+   * screen went on promising USDC on Solana above a button that paid a unified
+   * Zcash address, and the Sent screen mounted a tracker polling an address
+   * nobody had paid. A deceptive confirm screen on an irreversible action.
+   */
+  test("takes the swap screens away when the destination changes", async ({ page }) => {
+    const rail = await mockRail(page, { statuses: ["PENDING_DEPOSIT"] });
+    await openEnvelope(page, "?poll=300");
+    await throughTrustBoundary(page);
+    await page.getByTestId("swap-asset-usdc").click();
+    await page.getByTestId("swap-mode-paste").click();
+    await page.getByTestId("swap-address-input").fill(SOLANA_ADDRESS);
+    await page.getByTestId("swap-get-quote").click();
+    await page.getByTestId("swap-get-deposit").click();
+    await page.getByTestId("swap-continue").click();
+
+    // The review screen, with the swap's numbers on it.
+    await expect(page.getByTestId("review-swap-out")).toBeVisible();
+
+    // Back out, and choose a shielded address instead.
+    await page.getByTestId("review-back").click();
+    await expect(page.getByTestId("dest-address")).toBeVisible();
+    await page.getByTestId("dest-address").click();
+    await page.getByTestId("dest-input").fill(MOCK_UA);
+    await expect(page.getByTestId("dest-feedback")).toHaveAttribute("data-status", "ok");
+    await page.getByTestId("to-review").click();
+
+    // No swap on the review screen: not the amount out, not the spread, not the
+    // payout address.
+    await expect(page.getByTestId("review-receive")).toHaveText("0.0012 ZEC");
+    await expect(page.getByTestId("review-swap-out")).toHaveCount(0);
+    await expect(page.getByTestId("review-swap-spread")).toHaveCount(0);
+    await expect(page.getByTestId("review-swap-recipient")).toHaveCount(0);
+    await expect(page.getByTestId("review-destination")).toContainText("u1");
+
+    // And none on the Sent screen either: no tracker, and no poll for an address
+    // nobody paid.
+    const asked = rail.statusRequests.length;
+    await page.getByTestId("send-it-on").click();
+    await expect(page.getByTestId("sent-heading")).toHaveText("Sent.", { timeout: 60_000 });
+    await expect(page.getByTestId("swap-tracker")).toHaveCount(0);
+    await page.waitForTimeout(1_500);
+    expect(rail.statusRequests.length).toBe(asked);
+    await noDrainerCopy(page);
+  });
+
+  test("takes the plan away when the exit itself is backed out of", async ({ page }) => {
+    await mockRail(page);
+    await openEnvelope(page, "?dry=1");
+    await throughTrustBoundary(page);
+    await page.getByTestId("swap-asset-usdc").click();
+    await page.getByTestId("swap-mode-paste").click();
+    await page.getByTestId("swap-address-input").fill(SOLANA_ADDRESS);
+    await page.getByTestId("swap-get-quote").click();
+    await page.getByTestId("swap-get-deposit").click();
+    await expect(page.getByTestId("swap-deposit")).toBeVisible();
+
+    // Out of the exit the long way, from the deposit screen back to the cards.
+    for (let i = 0; i < 6; i += 1) {
+      if (await page.getByTestId("dest-address").isVisible()) break;
+      const back = (await page.getByTestId("trust-back").count())
+        ? page.getByTestId("trust-back")
+        : page.getByTestId("swap-back").first();
+      await back.click();
+    }
+    await page.getByTestId("dest-address").click();
+    await page.getByTestId("dest-input").fill(MOCK_UA);
+    await page.getByTestId("to-review").click();
+    await expect(page.getByTestId("review-swap-out")).toHaveCount(0);
   });
 });

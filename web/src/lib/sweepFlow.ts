@@ -69,6 +69,22 @@ export const SWEEP_FAILED_COPY =
 export const FUNDS_SAFE_COPY =
   "The funds are still in the envelope. Nothing moved, and this link still works.";
 
+/**
+ * Whether the swap's own lines belong on the screen.
+ *
+ * A reserved swap plan is only ever true of one destination: the Solana exit's
+ * deposit address. When the recipient backs out of the exit and chooses a Zcash
+ * address instead, the plan is thrown away — but the screens must not depend on
+ * that having happened, because a review screen promising USDC on Solana above
+ * a "Send it on" button that pays a unified address is a lie on an irreversible
+ * action, and a Sent screen mounting the tracker polls an address nobody paid
+ * (M3). Both conditions, in one place, checked by the review screen, the Sent
+ * screen and the dry-run lines.
+ */
+export function showSwapUi(choice: string | null, swap: unknown): boolean {
+  return choice === "solana" && swap !== null && swap !== undefined;
+}
+
 /** An error_code of null or 0 is a success. Anything else means nothing moved. */
 export function sweepFailure(result: SweepResult): string | null {
   const code = result.error_code;

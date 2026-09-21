@@ -5,6 +5,52 @@ the evidence it rests on. If something here contradicts another doc, this file w
 
 ## 2026-09-21
 
+### D15 The link secret is stripped from the URL once it has been read
+
+**Decision.** `/e` reads `location.hash` once at mount, hands the fragment to the core,
+and then rewrites the history entry with
+`history.replaceState(null, "", location.pathname + location.search)`. Everything after
+that — the scan, every retry, the sweep — works from the in-memory ref. **A reload
+therefore loses the secret**, by design: the page then shows the ordinary "this link has
+no envelope in it" screen, and every open screen carries the line *"Keep the original
+link: this page forgets it when reloaded."*
+
+**Why.** A Zenvelope link is a bearer capability: whoever holds it can spend the
+envelope. Left in the fragment it stayed in the address bar for the whole open → scan →
+prove flow — minutes — and therefore in the history entry, in whatever the browser syncs
+between devices, in a screenshot of the tab, and in anything the recipient taps "share
+page" on. None of that is needed: the flow reads the fragment exactly once. Meanwhile
+the screen said "The secret in this link stayed in your browser", which was true and
+also incomplete.
+
+Three options were weighed.
+
+1. **Leave it.** Reload works, and the secret sits in the URL bar for minutes. The
+   disclosure is silent and the recipient has no way to know it happened. Rejected.
+2. **Strip it and keep a copy in `sessionStorage`,** so a reload still works. That trades
+   the URL bar for a storage API, which is worse: `sessionStorage` survives the tab's
+   navigation, is readable by any script on the origin, and the product's whole claim is
+   that it writes the secret nowhere. Rejected, and asserted against by every e2e run.
+3. **Strip it and lose the reload.** Chosen. The recipient already has the link — it
+   arrived in a message they still have, which is exactly where a bearer capability
+   belongs — so the cost is one tap back to that message, and it is stated on screen
+   rather than discovered.
+
+`replaceState` rather than `pushState`: a push would leave the previous entry, the one
+with the secret in it, one Back press away.
+
+**Evidence.** `web/src/lib/fragmentStrip.test.ts` (the rule, including that nothing is
+pushed and that a browser refusing `replaceState` does not break the open) and
+`web/e2e/m2-open.spec.ts` (`location.hash` empty after the open, the reload screen, and
+Back/Forward carrying nothing), plus the same assertion on the real core in
+`m3-real.spec.ts` and `m5-real.spec.ts`. From the 2026-09-21 security review, finding
+H1.
+
+**What is not solved.** The link is still in the messaging app it arrived in, in that
+app's own history and backups, and possibly in a preview fetch that app made. That is
+outside the page entirely; the fix here is about the window between the recipient
+opening the link and the money moving.
+
 ### D14 The Solana swap's refund address is the envelope itself
 
 **Decision.** `refundTo` on every 1Click quote defaults to **the envelope's own unified

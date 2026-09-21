@@ -64,7 +64,54 @@ export const SCAN_FAILED_COPY =
   "We could not reach a Zcash node from this browser. Your envelope is fine: nothing was sent anywhere. Check your connection and try again.";
 
 export const NO_FRAGMENT_COPY =
-  "This link has no envelope in it. Links look like /e#… and the part after the # is dropped by some chat apps, so copy the whole link and try again.";
+  "This link has no envelope in it. Links look like /e#… and the part after the # is dropped by some chat apps, so copy the whole link and try again. This page forgets the link as soon as it has read it, so a reload lands here too: open the original link again.";
+
+/**
+ * Said on the open screens, because the address bar no longer shows the link.
+ *
+ * The secret is stripped out of the URL the moment it has been read (see
+ * {@link stripSecretFromUrl}), which means a reload, a bookmark or a "share this
+ * page" carries nothing — and also that the recipient has to keep the message
+ * the link arrived in.
+ */
+export const LINK_FORGOTTEN_COPY =
+  "Keep the original link: this page forgets it when reloaded.";
+
+/** The parts of `window` {@link stripSecretFromUrl} touches. */
+export interface UrlBar {
+  location: { pathname: string; search: string; hash: string };
+  history: { replaceState(data: unknown, unused: string, url: string): void };
+}
+
+/**
+ * Takes the secret out of the address bar and out of this history entry.
+ *
+ * A Zenvelope link is a bearer capability. Left in `location.hash` it sits in the
+ * URL bar for the whole open → scan → prove flow, in the back/forward history, in
+ * whatever the browser syncs between devices, and in anything the recipient taps
+ * "share" on. Nothing needs it there: the flow reads the fragment once at mount
+ * and every retry after that re-scans from the in-memory secret.
+ *
+ * `history.replaceState` rewrites the current entry rather than pushing a new
+ * one, so there is no entry left holding the old URL and no navigation happens.
+ * The cost is that a reload loses the secret; that is the trade, and the screens
+ * say so ({@link LINK_FORGOTTEN_COPY}).
+ *
+ * Returns the URL that was written, or null when there was nothing to strip.
+ */
+export function stripSecretFromUrl(win: UrlBar): string | null {
+  if (win.location.hash === "" || win.location.hash === "#") return null;
+  const url = `${win.location.pathname}${win.location.search}`;
+  try {
+    win.history.replaceState(null, "", url);
+  } catch {
+    // Some embedded browsers refuse replaceState on an opaque origin. The secret
+    // is already in memory and the flow does not read the hash again, so this is
+    // a worse URL bar and nothing more: never a broken open.
+    return null;
+  }
+  return url;
+}
 
 export const BAD_FRAGMENT_COPY =
   "This link does not contain a valid envelope. Check that you copied all of it.";

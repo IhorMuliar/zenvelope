@@ -316,3 +316,85 @@ ZENV_M4_THREADS=1 npx playwright test e2e/m3-real.spec.ts   # the 1-thread row
 `ZENV_M4_THREADS=1` puts `?threads=1` on the page, which caps the pool at one and so
 sends the core worker down the single-threaded package — both rows of the table above
 come off one build.
+
+---
+
+## Security fixes 2026-09-21
+
+A read-only security review of the tree at `20ff781` produced eleven findings and one
+observation. Every one of them is answered below: what it was, what changed, and the
+test that would catch it coming back. Nothing in this section was broadcast — the real
+runs took the `?dry=1` path exactly as the rest of this document did, and the envelope
+under test is now the **fee envelope** (0.0003 ZEC, unspent) rather than the M1 one,
+which the M3 sweep emptied.
+
+| Finding | What it was | Fix | Test |
+| --- | --- | --- | --- |
+| **H1** | The link secret stayed in `location.hash` for the whole open → scan → prove flow, and so in the history entry, in browser sync and in "share this page" — while the screen said the secret had stayed in the browser | `/e` reads the fragment once and then `history.replaceState(null, "", location.pathname + location.search)`; every retry re-scans from the in-memory ref. A reload loses it, by design, and every screen says so (DECISIONS **D15**) | `src/lib/fragmentStrip.test.ts`; `e2e/m2-open.spec.ts` — hash empty after the open, the reload screen, Back and Forward both clean; the same assertion on the real core in `m3-real` and `m5-real` |
+| **H2** | The CSP lived only in a Netlify/Cloudflare `_headers` file with no host configuration committed and no `<meta>` fallback: on any other host the app shipped with no CSP, no COOP/COEP and no `frame-ancestors`, silently | `index.html` carries the same policy as `<meta http-equiv="Content-Security-Policy">` (minus `frame-ancestors`, which a meta cannot express and `X-Frame-Options: DENY` backs up); `netlify.toml` is committed with the headers, the build and the SPA redirect; `web/README.md` documents the Cloudflare Pages setup | `src/lib/headers.test.ts` parses all three files and fails on any drift between them |
+| **M3** | A swap plan survived backing out of the Solana exit: the review screen went on promising USDC on Solana above a button that paid a unified Zcash address, and the Sent screen mounted a tracker polling an address nobody had paid | `setSwap(null)` on every pick handler, on backing out of the exit, and in "Choose somewhere else" (which now resets the destination too); the review, Sent and dry-run screens render swap UI only through `showSwapUi(choice, swap)` | `src/lib/swapSafety.test.ts` (the predicate); `e2e/m5-solana.spec.ts` — "takes the swap screens away when the destination changes", asserting no tracker and **no further status poll** |
+| **M4** | The 1Click refund override was free text that went straight into `refundTo`. A typo or a testnet address makes a `REFUNDED` swap unrecoverable | The override goes through `classify_address` like every other Zcash address — unified with an Orchard receiver, or transparent, on this network — and `canQuote` is false until it passes, with the core's reason on screen | `src/lib/swapSafety.test.ts` (the gate, including a late verdict about text already typed past); `e2e/m5-solana.spec.ts` — "classifies the refund address before it will quote anything", asserting the rail was asked nothing meanwhile |
+| **M5** | `spreadBps` was computed and displayed but never enforced, and `minAmountOut` was never read: a response with `amountOut ≈ 0` was accepted with nothing but a percentage on screen | `MAX_SPREAD_BPS` (config, **1500**) caps the cost of leaving, `effectiveCost().ok` must be true, and `amountOut >= minAmountOut` is required. `canGetDeposit` is false otherwise and the screen says which rule failed, with the numbers | `src/lib/swapSafety.test.ts` (cap boundary, unreadable figures, shortfall); `e2e/m5-solana.spec.ts` — "refuses a quote whose spread is over the cap", including deleting the `disabled` attribute and asserting **no real quote was ever asked for** |
+| **M6** | The rail's deposit address was classified but any payable kind was accepted, and `quoteRequest` was never compared with what we asked for | `checkSwapPlan` requires `kind === "transparent"` and compares the echoed `recipient`, `refundTo` and `destinationAsset` with the request. A failure throws the reservation away and never reaches the sweep | `src/lib/swapSafety.test.ts` (every field, both directions); `e2e/m5-solana.spec.ts` — a `u1…` deposit address and two tampered echoes, each ending on the error screen with no "Send it on" anywhere |
+| **M7** | Pasting a `t1` left the shielded pool behind one warning line, while the same privacy loss through the Solana card needed a full `TrustBoundary` tick | A pasted transparent address goes through the same component, with transparent-specific copy (`transparentBoundary` in `src/copy/en.ts`): four things you give up, and a tick that is the only way to the review screen | `src/components/TrustBoundary.test.ts` (the variant, same gate); `e2e/m3-open.spec.ts` — the gate, the attribute-deletion attempt, the way back, and a unified address **not** being gated; `e2e/m5-real.spec.ts` walks it on the real core |
+| **L8** | No `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` in `public/_headers` and `netlify.toml`. `preload` is deliberately left off until there is a domain of our own to submit (D9) | `src/lib/headers.test.ts` |
+| **L9** | If the core rejected the rail's address, the review dispatch was skipped, `SolanaExit` unmounted and its reservation was lost with no message at all | The reason is shown on the choose screen with a "Start the swap again" button | `e2e/m5-solana.spec.ts` — the retry lands back on the trust boundary |
+| **L10** | `describeDestination` discarded the core's `reason` and guessed the wrong-network case from a prefix regex, so most wrong-network pastes read as "that does not look like a Zcash address" | The regex is gone; `DestinationState.reason` carries the core's own words and the field renders them under the product's line | `src/lib/destination.test.ts`; `e2e/m3-open.spec.ts` — "shows the core's reason under a refused address" |
+| **L11** | `README.md` stated that subresource integrity and reproducible builds mitigate the served-JS risk. Neither exists | The paragraph now states what is true — static hosting, a strict CSP delivered three ways, same-origin wasm in a worker, committed lockfiles, the stripped fragment — and lists SRI and reproducible builds as **planned**, with the reason each is not yet possible | Prose; `src/lib/headers.test.ts` keeps the CSP half of the claim honest |
+| **I12** | The secret was a React prop (`Open.tsx`, `SendOn.tsx`), so DevTools printed it in full, unlike the ref it came from | `Open` passes a getter; `SendOn` calls it in one place, inside the sweep. No component takes the string | `src/components/SendOn.test.ts` — the getter is not called during a render, the secret is in no markup, and the props object serialises without it |
+
+### The residual on I12
+
+A getter is not a vault: anything executing in the page can call it, exactly as it could
+read the ref, and the secret is in the core worker's memory while a sweep runs. What it
+buys is that the bearer capability is no longer sitting in the React element tree where a
+casual DevTools inspection, a screen share or an error overlay would print it. The CSP is
+what is supposed to stop hostile script; this is what is left if something gets past it.
+It is documented in the same terms in `web/README.md` and at the top of
+`src/components/SendOn.test.ts`.
+
+### A deliberate consequence: small swaps are refused
+
+`MAX_SPREAD_BPS = 1500` is a product decision with teeth. A swap at the rail's floor
+really does cost 16-18% to leave, because a flat Solana withdrawal fee spread over about
+$2 is enormous — the recorded quote in `e2e/m5-solana.spec.ts` is 18.03%. Those swaps are
+now refused rather than offered with a percentage next to a live button, and the screen
+says the number and the cap. The mocked flow tests therefore use the same recorded body
+with a healthier `amountOutUsd`, and the recorded figures are kept as the test of the cap
+itself.
+
+### The runs behind this section
+
+Everything was re-run on 2026-09-21 after the fixes, on the branch
+`worktree-agent-a41aa356d6cc58f70`.
+
+| Run | Result |
+| --- | --- |
+| `npm test` | **377 passed**, 21 files (322 before: +55 for these fixes) |
+| `npm run build` | clean, `tsc -b` included |
+| MOCK e2e, wasm moved aside, port 4212 | **28 passed**, 17 skipped (the real groups) |
+| `e2e/m2-open.spec.ts`, real core, port 4211 | **1 passed** — the fee envelope opened on mainnet, 639 blocks (3,490,472..3,491,110) in 20.1 s, `location.hash` empty |
+| `e2e/m3-real.spec.ts`, real core, port 4211 | **2 passed** — proving key warm 17.6 s and 17.0 s at 4 threads, tap to Done 23.6 s and 23.8 s, 9,166-byte proved transaction each, both **dry** |
+| `e2e/m5-real.spec.ts`, live 1Click, port 4211 | **1 passed** — the rail's floor read live (132,000 zatoshi), a real deposit address reserved (`t1XQhP…NhTf`, `PENDING_DEPOSIT`, deadline 2026-09-24), the transparent trust boundary ticked, and a 9,200-byte proved transaction to it, **dry** |
+
+The envelope under test is the fee envelope: **0.0003 ZEC**, which is why
+`ZENV_EXPECT_ZEC` exists and why `VITE_FEE_ADDRESS` is unset for these runs —
+30,000 zatoshi cannot pay a 30,000 zatoshi flat fee and a miner fee on top.
+
+**Nothing was broadcast.** Every page load was `?dry=1`, every done screen was
+asserted to be the dry-run one ("Nothing was sent. The money is still in the
+envelope, and this link still works."), no explorer link was rendered on any of
+them, and `localStorage` and `sessionStorage` were `{}` at the end of every run.
+The one live side effect is the deposit address the M5 run reserved from the
+rail, which nobody paid and which expires in three days. The fee envelope still
+holds its 0.0003 ZEC.
+
+### What was already right
+
+The review found no `dangerouslySetInnerHTML`, no `innerHTML`, no `eval`, no storage API
+and no beacon anywhere in `web/src`; the memo renders as a plain text child; the CSV
+export neutralises formula injection; the worker boundary strips callbacks and pins the
+wasm URL to `self.location.origin`; the Rust destination rules enforce the network and
+refuse Sapling, TEX and Orchard-less unified addresses with reasons; and `?dry`, `?net`,
+`?poll` and `?threads` are read from `location.search` and never from the fragment. None
+of that changed.

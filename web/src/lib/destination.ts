@@ -25,6 +25,15 @@ export interface DestinationState {
   kind: AddressKind | null;
   /** The line under the field. null when there is nothing to say. */
   message: string | null;
+  /**
+   * The core's own explanation, verbatim, when it gave one: "this is a Test
+   * address and the sweep is running on Main", "TEX addresses are not
+   * supported". Diagnostic rather than product copy, so it is shown under the
+   * message and not folded into it — but it is shown, because a refusal whose
+   * reason is hidden reads as "not an address" for a paste that is a perfectly
+   * good address on the other network (L10).
+   */
+  reason: string | null;
   /** Whether "Send it on" may be reached from here. */
   canContinue: boolean;
 }
@@ -40,14 +49,12 @@ export const DESTINATION_COPY: Record<AddressKind, string> = {
   invalid: "That does not look like a Zcash address. Check that you copied all of it.",
 };
 
-/** On a mainnet page, a testnet address is the common paste mistake. */
-export const WRONG_NETWORK_HINT = "Testnet addresses do not work here.";
-
 export const emptyDestination: DestinationState = {
   input: "",
   status: "empty",
   kind: null,
   message: null,
+  reason: null,
   canContinue: false,
 };
 
@@ -88,7 +95,7 @@ export function classifyDestination(
   } catch {
     result = { kind: "invalid", reason: null };
   }
-  return describeDestination(input, result, network);
+  return describeDestination(input, result);
 }
 
 /**
@@ -113,27 +120,31 @@ export async function classifyDestinationAsync(
   } catch {
     result = { kind: "invalid", reason: null };
   }
-  return describeDestination(input, result, network);
+  return describeDestination(input, result);
 }
 
-/** The product's answer to a classification. The only place the copy is chosen. */
-export function describeDestination(
-  input: string,
-  result: AddressClass,
-  network: Network = "main",
-): DestinationState {
-  const addr = input.trim();
+/**
+ * The product's answer to a classification. The only place the copy is chosen.
+ *
+ * It used to guess at the wrong-network case from the prefix of what was typed,
+ * which meant a testnet address was named as one only when it matched the regex
+ * and every other wrong-network paste read as "that does not look like a Zcash
+ * address". The core already decides this — it decodes the address and compares
+ * networks — so the guess is gone and the core's `reason` is carried through
+ * instead (L10).
+ */
+export function describeDestination(input: string, result: AddressClass): DestinationState {
   const kind = result.kind;
-  let message = DESTINATION_COPY[kind];
-  if (kind === "invalid" && network === "main" && /^(utest1|ztestsapling1|t[mn])/.test(addr)) {
-    message = `${message} ${WRONG_NETWORK_HINT}`;
-  }
+  const reason = result.reason?.trim();
 
   return {
     input,
     status: STATUS[kind],
     kind,
-    message,
+    message: DESTINATION_COPY[kind],
+    // A reason on an address we are happy with is noise; on one we refuse or
+    // warn about, it is the only thing that says why.
+    reason: kind === "unified_orchard" || !reason ? null : reason,
     canContinue: isSendable(kind),
   };
 }

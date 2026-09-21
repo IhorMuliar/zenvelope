@@ -4,11 +4,13 @@ import { loadCore, provingNote } from "../core";
 import type { FoundNote, LoadedCore, Network } from "../core/types";
 import {
   BAD_FRAGMENT_COPY,
+  LINK_FORGOTTEN_COPY,
   NO_FRAGMENT_COPY,
   initialOpenState,
   openReducer,
   progressLabel,
   runOpen,
+  stripSecretFromUrl,
 } from "../lib/openFlow";
 import { formatCount, formatZecAmount, poolLabel, sumZat, truncateTxid } from "../lib/format";
 import { CopyField } from "../components/CopyField";
@@ -30,9 +32,14 @@ export function Open() {
   const [proving, setProving] = useState<string | null>(null);
 
   /**
-   * The secret lives in this ref and in the URL fragment, nowhere else: not in
-   * storage, not in a query string, not in any link this page renders, and never
-   * logged. It is handed to the core and to nothing else.
+   * The secret lives in this ref and nowhere else: not in storage, not in a query
+   * string, not in any link this page renders, never logged — and, from the
+   * moment it has been read, not in the URL either (`stripSecretFromUrl` below).
+   * It is handed to the core and to nothing else.
+   *
+   * It is deliberately not React state and is never spread into a child's props:
+   * a ref is not walked by the React DevTools props inspector, and the children
+   * that need it are given {@link getSecret} rather than the string.
    */
   const secret = useRef<string | null>(null);
   const core = useRef<LoadedCore | null>(null);
@@ -62,6 +69,10 @@ export function Open() {
         core.current = c;
         setProving(provingNote(c));
         secret.current = parsed.secret;
+        // The bearer secret is in memory now, so it has no further business in
+        // the address bar, the history entry or anything the recipient shares.
+        // Every retry below re-scans from `secret.current`, never from the hash.
+        stripSecretFromUrl(window);
         setIsMock(c.isMock);
         setLink({ address: derived.address, birthday: parsed.birthday, network });
         dispatch({ type: "parsed" });
@@ -99,6 +110,13 @@ export function Open() {
       if (id === runId.current) dispatch({ type: "failed", message: (err as Error).message });
     }
   }, [link]);
+
+  /**
+   * The children get a getter, not the string (I12). React DevTools shows a prop
+   * that is a function as `f () {}`; a string prop is shown in full, and the
+   * secret is the money. The closure reads the same ref the scan does.
+   */
+  const getSecret = useCallback(() => secret.current, []);
 
   const onOpen = () => {
     dispatch({ type: "open" });
@@ -148,6 +166,9 @@ export function Open() {
         <p className="fine" data-testid="open-fineprint">
           Opening scans the Zcash chain from your browser. Nothing leaves this page.
         </p>
+        <p className="fine" data-testid="link-forgotten">
+          {LINK_FORGOTTEN_COPY}
+        </p>
         {provingFooter}
         <details className="sealed-details">
           <summary data-testid="open-address-toggle">Check the envelope address</summary>
@@ -196,7 +217,7 @@ export function Open() {
         badge={badge}
         provingFooter={provingFooter}
         core={core.current}
-        secret={secret.current}
+        getSecret={getSecret}
         network={link.network}
         envelopeAddress={link.address}
       />
@@ -228,6 +249,9 @@ export function Open() {
       <p className="fine">
         The secret in this link stayed in your browser. Nothing about it was sent anywhere.
       </p>
+      <p className="fine" data-testid="link-forgotten">
+        {LINK_FORGOTTEN_COPY}
+      </p>
       {provingFooter}
     </section>
   );
@@ -239,7 +263,7 @@ function Opened({
   badge,
   provingFooter,
   core,
-  secret,
+  getSecret,
   network,
   envelopeAddress,
 }: {
@@ -248,8 +272,8 @@ function Opened({
   badge: React.ReactNode;
   provingFooter: React.ReactNode;
   core: LoadedCore;
-  /** Passed down to the sweep and to nothing else. */
-  secret: string;
+  /** Reads the secret out of the open page's ref, for the sweep and nothing else. */
+  getSecret: () => string | null;
   network: Network;
   /** The envelope's own address: the Solana exit's default refund target (D14). */
   envelopeAddress: string;
@@ -320,7 +344,7 @@ function Opened({
 
       <SendOn
         core={core}
-        secret={secret}
+        getSecret={getSecret}
         network={network}
         notes={notes}
         tipHeight={tipHeight}
@@ -330,6 +354,9 @@ function Opened({
       <p className="fine">
         The secret in this link stayed in your browser. Nothing about this envelope was sent
         anywhere.
+      </p>
+      <p className="fine" data-testid="link-forgotten">
+        {LINK_FORGOTTEN_COPY}
       </p>
       {provingFooter}
     </section>

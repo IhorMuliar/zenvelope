@@ -4,12 +4,17 @@
  *
  *   ./scripts/build-core.sh
  *   cd web && npm ci && npm run build
- *   ZENV_M1_FRAGMENT='<secret>.<birthday>' \
- *   ZENVELOPE_E2E_PORT=4197 npx playwright test e2e/m5-real.spec.ts
+ *   ZENV_M1_FRAGMENT='<secret>.<birthday>' ZENV_EXPECT_ZEC='0.0003' \
+ *   ZENVELOPE_E2E_PORT=4211 npx playwright test e2e/m5-real.spec.ts
  *
  * The fragment is never committed: it lives in the private, gitignored
- * M1-FUND.md, is read from the environment here, and the group skips cleanly
- * without it — which is what CI and a fresh checkout see.
+ * M1-FUND.md and M3-DEST.md, is read from the environment here, and the group
+ * skips cleanly without it — which is what CI and a fresh checkout see.
+ *
+ * **Which envelope.** The M1 envelope (0.0013 ZEC) was swept on 2026-09-21 and is
+ * empty; the live fixture is the 0.0003 ZEC fee envelope from M3-DEST.md, which is
+ * unspent. `ZENV_EXPECT_ZEC` says what to expect and everything below is derived
+ * from it, defaulting to the M1 amount.
  *
  * Nothing here is mocked. Every 1Click call goes to
  * `https://1click.chaindefuser.com/v0` from the page's own origin, which is
@@ -49,24 +54,40 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const FRAGMENT = process.env.ZENV_M1_FRAGMENT;
 const REAL_CORE = existsSync(resolve(HERE, "../src/wasm/core/zenvelope_core.js"));
 
-/** The M1 envelope: 130,000 zatoshi, one Ironwood note. */
-const ENVELOPE = "0.0013 ZEC";
+/** Zatoshi from a ZEC string, and back the way the page renders it. */
+function toZat(zec: string): bigint {
+  const [whole, frac = ""] = zec.trim().split(".");
+  return BigInt(whole || "0") * 100_000_000n + BigInt((frac + "00000000").slice(0, 8));
+}
+
+function asZec(zat: bigint): string {
+  const whole = (zat / 100_000_000n).toString();
+  const frac = (zat % 100_000_000n).toString().padStart(8, "0").replace(/0+$/, "");
+  return `${whole}.${frac === "" ? "0" : frac} ZEC`;
+}
+
+/** What the envelope under test holds. Default: the (now empty) M1 envelope. */
+const ENVELOPE_ZAT = toZat(process.env.ZENV_EXPECT_ZEC ?? "0.0013");
+const ENVELOPE = asZec(ENVELOPE_ZAT);
 
 /**
  * The flat Zenvelope fee is only charged when the build had a fee address, so what
  * the rail would be quoted depends on the build this run is driving:
  *
- *   130,000 - 15,000 transparent ZIP-317            = 115,000  (no fee address)
- *   130,000 - 15,000 transparent ZIP-317 - 30,000   =  85,000  (VITE_FEE_ADDRESS set)
+ *   envelope - 15,000 transparent ZIP-317            (no fee address)
+ *   envelope - 15,000 transparent ZIP-317 - 30,000   (VITE_FEE_ADDRESS set)
  *
  * It is the same arithmetic `sweepAmounts(..., "transparent", ...)` does for the
  * quote, so asserting it here is asserting that the review screen and the rail were
- * shown the same number. Both are under the rail's floor today, which is the point
- * of the run: the product refuses and says why.
+ * shown the same number. Every envelope we have is under the rail's floor today,
+ * which is the point of the run: the product refuses and says why.
  */
 const FEE_ENABLED = (process.env.VITE_FEE_ADDRESS ?? "").trim() !== "";
-const SERVICE_FEE = "0.0003 ZEC";
-const SWAP_INPUT = FEE_ENABLED ? "0.00085 ZEC" : "0.00115 ZEC";
+const TRANSPARENT_FEE_ZAT = 15_000n;
+const SERVICE_FEE_ZAT = FEE_ENABLED ? 30_000n : 0n;
+const SWAP_INPUT_ZAT = ENVELOPE_ZAT - TRANSPARENT_FEE_ZAT - SERVICE_FEE_ZAT;
+const SERVICE_FEE = asZec(SERVICE_FEE_ZAT);
+const SWAP_INPUT = asZec(SWAP_INPUT_ZAT);
 
 const USDC = "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near";
 
@@ -151,6 +172,11 @@ describeReal("M5: the Solana exit against the live 1Click API, dry run", () => {
   // The proving key and the proof are tens of seconds of wasm each.
   test.setTimeout(1_200_000);
 
+  test.skip(
+    SWAP_INPUT_ZAT <= 0n,
+    `the envelope (${ENVELOPE}) cannot cover a transparent sweep; set ZENV_EXPECT_ZEC`,
+  );
+
   test("quotes live, is told the floor, takes a real deposit address, and sends nothing", async ({
     page,
   }) => {
@@ -162,6 +188,11 @@ describeReal("M5: the Solana exit against the live 1Click API, dry run", () => {
     /* ------------------------------------------------- open the real envelope */
 
     await page.goto(`/e?dry=1#${FRAGMENT}`);
+    // H1: the link secret is out of the URL bar before anything else happens.
+    await expect
+      .poll(() => page.evaluate(() => window.location.hash), { timeout: 60_000 })
+      .toBe("");
+    expect(page.url()).not.toContain(FRAGMENT!.split(".")[0]);
     await expect(page.getByTestId("mock-badge")).toHaveCount(0);
     console.log(`M5 ${await page.getByTestId("proving-note").innerText()}`);
 
@@ -315,10 +346,17 @@ describeReal("M5: the Solana exit against the live 1Click API, dry run", () => {
     await expect(page.getByTestId("dest-feedback")).toContainText("leaves the shielded pool");
     await page.getByTestId("to-review").click();
 
+    // M7: a pasted transparent address goes through the trust boundary, with the
+    // tick as the only way past it, exactly as the Solana card does.
+    await expect(page.getByTestId("transparent-boundary")).toBeVisible();
+    await expect(page.getByTestId("trust-continue")).toBeDisabled();
+    await page.getByTestId("trust-ack").check();
+    await page.getByTestId("trust-continue").click();
+
     await expect(page.getByTestId("review-in-envelope")).toHaveText(ENVELOPE);
     // A transparent destination, so the higher ZIP-317 fee, which is exactly the
     // number the swap was quoted on.
-    await expect(page.getByTestId("review-network-fee")).toHaveText("0.00015 ZEC");
+    await expect(page.getByTestId("review-network-fee")).toHaveText(asZec(TRANSPARENT_FEE_ZAT));
     if (FEE_ENABLED) {
       await expect(page.getByTestId("review-service-fee")).toHaveText(SERVICE_FEE);
     }
@@ -338,7 +376,10 @@ describeReal("M5: the Solana exit against the live 1Click API, dry run", () => {
     await expect(page.getByTestId("explorer-link")).toHaveCount(0);
     const bytes = Number((await page.getByTestId("dry-run-size").innerText()).replace(/\D/g, ""));
     console.log(`M5 real dry sweep: raw transaction ${bytes} bytes to ${redact(deposit)}`);
-    expect(bytes).toBeGreaterThan(8_000);
+    // A real proved bundle. The floor is generous because the shape depends on the
+    // envelope: the two-output M3 sweep measured 9,166 bytes, and a one-output
+    // transparent sweep of a smaller envelope is smaller than that.
+    expect(bytes).toBeGreaterThan(5_000);
 
     /* -------------------------------------------------- and nothing leaked */
 

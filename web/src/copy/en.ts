@@ -212,6 +212,52 @@ export const trustBoundary = {
   back: "Keep it shielded instead",
 } as const;
 
+/* ------------------------------------ the same gate, for a pasted t1 (M7) */
+
+/**
+ * The trust boundary again, in the words a transparent Zcash address needs.
+ *
+ * Pasting a `t1` leaves the shielded pool exactly as permanently as the Solana
+ * exit does, and for a while it was the cheaper way to do it by accident: one
+ * warning line directly above "Send it on", where the Solana card needs a screen
+ * and a tick. The privacy loss decides the gate, not which card you came from,
+ * so a `t1` now goes through the same component with these words.
+ *
+ * No swap service is involved here, so the second and third of the Solana
+ * points do not apply; what replaces them is what a transparent output actually
+ * costs — a public amount, a public address, a higher network fee, and a link
+ * back to this envelope that anyone can follow.
+ */
+export const transparentBoundary = {
+  title: "This address leaves the shielded pool",
+  lede: "A transparent address is a public one. Read these before you send there; once the transaction is on-chain none of it can be taken back.",
+
+  points: [
+    {
+      title: "The amount and the address become public",
+      body: "A transparent output is written in the clear. Anyone can read how much arrived and where, for as long as Zcash exists. A shielded unified address starting with u1 discloses neither.",
+    },
+    {
+      title: "It can be linked to everything that address does",
+      body: "Every other payment that address has made or received is public too, so this one joins them. If that address is known to be yours — an exchange deposit, a published tip address — this envelope becomes yours in public as well.",
+    },
+    {
+      title: "The envelope stops being private at this point",
+      body: "The shielded side of the sweep hides where the money came from, and this output is where that ends: the transparent amount leaving the shielded pool is visible, and it is this one.",
+    },
+    {
+      title: "It costs more and it cannot be undone",
+      body: "A transparent destination adds a third action to the transaction, so the Zcash network fee is 0.00015 ZEC rather than 0.0001. There is no recall: a Zcash transaction is final once it is mined, and we could not reverse it even if we held the money, which we never do.",
+    },
+  ] as Step[],
+
+  /** The required tick. Nothing continues until this is true. */
+  checkbox: "I understand this address is public",
+  blockedHint: "Tick the box above to continue.",
+  continue: "Send to this transparent address",
+  back: "Use a shielded address instead",
+} as const;
+
 /* ------------------------------------------------------- the Solana exit (M5) */
 
 /**
@@ -308,6 +354,45 @@ export const solanaExit = {
     "The swap provider sees the amount of ZEC that arrives, the transparent Zcash address it arrives from, the Solana address it pays out to, and the network address of the browser that asked for the quote. It does not see this link, the secret in it, or anything else about the envelope.",
   notProvider:
     "Zenvelope is not the swap provider and never holds the funds. Your browser pays the address the rail quotes, and the rail pays you on Solana.",
+
+  /* --------------------------------------------- the refund address, checked */
+
+  refundChecking: "Checking that address…",
+  refundOk: "This address can receive a refund.",
+  /**
+   * The override is free text and it decides who can recover the money if the
+   * swap fails, so it goes through the same core classification every other
+   * Zcash address in the product goes through (M4). The core's own reason is
+   * shown after this sentence.
+   */
+  refundInvalid:
+    "A refund could not be sent to that address, so the quote is blocked until it is fixed or the box is emptied.",
+
+  /* ------------------------------------------ the quote, before it is accepted */
+
+  /** The cap on the cost of leaving, above which the deposit step is refused. */
+  spreadTooHigh: (spread: string, cap: string) =>
+    `The cost of leaving this quote is ${spread}, which is above the ${cap} we will go ahead with. Send it on as shielded ZEC instead, or try again later: the rate moves.`,
+  /** The rail sent something the spread cannot be computed from. */
+  quoteUnreadable:
+    "The swap service did not send figures we can check this quote against, so we will not go on with it.",
+  /** `amountOut` under the rail's own `minAmountOut`. */
+  quoteShortfall:
+    "The swap service quoted less than the minimum it says it would pay out, so we will not go on with it.",
+
+  /* -------------------------------------- the deposit address, before it is paid */
+
+  /**
+   * The rail hands back an address our own core then classifies. Anything but a
+   * transparent address of this network is refused: the sweep would be paying a
+   * stranger's address on our recipient's behalf (M6).
+   */
+  depositNotTransparent:
+    "The swap service sent a deposit address that is not a transparent Zcash address on this network. Nothing was sent, and nothing will be.",
+  /** The echoed request did not match what we asked for. */
+  depositMismatch: (field: string) =>
+    `The swap service answered with a different ${field} from the one we asked for. Nothing was sent, and nothing will be.`,
+  depositRetry: "Start the swap again",
 
   /* ------------------------------------------------------ the deposit address */
 
@@ -408,6 +493,7 @@ export function allStrings(): string[] {
     footer,
     how,
     trustBoundary,
+    transparentBoundary,
     solanaExit,
     group,
     single,

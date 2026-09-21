@@ -18,7 +18,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { TrustBoundary, trustBoundaryBlocked } from "./TrustBoundary";
-import { trustBoundary as copy } from "../copy/en";
+import { trustBoundary as copy, transparentBoundary as transparent } from "../copy/en";
 
 function render(props: Parameters<typeof TrustBoundary>[0] = {}): string {
   return renderToStaticMarkup(createElement(TrustBoundary, props));
@@ -105,6 +105,55 @@ describe("TrustBoundary", () => {
     const text = render({ acknowledged: true }).replace(/<[^>]*>/g, " ");
     expect(text.toLowerCase()).not.toContain("claim");
     expect(text.toLowerCase()).not.toMatch(/connect\s+(your|a|the)?\s*wallet/);
+    expect(text.toLowerCase()).not.toContain("seed phrase");
+  });
+});
+
+/* ------------------------------------------------------------------ M7 */
+
+/**
+ * The same gate, in front of a pasted transparent address.
+ *
+ * Pasting a `t1` leaves the shielded pool exactly as permanently as the Solana
+ * exit does, and it used to need nothing but reading one warning line above
+ * "Send it on". It goes through this component now, with its own words — so the
+ * thing being tested here is that the words move and the **gate does not**.
+ */
+describe("the transparent variant", () => {
+  const transparentProps = { content: transparent, testId: "transparent-boundary" };
+
+  it("is the same gate: blocked until the box is ticked", () => {
+    expect(continueButton(render(transparentProps))).toMatch(DISABLED_ATTR);
+    expect(continueButton(render({ ...transparentProps, acknowledged: true }))).not.toMatch(
+      DISABLED_ATTR,
+    );
+  });
+
+  it("says what a transparent address costs, not what a swap costs", () => {
+    const html = render(transparentProps);
+    expect(html).toContain(transparent.title);
+    expect(html).toContain(transparent.checkbox);
+    for (const point of transparent.points) expect(html).toContain(point.title);
+    // The Solana exit's words are not on this screen.
+    expect(html).not.toContain("swap service");
+  });
+
+  it("keeps its own test id, so the two screens are never confused", () => {
+    expect(render(transparentProps)).toContain('data-testid="transparent-boundary"');
+    expect(render()).toContain('data-testid="trust-boundary"');
+  });
+
+  it("names the public amount, the public address and the higher fee", () => {
+    const text = render(transparentProps).replace(/<[^>]*>/g, " ");
+    expect(text).toMatch(/public/i);
+    expect(text).toMatch(/0\.00015 ZEC/);
+    expect(text).toMatch(/cannot be undone|final/i);
+  });
+
+  it("offers a shielded way out, and says nothing a drainer would say", () => {
+    const text = render({ ...transparentProps, acknowledged: true }).replace(/<[^>]*>/g, " ");
+    expect(text).toContain(transparent.back);
+    expect(text.toLowerCase()).not.toContain("claim");
     expect(text.toLowerCase()).not.toContain("seed phrase");
   });
 });

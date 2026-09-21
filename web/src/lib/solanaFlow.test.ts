@@ -28,6 +28,15 @@ import {
 const ADDRESS = "9XgwdBnkmJzRyQhM3bAkYqekuG9u2w9eJfjCe2T3HyrS";
 const ENVELOPE = "u1nxx35rnvjqzuz03fcg4yur2atgm3j2yl4xsl6l93u5nxw8mxw0t5gxqlq";
 
+/**
+ * A priced quote, shaped like the rail's.
+ *
+ * Its USD figures are a **healthy** pair: 1 - 1.90/1.99 is 452 bps, comfortably
+ * under `MAX_SPREAD_BPS`. The recorded figures for a swap this small are not —
+ * a floor-sized swap really does cost 16-18% once the flat Solana withdrawal fee
+ * is spread over $2 — and those are kept below as {@link WIDE_QUOTE}, which is
+ * what the cap exists to refuse.
+ */
 const QUOTE = {
   quote: {
     amountIn: "132000",
@@ -36,7 +45,7 @@ const QUOTE = {
     minAmountIn: "132000",
     amountOut: "1669370",
     amountOutFormatted: "1.66937",
-    amountOutUsd: "1.66",
+    amountOutUsd: "1.90",
     minAmountOut: "1652676",
     timeEstimate: 454,
     refundFee: "32000",
@@ -52,6 +61,12 @@ const QUOTE = {
   },
   signature: "ed25519:…",
   timestamp: "2026-09-21T02:33:27.939Z",
+} as OneClickQuoteResponse;
+
+/** The same quote with the recorded 16.58% spread: over the cap. */
+const WIDE_QUOTE = {
+  ...QUOTE,
+  quote: { ...QUOTE.quote, amountOutUsd: "1.66" },
 } as OneClickQuoteResponse;
 
 function run(events: SolanaExitEvent[], from = initialSolanaExitState): SolanaExitState {
@@ -221,6 +236,7 @@ describe("the deposit address", () => {
           address: "t1Yqx4HkL1F9CQRfgzG4h9PD1SyZsY96vmd",
           deadline: "2026-09-24T09:00:00.000Z",
           quote: QUOTE.quote,
+          quoteRequest: QUOTE.quoteRequest,
         },
       },
     ]);
@@ -235,7 +251,7 @@ describe("the deposit address", () => {
       { type: "busy" },
       {
         type: "deposit",
-        reservation: { address: "t1x", deadline: null, quote: QUOTE.quote },
+        reservation: { address: "t1x", deadline: null, quote: QUOTE.quote, quoteRequest: QUOTE.quoteRequest },
       },
       { type: "quoteError", message: "the rail refused" },
     ]);
@@ -250,7 +266,7 @@ describe("going back", () => {
       ...TO_QUOTE,
       {
         type: "deposit",
-        reservation: { address: "t1x", deadline: null, quote: QUOTE.quote },
+        reservation: { address: "t1x", deadline: null, quote: QUOTE.quote, quoteRequest: QUOTE.quoteRequest },
       },
     ]);
     expect(state.phase).toBe("deposit");

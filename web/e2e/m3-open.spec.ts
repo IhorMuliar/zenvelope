@@ -17,6 +17,8 @@
  *     and will not continue until "I wrote these down" is ticked
  *   - the review screen's arithmetic: envelope - network fee = what you receive
  *   - the four stages tick over in order, with an elapsed clock
+ *   - a pasted transparent t1 goes through the same trust boundary the Solana
+ *     exit does, and the tick is the only way past it (M7)
  *   - the done screen has the txid, a copy button, an explorer link, and says
  *     the envelope is now empty
  *   - the secret never reaches a link or a request, and the word "claim" never
@@ -239,7 +241,14 @@ describeOnMock("M3: sending the envelope on", () => {
     await noDrainerCopy(page);
   });
 
-  test("warns about a transparent destination but still allows it", async ({ page }) => {
+  /**
+   * M7: a pasted `t1` leaves the shielded pool exactly as permanently as the
+   * Solana exit does. It used to need nothing but reading one warning line
+   * above "Send it on"; it goes through the same gate now, with its own words.
+   */
+  test("gates a transparent destination behind the trust boundary, then allows it", async ({
+    page,
+  }) => {
     await openEnvelope(page);
     await page.getByTestId("dest-address").click();
     await page.getByTestId("dest-input").fill("t1KvSHRKp5ZgFcqJe8ZbeBHhpTCVCXjPWKa");
@@ -249,10 +258,66 @@ describeOnMock("M3: sending the envelope on", () => {
     );
     await expect(page.getByTestId("to-review")).toBeEnabled();
 
-    // The higher ZIP-317 fee follows the destination onto the review screen.
+    // Continue does not reach the review screen: it reaches the boundary.
     await page.getByTestId("to-review").click();
+    await expect(page.getByTestId("transparent-boundary")).toBeVisible();
+    await expect(page.getByTestId("review-receive")).toHaveCount(0);
+    await expect(page.getByTestId("trust-title")).toHaveText("This address leaves the shielded pool");
+    await expect(page.getByTestId("trust-points").locator("li")).toHaveCount(4);
+    await expect(page.getByTestId("trust-continue")).toBeDisabled();
+    await expect(page.getByTestId("trust-blocked")).toHaveText("Tick the box above to continue.");
+
+    // Poking the disabled attribute out of the DOM does not get through: the
+    // handler checks the same rule the attribute is derived from.
+    await page.getByTestId("trust-continue").evaluate((el) => {
+      const button = el as HTMLButtonElement;
+      button.removeAttribute("disabled");
+      button.click();
+    });
+    await expect(page.getByTestId("transparent-boundary")).toBeVisible();
+    await expect(page.getByTestId("review-receive")).toHaveCount(0);
+
+    // The way back is always open, and it keeps the typed address.
+    await page.getByTestId("trust-back").click();
+    await expect(page.getByTestId("dest-input")).toHaveValue("t1KvSHRKp5ZgFcqJe8ZbeBHhpTCVCXjPWKa");
+
+    // And the tick is the way through.
+    await page.getByTestId("to-review").click();
+    await page.getByTestId("trust-ack").check();
+    await expect(page.getByTestId("trust-continue")).toBeEnabled();
+    await page.getByTestId("trust-continue").click();
+
+    // The higher ZIP-317 fee follows the destination onto the review screen.
     await expect(page.getByTestId("review-network-fee")).toHaveText("0.00015 ZEC");
     await expect(page.getByTestId("review-receive")).toHaveText("0.00115 ZEC");
     await expect(page.getByTestId("review-warning")).toContainText("visible on-chain");
+    await noDrainerCopy(page);
+  });
+
+  /** A unified address is not gated: it never leaves the shielded pool. */
+  test("does not gate a shielded destination", async ({ page }) => {
+    await openEnvelope(page);
+    await page.getByTestId("dest-address").click();
+    await page.getByTestId("dest-input").fill(VECTOR_UA);
+    await page.getByTestId("to-review").click();
+    await expect(page.getByTestId("transparent-boundary")).toHaveCount(0);
+    await expect(page.getByTestId("review-receive")).toHaveText("0.0012 ZEC");
+  });
+
+  /**
+   * L10: the core's own reason is on the screen, rather than being dropped in
+   * favour of a guess at the prefix of what was typed.
+   */
+  test("shows the core's reason under a refused address", async ({ page }) => {
+    await openEnvelope(page);
+    await page.getByTestId("dest-address").click();
+    await page.getByTestId("dest-input").fill(SAPLING);
+    await expect(page.getByTestId("dest-feedback")).toHaveAttribute("data-status", "error");
+    await expect(page.getByTestId("dest-reason")).not.toBeEmpty();
+
+    // A wrong-network address is named as one, whatever it starts with.
+    await page.getByTestId("dest-input").fill("nonsense-for-this-network");
+    await expect(page.getByTestId("dest-reason")).toContainText("network");
+    await noDrainerCopy(page);
   });
 });

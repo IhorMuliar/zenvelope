@@ -22,6 +22,8 @@
  *   - the fiat equivalent is behind a tap and never a price request
  *   - the M3 destination cards are live, with the Solana rail still disabled
  *   - no link on the page carries the secret fragment onward
+ *   - **the secret is out of the URL bar** the moment it has been read, and a
+ *     reload lands on the friendly "no envelope in this link" screen (H1)
  *   - a link with no fragment gets a friendly error and never scans
  */
 
@@ -47,6 +49,16 @@ describeOnMock("M2: opening an envelope", () => {
     page.on("request", (r) => requests.push(r.url()));
 
     await page.goto(`/e#${FRAGMENT}`);
+
+    // 0. H1: the fragment is gone from the address bar before anything else
+    // happens on this page. It was read once, into a ref, and the URL bar has no
+    // further business holding a bearer capability — not while the flow runs,
+    // not in this history entry, and not in anything the recipient shares.
+    await expect
+      .poll(() => page.evaluate(() => window.location.hash), { timeout: 20_000 })
+      .toBe("");
+    expect(page.url()).not.toContain(SECRET);
+    await expect(page.getByTestId("link-forgotten")).toContainText("Keep the original link");
 
     // 1. Sealed: an envelope, one button, and no amount or message yet.
     await expect(page.getByRole("heading", { name: "You have an envelope" })).toBeVisible();
@@ -102,6 +114,46 @@ describeOnMock("M2: opening an envelope", () => {
     );
     for (const href of hrefs) expect(href).not.toContain(SECRET);
     for (const url of requests) expect(url).not.toContain(SECRET);
+
+    // And the URL is still clean at the end of the flow, not only at the start.
+    expect(page.url()).not.toContain(SECRET);
+    expect(await page.evaluate(() => window.location.hash)).toBe("");
+  });
+
+  test("forgets the link on reload, and says so rather than looking broken", async ({ page }) => {
+    // The cost of H1, asserted as a feature: the secret is not in the URL any
+    // more, so a reload has nothing to open with. What the recipient must not
+    // get is a blank screen or a scary error.
+    await page.goto(`/e#${FRAGMENT}`);
+    await expect(page.getByTestId("open-envelope")).toBeVisible();
+    await expect
+      .poll(() => page.evaluate(() => window.location.hash), { timeout: 20_000 })
+      .toBe("");
+
+    await page.reload();
+    await expect(page.getByTestId("open-error")).toContainText("This link has no envelope in it");
+    await expect(page.getByTestId("open-error")).toContainText("forgets the link");
+    await expect(page.getByTestId("open-envelope")).toHaveCount(0);
+    await expect(page.getByTestId("scan-bar")).toHaveCount(0);
+    // A way on from here, rather than a dead end.
+    await expect(page.getByRole("link", { name: "Create an envelope instead" })).toBeVisible();
+    expect((await page.locator("body").innerText()).toLowerCase()).not.toContain("claim");
+  });
+
+  test("leaves no history entry holding the secret", async ({ page }) => {
+    // replaceState, not pushState: going Back from the open page must not land
+    // on a URL with the fragment still in it.
+    await page.goto("/");
+    await page.goto(`/e#${FRAGMENT}`);
+    await expect(page.getByTestId("open-envelope")).toBeVisible();
+    await expect
+      .poll(() => page.evaluate(() => window.location.hash), { timeout: 20_000 })
+      .toBe("");
+
+    await page.goBack();
+    expect(page.url()).not.toContain(SECRET);
+    await page.goForward();
+    expect(page.url()).not.toContain(SECRET);
   });
 
   test("shows a friendly error and never scans without a fragment", async ({ page }) => {
@@ -130,13 +182,22 @@ describeOnMock("M2: opening an envelope", () => {
  * (private, gitignored). The memo is absent: M1 was funded from a ZIP-321 `message=`,
  * which the sending wallet keeps as a local label and never writes into the note. That
  * finding is what moved the create flow to `memo=`.
+ *
+ * That envelope was swept on 2026-09-21 (tx `ba0f91cf…`, block 3,491,056) and is
+ * empty. The live fixture is now the 0.0003 ZEC **fee envelope** from M3-DEST.md,
+ * which that same sweep paid and which is unspent — so the amount is read from
+ * `ZENV_EXPECT_ZEC`, and the block and txid of the M1 funding are only asserted when
+ * this run really is against the M1 envelope.
  */
+const EXPECT_ZEC = process.env.ZENV_EXPECT_ZEC?.trim();
 const M1 = {
-  amount: "0.0013 ZEC",
+  amount: `${EXPECT_ZEC ?? "0.0013"} ZEC`,
   pool: "shielded (Ironwood)",
   height: "3,490,472",
   txidPrefix: "281e9f7b",
 };
+/** True when nothing overrode the amount, so the M1 funding facts still hold. */
+const IS_M1_ENVELOPE = EXPECT_ZEC === undefined || EXPECT_ZEC === "0.0013";
 
 const M1_FRAGMENT = process.env.ZENV_M1_FRAGMENT;
 
@@ -162,6 +223,12 @@ test.describe("M2: opening the funded mainnet envelope on the real core", () => 
 
     await page.goto(`/e#${fragment}`);
 
+    // H1, on the real core: the money's own link is out of the URL bar.
+    await expect
+      .poll(() => page.evaluate(() => window.location.hash), { timeout: 60_000 })
+      .toBe("");
+    expect(page.url()).not.toContain(fragment.split(".")[0]);
+
     // Sealed, on the real core: no MOCK badge anywhere in this flow.
     await expect(page.getByRole("heading", { name: "You have an envelope" })).toBeVisible();
     await expect(page.getByTestId("mock-badge")).toHaveCount(0);
@@ -176,10 +243,16 @@ test.describe("M2: opening the funded mainnet envelope on the real core", () => 
 
     await expect(page.getByTestId("envelope")).toHaveAttribute("data-open", "true");
     await expect(page.getByTestId("pool")).toHaveText(M1.pool);
-    await expect(page.getByTestId("height")).toHaveText(M1.height);
-    await expect(page.getByTestId("txid")).toHaveText(
-      new RegExp(`^${M1.txidPrefix}…[0-9a-f]{8}$`),
-    );
+    if (IS_M1_ENVELOPE) {
+      await expect(page.getByTestId("height")).toHaveText(M1.height);
+      await expect(page.getByTestId("txid")).toHaveText(
+        new RegExp(`^${M1.txidPrefix}…[0-9a-f]{8}$`),
+      );
+    } else {
+      // A different envelope: the note is still a real one at a real height.
+      await expect(page.getByTestId("height")).toHaveText(/^[\d,]+$/);
+      await expect(page.getByTestId("txid")).toHaveText(/^[0-9a-f]{8}…[0-9a-f]{8}$/);
+    }
     await expect(page.getByTestId("mock-badge")).toHaveCount(0);
     expect(errors, `page errors: ${errors.join("; ")}`).toHaveLength(0);
 

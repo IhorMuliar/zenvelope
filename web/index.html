@@ -4,6 +4,26 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="referrer" content="no-referrer" />
+    <!--
+      The Content-Security-Policy, as a fallback.
+
+      `public/_headers` and `netlify.toml` both carry this policy as a real
+      response header, which is where it belongs: a header applies to every
+      response, cannot be stripped by an injection that has already got into the
+      document, and can express `frame-ancestors`. But a static bundle can be
+      served by anything, and on a host that reads neither file every header is
+      inert — no CSP at all, on the one page that holds a bearer secret. This
+      meta is the floor under that: it is the same policy minus the two
+      directives a meta cannot express (`frame-ancestors`, which
+      `X-Frame-Options` also covers from the header side, and `report-uri`).
+
+      Keep it identical to the header. `src/lib/headers.test.ts` compares the
+      three files directive by directive and fails if they drift.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; font-src 'self'; manifest-src 'self'; worker-src 'self' blob:; connect-src 'self' https://zjs.zec.rocks https://zcash-mainnet.chainsafe.dev https://zcash-testnet.chainsafe.dev https://1click.chaindefuser.com"
+    />
     <meta
       name="description"
       content="Send shielded money as a link. No wallet, no address, no amount on screen."

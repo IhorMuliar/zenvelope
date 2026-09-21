@@ -85,6 +85,17 @@ export function explorerTxUrl(txid: string, network: Network = "main"): string {
   return `${EXPLORER_TX[network]}${txid}`;
 }
 
+/**
+ * The worst rate the Solana exit will let a recipient accept, in basis points.
+ *
+ * `effectiveCost().spreadBps` is the whole cost of leaving — the rail's rate, its
+ * withdrawal fee and the 25 bps house fee in one number — and above this the
+ * deposit step is refused outright rather than shown as a percentage nobody can
+ * act on. 1500 bps is 15%: generous next to the 40-60 bps a healthy quote costs,
+ * and far under the "amountOut is nearly zero" answer this exists to stop.
+ */
+export const MAX_SPREAD_BPS = 1500;
+
 /** The explorer's own name, for the link text. */
 export const EXPLORER_NAME = "zcashexplorer.app";
 

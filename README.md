@@ -173,8 +173,19 @@ and the recipient moves them to their own wallet with an ordinary on-chain trans
 
 - **Link shape.** Ours is `https://host/e#secret`. The ZIP preferred a non-resolving
   host so no server could serve code that sees the secret. We accept the served-JS risk
-  and mitigate it: static hosting, subresource integrity, reproducible builds, open
-  source, no analytics.
+  and mitigate it with what actually exists today: static hosting with no backend and no
+  analytics; a strict `Content-Security-Policy` — `default-src 'none'`, no
+  `unsafe-inline`, `connect-src` limited to the two lightwalletd pairs and the swap rail
+  — delivered as a response header by both committed host configurations and as a
+  `<meta>` fallback in `index.html` for any host that reads neither; the wasm core loaded
+  from our own origin only, in a worker; `npm` and `cargo` lockfiles committed, with
+  three runtime npm dependencies; and the secret stripped out of the URL as soon as it
+  has been read (DECISIONS D15). **Planned, and not yet true:** subresource integrity
+  hashes on the built assets, and reproducible builds. Neither exists — the wasm is built
+  by `scripts/build-core.sh` with no hash pinning, `web/src/wasm/` is gitignored, and the
+  threaded core is loaded by a bare `import(url)`, which cannot carry SRI. Until they do,
+  the honest statement of the trust model is that a recipient trusts the host to serve
+  the code this repository contains.
 - **No amount in the link.** The ZIP left human-readable amounts as an open question.
   Our answer is to leave them out entirely, so a shared link discloses nothing.
 - **Secret.** 32 random bytes, base64url, not a Bech32-encoded key.

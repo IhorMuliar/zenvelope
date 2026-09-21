@@ -375,9 +375,21 @@ asserted on the way out. Recorded run in
 [docs/M5-VERIFICATION.md](docs/M5-VERIFICATION.md).
 
 ```sh
-cd web && ZENV_M1_FRAGMENT='<secret>.<birthday>' ZENVELOPE_E2E_PORT=4197 \
-  npx playwright test e2e/m5-real.spec.ts
+cd web && ZENV_M1_FRAGMENT='<secret>.<birthday>' ZENV_EXPECT_ZEC='0.0003' \
+  ZENVELOPE_E2E_PORT=4211 npx playwright test e2e/m5-real.spec.ts
 ```
+
+### Which envelope the real runs use
+
+The M1 envelope (0.0013 ZEC) was swept on 2026-09-21 and is **empty**. The live
+fixture is the **fee envelope** that same sweep paid — 0.0003 ZEC, unspent, its
+link secret in the private `M3-DEST.md`. So `ZENV_M1_FRAGMENT` takes that
+envelope's fragment and `ZENV_EXPECT_ZEC` says what to expect:
+`e2e/m2-open.spec.ts`, `e2e/m3-real.spec.ts` and `e2e/m5-real.spec.ts` all derive
+every figure from it and default to the M1 amount. `VITE_FEE_ADDRESS` cannot be
+set for a run against the fee envelope — 30,000 zatoshi cannot pay a 30,000
+zatoshi flat fee and a miner fee — so those runs simply have no fee line, and the
+specs assert its absence rather than its value.
 
 `e2e/m2-core.spec.ts` drives the built wasm directly on a bare isolated page and
 checks the note against the zcash-devtool oracle. Same environment variable, same
@@ -400,6 +412,30 @@ never logged, and never sent anywhere but the core. Browsers do not send the URL
 fragment to servers, so `/e#…` discloses nothing to the host, and no link the
 open page renders carries the fragment onward.
 
+**It leaves the URL bar as soon as it has been read.** `/e` reads
+`location.hash` once at mount, hands it to the core, and then calls
+`history.replaceState` to rewrite the entry as `location.pathname +
+location.search` (`stripSecretFromUrl` in `src/lib/openFlow.ts`, DECISIONS
+D15). Everything afterwards — the scan, every retry, the sweep — works from the
+in-memory ref. The trade is that a **reload loses it**: the page says so on
+every screen ("Keep the original link: this page forgets it when reloaded"), and
+a reload lands on the ordinary "this link has no envelope in it" screen, which
+now explains the reload rather than blaming the link.
+
+**It is not a React prop.** `Open` passes a getter (`getSecret`), not the
+string, so the bearer capability is not sitting in the element tree where the
+DevTools props inspector, a screen share or a React error overlay would print
+it. The getter is called in exactly one place: inside the sweep, at the moment
+the core is handed the secret.
+
+*Residual.* This is defence in depth, not a vault. Anything executing in the
+page can call the getter, exactly as it could read the ref; the secret is in the
+core worker's memory while a sweep runs; and it is in whatever the recipient
+received the link in — the chat app, the history of the app that opened it — all
+of which is outside this app entirely. The CSP is what is supposed to stop the
+script; this is what is left if something gets past it. `src/components/SendOn.test.ts`
+holds the assertions and the same note.
+
 ## Chain height
 
 `src/lib/grpcweb.ts` is a hand-rolled gRPC-web unary client: no library, about a
@@ -412,15 +448,51 @@ birthday.
 
 ## Headers
 
-`public/_headers` is the Cloudflare Pages / Netlify header file: COOP
-`same-origin` and COEP `require-corp` so WASM threads are available,
-`X-Content-Type-Options: nosniff`, and a strict CSP whose `connect-src` allows
-only the two lightwalletd hosts. `vite.config.ts` sets the same COOP/COEP on the
-dev and preview servers. The open flow needs nothing added to that policy: the
-envelope is inline SVG, there is no external asset, no inline style and no
-request beyond the lightwalletd hosts already listed. `index.html` also carries
-`<meta name="referrer" content="no-referrer">`, alongside the `Referrer-Policy`
-header.
+The security headers are delivered three ways, and they say the same thing in
+all three:
+
+| File | Read by | Carries |
+| --- | --- | --- |
+| `public/_headers` | **Cloudflare Pages** (and Netlify) | every header |
+| `netlify.toml` | **Netlify** | every header, plus the build and the SPA redirect |
+| `index.html` `<meta http-equiv>` | **any host**, including one that reads neither file | the CSP, minus `frame-ancestors` |
+
+The policy: COOP `same-origin` and COEP `require-corp` so WASM threads are
+available, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+`Referrer-Policy: no-referrer`, `Strict-Transport-Security: max-age=31536000;
+includeSubDomains`, and a CSP of `default-src 'none'` with no `unsafe-inline`
+anywhere, `script-src 'self' 'wasm-unsafe-eval'`, and a `connect-src` limited to
+the two lightwalletd pairs and the 1Click rail.
+
+**Why three.** The CSP is the only thing between an injected script and
+`location.hash`, and a header file is a per-host convention: served by anything
+that reads neither file, the app used to ship with no CSP, no COOP/COEP and no
+`frame-ancestors` at all, silently. The `<meta>` is the floor under that. It
+cannot express `frame-ancestors` — no meta CSP can — which is why
+`X-Frame-Options: DENY` is in both header files as well.
+
+`src/lib/headers.test.ts` parses all three and fails if they drift: same
+directives, same sources, with `frame-ancestors` as the one documented
+difference. `vite.config.ts` sets the same COOP/COEP on the dev and preview
+servers.
+
+**Cloudflare Pages.** `public/_headers` and `public/_redirects` are copied into
+`dist/` verbatim by the build and are the whole configuration: set the build
+command to `npm ci && npm run build`, the output directory to `dist`, and the
+root directory to `web`. Pages reads `_headers` from the output directory and
+ignores `netlify.toml`, so the two must agree — which the test enforces.
+`HSTS` is also settable in the Pages dashboard (SSL/TLS → Edge Certificates);
+the header here is what a non-Cloudflare host gets.
+
+The open flow needs nothing added to the policy: the envelope is inline SVG,
+there is no external asset, no inline style and no request beyond the hosts
+already listed. `index.html` also carries `<meta name="referrer"
+content="no-referrer">`, alongside the `Referrer-Policy` header.
+
+**Not verified here.** What a deployment actually sends. Nothing in this
+repository can assert the live response headers; the check is to run
+`curl -sI https://<host>/e` after a deploy and compare it with
+`public/_headers`.
 
 ## Status
 

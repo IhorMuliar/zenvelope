@@ -6,18 +6,27 @@
  *   cd web && npm ci
  *   ZENV_M1_FRAGMENT='<secret>.<birthday>' \
  *   ZENV_M3_DEST_ADDRESS='u1…' \
- *   VITE_FEE_ADDRESS='u1…' \
+ *   ZENV_EXPECT_ZEC='0.0003' \
  *     npm run build && \
  *   ZENV_M1_FRAGMENT='<secret>.<birthday>' \
  *   ZENV_M3_DEST_ADDRESS='u1…' \
- *   VITE_FEE_ADDRESS='u1…' \
+ *   ZENV_EXPECT_ZEC='0.0003' \
  *     npx playwright test e2e/m3-real.spec.ts
  *
- * `VITE_FEE_ADDRESS` has to be set for the **build**, because that is when Vite bakes
- * it into config.ts; it is read again here only so the test can refuse to run against
- * a build that never saw it. All three values live in the private, gitignored
- * M1-FUND.md and M3-DEST.md, are read from the environment, and the group skips
- * cleanly when any is missing — which is what CI and a fresh checkout see.
+ * **Which envelope.** The M1 envelope (0.0013 ZEC) was swept on 2026-09-21 and is
+ * empty. The live fixture is now the **fee envelope** from M3-DEST.md, which holds
+ * 0.0003 ZEC and is unspent, so `ZENV_EXPECT_ZEC` says what this run should find and
+ * every figure below is derived from it. It defaults to the M1 amount, so a run
+ * against a refilled envelope needs nothing new.
+ *
+ * `VITE_FEE_ADDRESS` is optional and has to be set for the **build** when it is set at
+ * all, because that is when Vite bakes it into config.ts; it is read here only to know
+ * whether to expect the fee line. It cannot be used with the fee envelope itself —
+ * 30,000 zatoshi cannot pay a 30,000 zatoshi fee and a miner fee — so the arithmetic
+ * below drops that line when the build had no fee address, and the group skips when
+ * the envelope cannot cover its fees at all. Every value lives in the private,
+ * gitignored M1-FUND.md and M3-DEST.md, is read from the environment, and the group
+ * skips cleanly when one is missing — which is what CI and a fresh checkout see.
  *
  * Where e2e/m3-core.spec.ts drives the wasm exports directly from a bare page, this
  * drives the **product**: the /e page, the open flow, the destination picker, the
@@ -25,7 +34,8 @@
  *
  * What it proves:
  *   - the real wasm is loaded: no MOCK badge anywhere
- *   - the envelope opens on mainnet and reveals 0.0013 ZEC
+ *   - the envelope opens on mainnet and reveals ZENV_EXPECT_ZEC
+ *   - the link secret is out of the URL bar before anything else happens (H1)
  *   - warm_proving_key finishes in the background and the page says "Keys ready"
  *   - a pasted unified address is accepted and the review arithmetic is right,
  *     including the flat Zenvelope fee on its own output
@@ -55,6 +65,7 @@ const DOCS = resolve(HERE, "../docs");
 const FRAGMENT = process.env.ZENV_M1_FRAGMENT;
 const DESTINATION = process.env.ZENV_M3_DEST_ADDRESS;
 const FEE_ADDRESS = process.env.VITE_FEE_ADDRESS;
+const FEE_ENABLED = (FEE_ADDRESS ?? "").trim() !== "";
 
 /**
  * M4: cap the proving pool, so the same build gives both rows of the timing table.
@@ -63,15 +74,45 @@ const FEE_ADDRESS = process.env.VITE_FEE_ADDRESS;
 const THREADS = process.env.ZENV_M4_THREADS;
 const QUERY = `?dry=1${THREADS ? `&threads=${THREADS}` : ""}`;
 
-/** The M1 envelope: 130,000 zatoshi, one Ironwood note. */
-const ENVELOPE = "0.0013 ZEC";
-const NETWORK_FEE = "0.0001 ZEC";
-const SERVICE_FEE = "0.0003 ZEC";
-const RECEIVE = "0.0009 ZEC";
+/* ------------------------------------------------------- what to expect, in ZEC */
 
-/** The proved bundle measured at 9,166 bytes natively and in the browser. */
-const TX_BYTES_MIN = 8_000;
-const TX_BYTES_MAX = 11_000;
+/** Zatoshi from a ZEC string: "0.0003" -> 30000n. */
+function toZat(zec: string): bigint {
+  const [whole, frac = ""] = zec.trim().split(".");
+  return BigInt(whole || "0") * 100_000_000n + BigInt((frac + "00000000").slice(0, 8));
+}
+
+/** The same string the page renders, from src/lib/format.ts. */
+function asZec(zat: bigint): string {
+  const whole = (zat / 100_000_000n).toString();
+  const frac = (zat % 100_000_000n).toString().padStart(8, "0").replace(/0+$/, "");
+  return `${whole}.${frac === "" ? "0" : frac} ZEC`;
+}
+
+/**
+ * What the envelope under test holds. The M1 envelope was swept and is empty, so
+ * the live fixture is the 0.0003 ZEC fee envelope; the default is kept at the M1
+ * amount so nothing about this file assumes today's fixture forever.
+ */
+const ENVELOPE_ZAT = toZat(process.env.ZENV_EXPECT_ZEC ?? "0.0013");
+/** ZIP-317 for a shielded destination, which both destinations here are. */
+const NETWORK_FEE_ZAT = 10_000n;
+/** The flat Zenvelope fee, when the build had an address to send it to (D13). */
+const SERVICE_FEE_ZAT = FEE_ENABLED ? 30_000n : 0n;
+const RECEIVE_ZAT = ENVELOPE_ZAT - NETWORK_FEE_ZAT - SERVICE_FEE_ZAT;
+
+const ENVELOPE = asZec(ENVELOPE_ZAT);
+const NETWORK_FEE = asZec(NETWORK_FEE_ZAT);
+const SERVICE_FEE = asZec(SERVICE_FEE_ZAT);
+const RECEIVE = asZec(RECEIVE_ZAT);
+
+/**
+ * The proved bundle: 9,166 bytes for the two-output M1 sweep, measured natively and
+ * in the browser. A one-output sweep is smaller, so the floor is generous — the
+ * point of the check is that a real proved transaction was built, not its exact size.
+ */
+const TX_BYTES_MIN = 5_000;
+const TX_BYTES_MAX = 12_000;
 
 /** One stage row's state, with the millisecond it reached it. */
 interface StageEvent {
@@ -133,6 +174,11 @@ function stageDurations(events: StageEvent[], endedAt: number): Array<[string, n
 /** Opens the real envelope and waits for the reveal. */
 async function openEnvelope(page: Page): Promise<void> {
   await page.goto(`/e${QUERY}#${FRAGMENT}`);
+  // H1: the money's own link is out of the address bar before anything else.
+  await expect
+    .poll(() => page.evaluate(() => window.location.hash), { timeout: 60_000 })
+    .toBe("");
+  expect(page.url()).not.toContain(FRAGMENT!.split(".")[0]);
   // The real core is in this build: a MOCK badge here would mean the wasm is missing
   // and every number below would be invented.
   await expect(page.getByTestId("mock-badge")).toHaveCount(0);
@@ -153,7 +199,12 @@ async function openEnvelope(page: Page): Promise<void> {
 async function sweepAndAssert(page: Page, label: string, screenshot?: string): Promise<number> {
   await expect(page.getByTestId("review-in-envelope")).toHaveText(ENVELOPE);
   await expect(page.getByTestId("review-network-fee")).toHaveText(NETWORK_FEE);
-  await expect(page.getByTestId("review-service-fee")).toHaveText(SERVICE_FEE);
+  if (FEE_ENABLED) {
+    await expect(page.getByTestId("review-service-fee")).toHaveText(SERVICE_FEE);
+  } else {
+    // No fee address in this build, so no fee output and no line for it (D13).
+    await expect(page.getByTestId("review-service-fee")).toHaveCount(0);
+  }
   await expect(page.getByTestId("review-receive")).toHaveText(RECEIVE);
   if (screenshot) {
     mkdirSync(DOCS, { recursive: true });
@@ -260,9 +311,14 @@ async function sweepAndAssert(page: Page, label: string, screenshot?: string): P
 
 test.describe("M3: a real mainnet sweep through the UI, dry run", () => {
   test.skip(
-    !FRAGMENT || !DESTINATION || !FEE_ADDRESS,
-    "ZENV_M1_FRAGMENT, ZENV_M3_DEST_ADDRESS and VITE_FEE_ADDRESS must all be set, and " +
-      "VITE_FEE_ADDRESS must have been set for `npm run build` too",
+    !FRAGMENT || !DESTINATION,
+    "ZENV_M1_FRAGMENT and ZENV_M3_DEST_ADDRESS must both be set. VITE_FEE_ADDRESS is " +
+      "optional, and when it is set it must have been set for `npm run build` too",
+  );
+  test.skip(
+    RECEIVE_ZAT <= 0n,
+    `the envelope (${ENVELOPE}) cannot cover its fees; set ZENV_EXPECT_ZEC, or run ` +
+      "without VITE_FEE_ADDRESS",
   );
 
   // The proving key and the proof are minutes of single-threaded wasm each.

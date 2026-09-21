@@ -16,8 +16,10 @@
  * (TrustBoundary), and the first thing it shows after that is what it costs.
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { solanaExit as copy } from "../copy/en";
+import type { Network } from "../core/types";
+import { classifyDestinationAsync, type ClassifyAsync } from "../lib/destination";
 import { formatZec, formatZecAmount } from "../lib/format";
 import {
   OneClickError,
@@ -36,8 +38,10 @@ import {
   canQuote,
   destinationReady,
   initialSolanaExitState,
+  quoteAcceptable,
   recipientAddress,
   refundAddress,
+  refundReady,
   solanaExitReducer,
   type DepositReservation,
   type SolanaExitState,
@@ -67,6 +71,12 @@ interface Props {
    * again (DECISIONS D14).
    */
   envelopeAddress: string;
+  /**
+   * The core's address classifier, for the refund override and for nothing else
+   * (M4). The exit still never sees the secret and never builds a transaction.
+   */
+  classify: ClassifyAsync;
+  network: Network;
   onPlan(plan: SwapPlan): void;
   onBack(): void;
 }
@@ -79,13 +89,53 @@ function formatDeadline(iso: string | null): string {
   return at.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
-export function SolanaExit({ amountZat, envelopeAddress, onPlan, onBack }: Props) {
+export function SolanaExit({
+  amountZat,
+  envelopeAddress,
+  classify,
+  network,
+  onPlan,
+  onBack,
+}: Props) {
   const [state, setState] = useState<SolanaExitState>(initialSolanaExitState);
   const dispatch = useCallback(
     (event: Parameters<typeof solanaExitReducer>[1]) =>
       setState((s) => solanaExitReducer(s, event)),
     [],
   );
+
+  /**
+   * The refund override, through the core (M4).
+   *
+   * It is free text that decides who can recover the money when a swap fails, so
+   * it goes through exactly the classifier every other Zcash address in the
+   * product goes through — unified with an Orchard receiver, or transparent, on
+   * this network — and the quote button stays off until it passes. The empty box
+   * is the normal case and needs no check: it means the envelope's own address
+   * (DECISIONS D14).
+   *
+   * The verdict is tagged with the text it was asked about, so an answer the
+   * recipient has already typed past cannot land on newer text.
+   */
+  useEffect(() => {
+    const input = state.refundOverride.trim();
+    if (input === "") return;
+    let alive = true;
+    void classifyDestinationAsync(input, classify, network).then((verdict) => {
+      if (!alive) return;
+      dispatch({
+        type: "refundVerdict",
+        input,
+        ok: verdict.canContinue,
+        message: verdict.canContinue
+          ? null
+          : [copy.refundInvalid, verdict.reason ?? verdict.message].filter(Boolean).join(" "),
+      });
+    });
+    return () => {
+      alive = false;
+    };
+  }, [state.refundOverride, classify, network, dispatch]);
 
   /** One place turns a thrown {@link OneClickError} into what the screen says. */
   const failQuote = useCallback(
@@ -122,6 +172,9 @@ export function SolanaExit({ amountZat, envelopeAddress, onPlan, onBack }: Props
             address: response.quote.depositAddress ?? "",
             deadline: response.quote.deadline ?? response.quote.timeWhenInactive ?? null,
             quote: response.quote,
+            // Kept so the caller can compare it with what we asked for before it
+            // sweeps anything to that address (M6).
+            quoteRequest: response.quoteRequest,
           },
         });
       } catch (err) {
@@ -328,6 +381,20 @@ export function SolanaExit({ amountZat, envelopeAddress, onPlan, onBack }: Props
               data-testid="swap-refund-input"
             />
           </label>
+          {state.refundStatus !== "default" ? (
+            <p
+              className={state.refundStatus === "bad" ? "error" : "hint"}
+              data-status={state.refundStatus}
+              aria-live="polite"
+              data-testid="swap-refund-feedback"
+            >
+              {state.refundStatus === "checking"
+                ? copy.refundChecking
+                : state.refundStatus === "ok"
+                  ? copy.refundOk
+                  : state.refundMessage}
+            </p>
+          ) : null}
           <p className="fine">{copy.refundOverrideHint}</p>
         </details>
 
@@ -360,9 +427,13 @@ export function SolanaExit({ amountZat, envelopeAddress, onPlan, onBack }: Props
         >
           {state.busy ? copy.quoteBusy : copy.quoteButton}
         </button>
-        {!destinationReady(state) ? (
+        {!destinationReady(state) || !refundReady(state) ? (
           <p className="fine" data-testid="swap-destination-blocked">
-            {state.mode === "generate" ? copy.savedBlockedHint : copy.pasteBody}
+            {!refundReady(state)
+              ? copy.refundInvalid
+              : state.mode === "generate"
+                ? copy.savedBlockedHint
+                : copy.pasteBody}
           </p>
         ) : null}
         <button type="button" className="ghost wide" onClick={back} data-testid="swap-back">
@@ -378,6 +449,9 @@ export function SolanaExit({ amountZat, envelopeAddress, onPlan, onBack }: Props
     const quote = state.quote.quote;
     const cost = effectiveCost(quote);
     const low = belowMinimum(state, amountZat);
+    // The cap on the cost of leaving, and the rail's own minAmountOut (M5). A
+    // quote that fails either is shown in full and cannot be acted on.
+    const verdict = quoteAcceptable(quote);
     return (
       <div className="card stack" data-testid="swap-quote">
         <h2>{copy.quoteTitle}</h2>
@@ -425,6 +499,11 @@ export function SolanaExit({ amountZat, envelopeAddress, onPlan, onBack }: Props
         {low && state.minAmountZat !== null ? (
           <p className="error" data-testid="swap-minimum">
             {copy.minimum(formatZec(state.minAmountZat))}
+          </p>
+        ) : null}
+        {!verdict.ok ? (
+          <p className="error" data-testid="swap-quote-refused">
+            {verdict.reason}
           </p>
         ) : null}
         {state.error && !low ? (

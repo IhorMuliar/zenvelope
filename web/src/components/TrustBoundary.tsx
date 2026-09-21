@@ -11,12 +11,28 @@
  * button is disabled *and* the handler re-checks, so neither a devtools poke at
  * the `disabled` attribute nor a keyboard activation gets through.
  *
- * Not wired into the send-on flow yet — M5 does that. It is written, styled and
- * tested here so that the copy and the gate are settled before the rail lands.
+ * Two destinations use it, with the same gate and different words: the Solana
+ * exit (M5) and a pasted transparent `t1`, which leaves the shielded pool just
+ * as permanently and used to be one warning line above "Send it on" (M7).
  */
 
 import { useState } from "react";
-import { trustBoundary as copy } from "../copy/en";
+import { trustBoundary as solanaCopy } from "../copy/en";
+
+/**
+ * The words on one of these screens. The shape is the Solana exit's; the
+ * transparent variant (`transparentBoundary` in ../copy/en) fills the same
+ * fields with what a `t1` costs.
+ */
+export interface TrustBoundaryContent {
+  title: string;
+  lede: string;
+  points: ReadonlyArray<{ title: string; body: string }>;
+  checkbox: string;
+  blockedHint: string;
+  continue: string;
+  back: string;
+}
 
 export interface TrustBoundaryProps {
   /** Called only once the box is ticked. Never called otherwise. */
@@ -32,6 +48,13 @@ export interface TrustBoundaryProps {
   onAcknowledgedChange?: (next: boolean) => void;
   /** Overrides the button label; the gate is the same either way. */
   continueLabel?: string;
+  /**
+   * The words. Defaults to the Solana exit's. The gate does not move with them:
+   * whatever this screen says, the tick is what opens it.
+   */
+  content?: TrustBoundaryContent;
+  /** So a test can tell the two variants apart. The inner test ids do not change. */
+  testId?: string;
 }
 
 /**
@@ -47,8 +70,12 @@ export function TrustBoundary({
   onBack,
   acknowledged,
   onAcknowledgedChange,
-  continueLabel = copy.continue,
+  continueLabel,
+  content,
+  testId = "trust-boundary",
 }: TrustBoundaryProps) {
+  const copy = content ?? solanaCopy;
+  const label = continueLabel ?? copy.continue;
   const [own, setOwn] = useState(false);
   const ticked = acknowledged ?? own;
   const blocked = trustBoundaryBlocked(ticked);
@@ -59,7 +86,7 @@ export function TrustBoundary({
   };
 
   return (
-    <section className="card stack trust-boundary" data-testid="trust-boundary">
+    <section className="card stack trust-boundary" data-testid={testId}>
       <h2 data-testid="trust-title">{copy.title}</h2>
       <p className="warn">{copy.lede}</p>
 
@@ -95,7 +122,7 @@ export function TrustBoundary({
           onContinue?.();
         }}
       >
-        {continueLabel}
+        {label}
       </button>
 
       {blocked ? (

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   DESTINATION_COPY,
-  WRONG_NETWORK_HINT,
   classifyDestination,
   classifyDestinationAsync,
   emptyDestination,
@@ -100,14 +99,42 @@ describe("the field itself", () => {
     expect(s.canContinue).toBe(false);
   });
 
-  it("names the common mistake when a testnet address is pasted on mainnet", () => {
-    const s = classifyDestination("utest1abc", says("invalid"));
-    expect(s.message).toContain(WRONG_NETWORK_HINT);
+  /* ------------------------------------------------- L10: the core's reason */
+
+  it("carries the core's reason through, instead of guessing from the prefix", () => {
+    const s = classifyDestination(
+      "utest1abc",
+      says("invalid", "this is a Test address and the sweep is running on Main"),
+    );
+    expect(s.status).toBe("error");
+    expect(s.reason).toBe("this is a Test address and the sweep is running on Main");
+    // The product's line is unchanged: the reason is shown beside it, not folded in.
+    expect(s.message).toBe(DESTINATION_COPY.invalid);
   });
 
-  it("does not add the testnet hint on the testnet page", () => {
-    const s = classifyDestination("utest1abc", says("invalid"), "test");
-    expect(s.message).not.toContain(WRONG_NETWORK_HINT);
+  it("names a wrong-network address whatever it starts with", () => {
+    // The old prefix regex knew utest1/ztestsapling1/tm/tn and nothing else, so a
+    // mainnet page was silent about every other wrong-network paste.
+    const s = classifyDestination(
+      "u1notaprefixtheregexknew",
+      says("invalid", "this is a Test address and the sweep is running on Main"),
+    );
+    expect(s.reason).toMatch(/Test address/);
+  });
+
+  it("says nothing extra about an address it is happy with", () => {
+    expect(classifyDestination("u1abc", says("unified_orchard", "fine")).reason).toBeNull();
+  });
+
+  it("has no reason to give when the core gave none", () => {
+    expect(classifyDestination("u1abc", says("invalid")).reason).toBeNull();
+    expect(classifyDestination("u1abc", says("invalid", "   ")).reason).toBeNull();
+  });
+
+  it("explains a transparent address with the core's own words as well", () => {
+    const s = classifyDestination("t1abc", says("transparent", "transparent P2PKH"));
+    expect(s.status).toBe("warn");
+    expect(s.reason).toBe("transparent P2PKH");
   });
 });
 
@@ -132,8 +159,8 @@ describe("against the MOCK classifier", () => {
 describe("across the core worker", () => {
   /** The same verdict, one message round trip away. */
   const asyncSays =
-    (kind: AddressKind) =>
-    async (): Promise<AddressClass> => ({ kind, reason: null });
+    (kind: AddressKind, reason: string | null = null) =>
+    async (): Promise<AddressClass> => ({ kind, reason });
 
   it("gives the same answer the synchronous classifier does", async () => {
     for (const kind of Object.keys(DESTINATION_COPY) as AddressKind[]) {
@@ -162,8 +189,12 @@ describe("across the core worker", () => {
     expect(s.canContinue).toBe(false);
   });
 
-  it("still adds the testnet hint on a mainnet page", async () => {
-    const s = await classifyDestinationAsync("utest1abc", asyncSays("invalid"), "main");
-    expect(s.message).toContain(WRONG_NETWORK_HINT);
+  it("carries the core's reason across the worker too", async () => {
+    const s = await classifyDestinationAsync(
+      "utest1abc",
+      asyncSays("invalid", "this is a Test address and the sweep is running on Main"),
+      "main",
+    );
+    expect(s.reason).toMatch(/Test address/);
   });
 });
