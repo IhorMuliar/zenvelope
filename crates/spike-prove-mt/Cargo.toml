@@ -1,0 +1,50 @@
+[package]
+name = "zenvelope-spike-prove-mt"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "THROWAWAY M4 spike: the same Ironwood proof as crates/spike-prove, but with orchard's `multicore` (rayon) and a wasm-bindgen-rayon thread pool."
+
+[lib]
+name = "zenvelope_spike_prove_mt"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The one difference from `crates/spike-prove`: `multicore` is ON, which turns on
+# halo2_proofs/multicore and with it rayon. Without threads in the wasm that would be
+# dead weight; with wasm-bindgen-rayon's pool it is the whole point.
+orchard = { version = "0.15.5", default-features = false, features = [
+    "circuit",
+    "multicore",
+] }
+incrementalmerkletree = "0.8.1"
+rand = { version = "0.8", default-features = false }
+rand_chacha = { version = "0.3", default-features = false }
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+
+# `no-bundler`: the spike harness loads the package straight off a static server with a
+# bare `import()`. The default (bundler) glue resolves the main module as
+# `import("../../..")`, which no browser resolves on its own. web/ runs Vite, which can,
+# so an app build would drop this feature.
+rayon = "1.8"
+wasm-bindgen-rayon = { version = "1.3.0", features = ["no-bundler"] }
+
+# Same getrandom 0.2 `js` backend as the single-threaded spike.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
+
+# wasm-opt has to be told about threads and shared memory on top of the post-MVP
+# features the single-threaded spike already names.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = [
+    "-O3",
+    "--enable-threads",
+    "--enable-bulk-memory",
+    "--enable-sign-ext",
+    "--enable-mutable-globals",
+    "--enable-nontrapping-float-to-int",
+    "--enable-reference-types",
+    "--enable-multivalue",
+]
