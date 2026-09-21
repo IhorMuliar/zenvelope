@@ -5,9 +5,12 @@ the spending key from the link fragment alone, witnesses the envelope's Ironwood
 against the chain's own commitment tree, builds a two-action V6 transaction and **proves
 it in WASM** — through the product's own screens, not a test harness.
 
-**Nothing was broadcast.** Every run on this page took the dry-run path and passed
-`broadcast: false` to `sweep_envelope`. The money is still in the M1 envelope and the link
-still works. Sending it is a separate step, triggered by hand.
+**Sections 1–7 were dry runs.** Every run recorded there took the dry-run path and passed
+`broadcast: false` to `sweep_envelope`, and at the time they were written the money was
+still in the M1 envelope. Sending it was a separate step, triggered by hand on the same
+day: it is [§9, Broadcast, verified](#9-broadcast-verified) — tx
+`ba0f91cfe7…6260fa2aad`, block **3,491,056**, 0.0009 ZEC delivered. The M1 envelope is
+now empty and its link no longer holds anything.
 
 Run on 2026-09-21. Everything below is a transcript of commands that were actually
 executed, not a description of what they would do.
@@ -212,7 +215,7 @@ one piece of React state, it is read by nothing, and it is not recorded here or 
 else. A fresh wallet is generated on every run, so this address is a record of what
 happened, not something to pay.
 
-## 6. Nothing was broadcast
+## 6. Nothing was broadcast in §1–5
 
 - The page was loaded with `?dry=1`, so `SendOn` passed `broadcast: false`.
 - The core's own result says so, and the test asserts it through the UI: the done screen
@@ -222,10 +225,12 @@ happened, not something to pay.
   `error_message === null`.
 - The native integration test (`cargo test -p zenvelope-core --test m3_sweep -- --ignored`)
   is `broadcast: false` as well.
-- The M1 envelope still holds its 130,000 zatoshi, and the link in `M1-FUND.md` still
-  opens it.
+- The M1 envelope still held its 130,000 zatoshi when this section was written, and the
+  link in `M1-FUND.md` still opened it.
 
-Broadcasting the real sweep is a separate step, triggered by hand by the owner.
+Broadcasting the real sweep was a separate step, triggered by hand by the owner. It
+happened later the same day, and it is [§9](#9-broadcast-verified): the envelope is empty
+now, and everything above is the evidence that was in hand before it was spent.
 
 ## 7. Nothing regressed
 
@@ -302,3 +307,162 @@ by this milestone.
 checkout see. None of the three is ever written to the repository: `M1-FUND.md` and
 `M3-DEST.md` are gitignored, `dist/` is gitignored, and the built bundle that carries the
 fee address is never committed.
+
+## 9. Broadcast, verified
+
+On **2026-09-21**, with the owner's explicit approval, the same flow was run once more
+through the production build **without `?dry=1`**. The transaction was signed, proved and
+**sent**. This section is the transcript.
+
+| | |
+| --- | --- |
+| txid | **`ba0f91cfe7ca33dd269b692bf80027df2681a321215e90ab28c2a56260fa2aad`** |
+| explorer | https://mainnet.zcashexplorer.app/transactions/ba0f91cfe7ca33dd269b692bf80027df2681a321215e90ab28c2a56260fa2aad |
+| mined in block | **3,491,056**, 2026-09-21 11:13:16 UTC |
+| inputs | the M1 envelope's one Ironwood note, 130,000 zat (tx `281e9f7b…341d43`, block 3,490,472, action index 1) |
+| outputs | 90,000 zat to the destination wallet, 30,000 zat to the fee envelope, both Ironwood |
+| network fee | 10,000 zat (ZIP-317, two actions) |
+| proving | `proving: 4 threads` — the threaded wasm package, in the core worker |
+
+### The run
+
+Playwright's own chromium (not the CDP browser on 9222), viewport 1280×720, video
+recording on, against `npm run preview` on port 4207 with the production COOP/COEP
+headers, on the build made with `VITE_FEE_ADDRESS` set to the fee envelope's address.
+
+| Moment | UTC |
+| --- | --- |
+| `/e#<fragment>` loaded, no query string | 11:11:20.3 |
+| envelope open, `0.0013 ZEC` on screen | 11:11:35.0 (14.2 s) |
+| `Keys ready` — `warm_proving_key` done in the background | 11:11:49.9 (14.9 s after the reveal) |
+| destination pasted, review shown | 11:11:50.1 |
+| **"Send it on" tapped** | **11:11:50.4** |
+| **Done screen: `Sent.`** | **11:12:30.6** |
+| the transaction is in a block | 11:13:16 (block 3,491,056) |
+
+### What the page showed
+
+| | Review screen | Done screen |
+| --- | --- | --- |
+| In the envelope | `0.0013 ZEC` | — |
+| Network fee (ZIP-317, 2 actions) | `0.0001 ZEC` | — |
+| Zenvelope fee (D5, second output) | `0.0003 ZEC` | — |
+| You receive | **`0.0009 ZEC`** | `0.0009 ZEC` |
+| Heading | `Check this over` | **`Sent.`** |
+| Transaction | — | `ba0f91cfe7…6260fa2aad` |
+| Explorer link | — | **present**, to zcashexplorer.app |
+| Dry-run line | — | **absent** |
+| Envelope | — | **`The envelope is now empty.`** |
+| Footer | `proving: 4 threads` | `proving: 4 threads` |
+| MOCK badge | absent | absent |
+
+Screenshot of the done screen: [m3-sent.png](m3-sent.png). Video of the whole run:
+`/root/Projects/web3-sweep/zenvelope-video/m3-broadcast.webm` (and `.mp4`), 1280×720.
+
+The run also asserted what every dry run asserts: no page error, the link secret in **no**
+request URL, and `localStorage` and `sessionStorage` both `{}` at the end.
+
+### Stage timings
+
+Painted in the page, recorded by a `MutationObserver` on the stage rows' `data-state`:
+
+| Stage | Wall time |
+| --- | --- |
+| `witness` | **26.6 s** |
+| `keys` | 0.1 s |
+| `proving` | **13.1 s** |
+| `broadcast` | **0.4 s** — the real `SendTransaction`, where every dry run skipped it |
+| **tap → Done** | **40.3 s** |
+
+`proving` at 13.1 s and the warm key at 14.9 s match M4's four-thread table (14.7 s and
+16.1 s). `witness` is 26.6 s against M4's 8.1 s: it is network round trips and a block
+range that has grown by ~470 blocks since M4 measured it, which is the caveat
+[M4-VERIFICATION.md](M4-VERIFICATION.md) §3 already puts under its own table. A dry
+rehearsal on this same build, minutes earlier, gave the same shape — witness 25.6 s,
+keys 0.1 s, proving 13.5 s, 39.2 s tap to done — so the only difference the real run made
+was the 0.4 s of `broadcast`.
+
+### The oracle: three independent wallets
+
+`zcash-devtool` (`/root/Projects/web3-sweep/tools/zcash-devtool`), view-only wallets, the
+`zecrocks` servers — none of Zenvelope's own code. The two new wallets were created with
+`wallet init-fvk` from the UFVKs in the gitignored `M3-DEST.md`, birthday 3,490,472.
+
+| Wallet | Command | Result |
+| --- | --- | --- |
+| **(a) the M1 envelope** `tools/wallets/m1-fund-watch` | `sync` + `balance --json` | `{"total": 0, …}` — **the note is spent**. `list-tx` now lists two transactions: the funding `281e9f7b…341d43` at 3,490,472 and `ba0f91cf…fa2aad` at **3,491,056**, the latter with **0 notes received** |
+| **(b) the destination wallet** `tools/wallets/m3-dest-watch` | `init-fvk` + `sync` + `balance --json` | `{"total": 90000, …}` — **90,000 zat received**, `list-tx`: output 0 of `ba0f91cf…fa2aad`, **Ironwood**, 0.00090000 ZEC, mined 3,491,056 |
+| **(c) the fee envelope** `tools/wallets/m3-fee-watch` | `init-fvk` + `sync` + `balance --json` | `{"total": 30000, …}` — **30,000 zat received**, `list-tx`: output 1 of the same transaction, **Ironwood**, 0.00030000 ZEC, mined 3,491,056 |
+
+130,000 in, 90,000 + 30,000 out, 10,000 to the miners. The arithmetic on the review screen
+is the arithmetic on the chain.
+
+Confirmations were polled until the chain had moved past the block. At 11:19 UTC the tip
+was **3,491,060** — four blocks above the one that carries the transaction — with all
+three balances unchanged, and the two receiving wallets still reported their notes as
+`total` but not yet `ironwood_spendable`, which is the wallet's confirmation rule, not a
+doubt about the transaction. At 11:30 UTC, tip **3,491,068** (twelve confirmations), both
+had crossed it:
+
+```
+m1-fund-watch  {"chain_tip_height":3491068,"ironwood_spendable":0,    "total":0}
+m3-dest-watch  {"chain_tip_height":3491068,"ironwood_spendable":90000,"total":90000}
+m3-fee-watch   {"chain_tip_height":3491068,"ironwood_spendable":30000,"total":30000}
+```
+
+The recipient's 90,000 zatoshi are spendable, from a link that was opened in a browser.
+
+### The product's own view of the fee envelope
+
+The fee output is an ordinary Zenvelope envelope, so the product can open it. Loading
+`/e?dry=1#<fee secret>` in the same browser and tapping "Open envelope":
+
+```
+fee envelope in the app: 0.0003 ZEC (13.2 s)
+```
+
+The app scans, decrypts and reveals the fee it was paid, by the same path a recipient
+uses. The fee envelope's secret is the money and stays in the gitignored `M3-DEST.md`.
+
+### What this build was
+
+Rebuilt from this tree for the broadcast, so the numbers above belong to the code that is
+committed here and not to M3's or M4's snapshot:
+
+```
+wasm (1 thread): 2,249,295 bytes raw, 1,062,892 gzip
+wasm (threads):  2,302,997 bytes raw, 1,087,121 gzip
+npm run build:   tsc -b && vite build, clean, 134 modules
+```
+
+Both are larger than M4's table (2,231,700 and 2,285,245) by the M5 Solana exit and the
+group-envelope code that landed after it; the circuit is unchanged.
+
+### Exact commands
+
+```sh
+./scripts/build-core.sh                    # both wasm packages
+cd web && npm ci
+VITE_FEE_ADDRESS="$ZENV_M3_FEE_ADDRESS" npm run build
+npm run preview -- --host 127.0.0.1 --port 4207 --strictPort
+
+# the broadcast: Playwright's own chromium, 1280x720, recordVideo on,
+# /e#<fragment> with NO ?dry=1
+node <driver>.mjs                          # the driver is not in the repo: it is a
+                                           # one-shot that spends a real envelope
+
+# the oracle
+B=/root/Projects/web3-sweep/tools/zcash-devtool/target/release/zcash-devtool
+W=/root/Projects/web3-sweep/tools/wallets
+"$B" wallet -w "$W/m1-fund-watch" sync -s zecrocks && "$B" wallet -w "$W/m1-fund-watch" balance --json
+"$B" wallet -w "$W/m3-dest-watch" init-fvk --name m3-dest --fvk "$DEST_UFVK" --birthday 3490472 -s zecrocks
+"$B" wallet -w "$W/m3-dest-watch" sync -s zecrocks && "$B" wallet -w "$W/m3-dest-watch" balance --json
+"$B" wallet -w "$W/m3-fee-watch"  init-fvk --name m3-fee  --fvk "$FEE_UFVK"  --birthday 3490472 -s zecrocks
+"$B" wallet -w "$W/m3-fee-watch"  sync -s zecrocks && "$B" wallet -w "$W/m3-fee-watch"  balance --json
+```
+
+The driver that broadcasts is deliberately **not** committed: `e2e/m3-real.spec.ts` stays
+dry-run-only, so nothing in this repository can spend an envelope by being run.
+
+**M3 is done.** A link, on mainnet, opened in a browser and swept to its recipient with
+the proof built in that browser. Nothing in the path held the money.

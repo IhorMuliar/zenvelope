@@ -57,17 +57,20 @@ M2 (done 2026-09-21) Open a link on mainnet: scan, decrypt, show amount. The
    `message=` never reaches the chain — the M1 note arrived with Memo::Empty — so
    the sender's text now rides in the ZIP-321 `memo=` parameter and is encrypted
    on-chain. Transcript in web/docs/M2-VERIFICATION.md.
-M3 (built 2026-09-21, broadcast pending) Spend from the link to a pasted Zcash
-   address in the browser, on mainnet. In-browser Ironwood proving. End to end.
-   Built: the sweep is proved in the browser on mainnet, through the product's own
-   screens. The /e page opens the real M1 envelope, warms the Ironwood proving key
-   in the background, takes a pasted unified address or a wallet generated in the
-   page, shows the fee breakdown (0.0013 in, 0.0001 network fee, 0.0003 Zenvelope
-   fee, 0.0009 out), witnesses the note against the chain's own Ironwood tree and
-   proves a two-action V6 transaction of 9,166 bytes — 48.9 s from the tap to the
-   done screen with the key already warm. Broadcast pending: every run so far used
-   the ?dry=1 path with broadcast: false and nothing has been sent. Transcript in
-   web/docs/M3-VERIFICATION.md. Demo video 1 recorded here.
+M3 (done 2026-09-21) Spend from the link to a pasted Zcash address in the
+   browser, on mainnet. In-browser Ironwood proving. End to end. Done: the sweep
+   was proved in the browser and broadcast, through the product's own screens.
+   The /e page opened the real M1 envelope, warmed the Ironwood proving key in
+   the background, took a pasted unified address, showed the fee breakdown
+   (0.0013 in, 0.0001 network fee, 0.0003 Zenvelope fee, 0.0009 out), witnessed
+   the note against the chain's own Ironwood tree, proved a two-action V6
+   transaction on four threads and sent it — 40.3 s from the tap to "Sent.",
+   mined in block 3,491,056 as
+   ba0f91cfe7ca33dd269b692bf80027df2681a321215e90ab28c2a56260fa2aad. Three
+   independent view-only zcash-devtool wallets confirm it: the envelope's note
+   is spent (balance 0), the destination received 90,000 zat and the fee
+   envelope 30,000 zat, both Ironwood. Transcript in
+   web/docs/M3-VERIFICATION.md, §9 for the broadcast. Demo video 1 recorded here.
 M4 (in progress 2026-09-21) Drainer-safe copy, trust-boundary screens, in-browser
    fresh wallet with seed export for recipients who have nothing — plus the proving
    work those screens need to be worth reading. In: the core runs in a Web Worker
