@@ -194,7 +194,9 @@ describeOnMock("M3: sending the envelope on", () => {
     expect(await asNumber("keys")).toBeGreaterThanOrEqual(2.9);
     expect(await asNumber("total")).toBeGreaterThanOrEqual(3.9);
     await expect(page.getByTestId("timing-device")).toHaveText(
-      /^proving: \d+ threads? \u00b7 hardwareConcurrency \d+ \u00b7 \w+ on \w+$/,
+      // The gateway the core raced and won with closes the line. On the mock it is
+      // the word "mock", which no mainnet run can produce.
+      /^proving: \d+ threads? \u00b7 hardwareConcurrency \d+ \u00b7 \w+ on \w+ \u00b7 gateway \S+$/,
     );
     // And it copies as plain text.
     const copyTiming = page.getByTestId("copy-timing");

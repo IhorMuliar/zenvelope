@@ -3,6 +3,7 @@ import {
   BAD_FRAGMENT_COPY,
   NOT_FOUND_COPY,
   SCAN_FAILED_COPY,
+  gatewayList,
   initialOpenState,
   isScanning,
   openReducer,
@@ -38,6 +39,7 @@ const FOUND: OpenResult = {
   birthday: 3490437,
   birthday_defaulted: false,
   scanned_blocks: 64,
+  gateway: "zjs.zec.rocks",
 };
 
 const EMPTY: OpenResult = {
@@ -48,6 +50,7 @@ const EMPTY: OpenResult = {
   birthday: 3490437,
   birthday_defaulted: false,
   scanned_blocks: 64,
+  gateway: "zjs.zec.rocks",
 };
 
 describe("openReducer", () => {
@@ -200,17 +203,25 @@ describe("runOpen", () => {
       onProgress: (s, t) => seen.push([s, t]),
     });
     expect(result).toEqual(FOUND);
-    expect(c.calls).toEqual([hosts[0]]);
+    // One attempt, and it names both gateways so the core can race them.
+    expect(c.calls).toEqual([`${hosts[0]},${hosts[1]}`]);
     expect(seen).toEqual([
       [0, 0],
       [5, 10],
     ]);
   });
 
-  it("retries once on the failover host", async () => {
+  it("joins the gateways into one preference-ordered list", () => {
+    expect(gatewayList(hosts)).toBe(`${hosts[0]},${hosts[1]}`);
+    // An unset failover must not leave a trailing comma the core would refuse.
+    expect(gatewayList([hosts[0], ""])).toBe(hosts[0]);
+    expect(gatewayList([])).toBe("");
+  });
+
+  it("retries on the failover host alone when the race refused", async () => {
     const attempts: number[] = [];
     const c = core(async (url) => {
-      if (url === hosts[0]) throw new Error("connect ECONNREFUSED primary");
+      if (url.includes(hosts[0])) throw new Error("connect ECONNREFUSED primary");
       return FOUND;
     });
     const result = await runOpen({
@@ -223,7 +234,7 @@ describe("runOpen", () => {
       onAttempt: (a) => attempts.push(a),
     });
     expect(result).toEqual(FOUND);
-    expect(c.calls).toEqual([hosts[0], hosts[1]]);
+    expect(c.calls).toEqual([`${hosts[0]},${hosts[1]}`, hosts[1]]);
     expect(attempts).toEqual([0, 1]);
   });
 
@@ -260,7 +271,7 @@ describe("runOpen", () => {
       onProgress: () => {},
     });
     expect(result.found).toBe(false);
-    expect(seen).toEqual([[SECRET, 3490437, "test", hosts[0]]]);
+    expect(seen).toEqual([[SECRET, 3490437, "test", `${hosts[0]},${hosts[1]}`]]);
   });
 });
 

@@ -144,6 +144,7 @@ function takeSweep(v: SweepResult & Partial<Disposable>): SweepResult {
       broadcast: v.broadcast,
       error_code: v.error_code ?? null,
       error_message: v.error_message ?? null,
+      gateway: v.gateway ?? "",
     };
   } finally {
     if (typeof v.free === "function") v.free();

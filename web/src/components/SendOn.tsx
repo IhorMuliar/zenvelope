@@ -19,6 +19,7 @@ import {
   FEE_ADDRESS,
   FEE_ENABLED,
   LIGHTWALLETD,
+  LIGHTWALLETD_FALLBACK,
   SWEEP_FEE_ZAT,
   explorerTxUrl,
 } from "../config";
@@ -30,6 +31,7 @@ import {
   type DestinationState,
 } from "../lib/destination";
 import { DRY_RUN_COPY, isDryRun, rawTxBytes } from "../lib/dryRun";
+import { gatewayList } from "../lib/openFlow";
 import { formatCount, formatZecAmount, truncateMiddle } from "../lib/format";
 import { solanaExit as swapCopy, transparentBoundary as transparentCopy } from "../copy/en";
 import { effectiveCost, formatAssetAmount, formatUsd } from "../lib/oneclick";
@@ -288,7 +290,9 @@ export function SendOn({
       const result = await core.sweep_envelope(
         secret,
         network,
-        LIGHTWALLETD[network],
+        // Both gateways, in preference order: the core races them for the chain
+        // tip and runs the sweep on whichever answered first.
+        gatewayList([LIGHTWALLETD[network], LIGHTWALLETD_FALLBACK[network]]),
         notes.map((n) => ({
           txid: n.txid,
           height: n.height,
@@ -417,6 +421,8 @@ export function SendOn({
       hardwareConcurrency: navigator.hardwareConcurrency ?? 0,
       userAgent: navigator.userAgent,
       brave: hasBrave(navigator),
+      // The core is the authority on which gateway answered, not the config.
+      gateway: state.result.gateway,
     });
     return (
       <>
