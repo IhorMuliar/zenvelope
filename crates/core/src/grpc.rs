@@ -18,15 +18,16 @@ use wasm_bindgen_futures::future_to_promise;
 
 use orchard::circuit::OrchardCircuitVersion;
 use zcash_client_backend::proto::service::{
-    compact_tx_streamer_client::CompactTxStreamerClient, BlockId, BlockRange, ChainSpec, TxFilter,
+    compact_tx_streamer_client::CompactTxStreamerClient, BlockId, BlockRange, TxFilter,
 };
 use zcash_primitives::transaction::builder::cached_orchard_proving_key;
 use zcash_protocol::consensus::Network;
 use zcash_protocol::TxId;
 
+use crate::gateway;
 use crate::network_from_str;
 use crate::scan::{
-    normalize_endpoint, notes_from_transaction, parse_transaction, scan_compact_block, scan_range,
+    normalize_endpoints, notes_from_transaction, parse_transaction, scan_compact_block, scan_range,
     total_zat, OpenResult, ReceivedNote, ViewKeys,
 };
 use crate::sweep::{sweep, NoteRef, SweepOutcome, SweepRequest};
@@ -73,19 +74,15 @@ async fn open_envelope_inner(
     on_progress: Option<&Function>,
 ) -> Result<OpenResult, String> {
     let network: Network = network_from_str(network)?;
-    let endpoint = normalize_endpoint(lightwalletd_url)?;
+    let endpoints = normalize_endpoints(lightwalletd_url)?;
     let keys = ViewKeys::from_secret(secret_b64url, network)?;
 
-    let transport = tonic_web_wasm_client::Client::new(endpoint);
-    let mut client = CompactTxStreamerClient::new(transport);
-
-    let tip = client
-        .get_latest_block(ChainSpec {})
-        .await
-        .map_err(|e| format!("GetLatestBlock failed: {}", e.message()))?
-        .into_inner()
-        .height;
-    let tip_height = u32::try_from(tip).map_err(|_| format!("chain tip height {tip} is absurd"))?;
+    // One round trip buys two things: which gateway is answering fastest right now, and
+    // the chain tip. `GetLatestBlock` is the race, so the tip is the race's answer and
+    // there is no separate call for it.
+    let chosen = gateway::choose(&endpoints).await?;
+    let tip_height = chosen.tip_height;
+    let mut client = CompactTxStreamerClient::new(chosen.transport);
 
     let (start, birthday_defaulted, scanned_blocks) = scan_range(birthday, tip_height);
 
@@ -130,19 +127,33 @@ async fn open_envelope_inner(
 
     // Pass 2: fetch each hit in full. Compact blocks carry 52 bytes of ciphertext, enough
     // to recognise a note but not to read its memo, so the memo comes from here.
-    let mut notes: Vec<ReceivedNote> = Vec::new();
-    for (height, txid) in hits {
-        let raw = client
-            .get_transaction(TxFilter {
-                block: None,
-                index: 0,
-                hash: txid.as_ref().to_vec(),
-            })
-            .await
-            .map_err(|e| format!("GetTransaction({txid}) failed: {}", e.message()))?
-            .into_inner();
+    //
+    // The hits are independent of each other, so they go out together rather than one
+    // round trip after another. `try_join_all` preserves the order of the list, which is
+    // the `BTreeSet`'s (height, txid) order, so the notes come out sorted exactly as the
+    // sequential version produced them.
+    let fetches = hits.iter().map(|(height, txid)| {
+        let mut client = client.clone();
+        let txid = *txid;
+        let height = *height;
+        async move {
+            let raw = client
+                .get_transaction(TxFilter {
+                    block: None,
+                    index: 0,
+                    hash: txid.as_ref().to_vec(),
+                })
+                .await
+                .map_err(|e| format!("GetTransaction({txid}) failed: {}", e.message()))?
+                .into_inner();
+            Ok::<_, String>((height, raw.data))
+        }
+    });
+    let fetched = futures_util::future::try_join_all(fetches).await?;
 
-        let tx = parse_transaction(&raw.data, height, network)?;
+    let mut notes: Vec<ReceivedNote> = Vec::new();
+    for (height, raw) in fetched {
+        let tx = parse_transaction(&raw, height, network)?;
         notes.extend(notes_from_transaction(&tx, height, &keys, network));
     }
 
@@ -154,6 +165,7 @@ async fn open_envelope_inner(
         birthday: start,
         birthday_defaulted,
         scanned_blocks,
+        gateway: chosen.label,
     })
 }
 
@@ -231,6 +243,7 @@ fn to_js(result: &OpenResult) -> JsValue {
         "scanned_blocks",
         &JsValue::from_f64(f64::from(result.scanned_blocks)),
     );
+    set(&out, "gateway", &JsValue::from_str(&result.gateway));
     out.into()
 }
 
@@ -342,7 +355,7 @@ async fn sweep_envelope_inner(
     on_stage: Option<&Function>,
 ) -> Result<SweepOutcome, String> {
     let network = network_from_str(network)?;
-    let endpoint = normalize_endpoint(lightwalletd_url)?;
+    let endpoints = normalize_endpoints(lightwalletd_url)?;
 
     let request = SweepRequest {
         secret_b64url,
@@ -355,8 +368,10 @@ async fn sweep_envelope_inner(
         broadcast,
     };
 
-    let transport = tonic_web_wasm_client::Client::new(endpoint);
-    let mut client = CompactTxStreamerClient::new(transport)
+    // Same race as the open flow: one `GetLatestBlock` against every gateway, the fastest
+    // leads the session. Its tip is handed to `sweep` so the race is not paid for twice.
+    let chosen = gateway::choose(&endpoints).await?;
+    let mut client = CompactTxStreamerClient::new(chosen.transport)
         // A mainnet block carrying a full Ironwood bundle can exceed tonic's 4 MiB
         // default decoding limit, and so can a GetTransaction response.
         .max_decoding_message_size(64 * 1024 * 1024);
@@ -372,7 +387,9 @@ async fn sweep_envelope_inner(
         }
     };
 
-    sweep(&mut client, &request, &mut report).await
+    let mut outcome = sweep(&mut client, &request, &mut report).await?;
+    outcome.gateway = chosen.label;
+    Ok(outcome)
 }
 
 /// Reads the notes to spend off the JS boundary.
@@ -478,6 +495,7 @@ fn outcome_to_js(outcome: &SweepOutcome) -> JsValue {
         &JsValue::from_f64(f64::from(outcome.anchor_height)),
     );
     set(&o, "broadcast", &JsValue::from_bool(outcome.broadcast));
+    set(&o, "gateway", &JsValue::from_str(&outcome.gateway));
     set(
         &o,
         "error_code",

@@ -33,6 +33,7 @@ const OK: SweepResult = {
   fee_zat: "0",
   network_fee_zat: "10000",
   anchor_height: 3490500,
+  gateway: "zjs.zec.rocks",
   broadcast: true,
   error_code: null,
   error_message: null,
@@ -350,6 +351,21 @@ describe("timings", () => {
     );
     expect(deviceLine({ threads: 1, hardwareConcurrency: 1, userAgent: ua })).toBe(
       "proving: 1 thread · hardwareConcurrency 1 · Safari on macOS",
+    );
+  });
+
+  it("names the gateway that answered, and leaves it out when there is none", () => {
+    const ua = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/140.0.0.0 Safari/537.36";
+    expect(
+      deviceLine({ threads: 4, hardwareConcurrency: 8, userAgent: ua, gateway: "zjs.zec.rocks" }),
+    ).toBe("proving: 4 threads · hardwareConcurrency 8 · Chrome on Linux · gateway zjs.zec.rocks");
+    // A core that did not say (an old wasm, or the mock before it was taught) must
+    // not put an empty "gateway " on the end of a measurement.
+    expect(deviceLine({ threads: 4, hardwareConcurrency: 8, userAgent: ua, gateway: "  " })).toBe(
+      "proving: 4 threads · hardwareConcurrency 8 · Chrome on Linux",
+    );
+    expect(deviceLine({ threads: 4, hardwareConcurrency: 8, userAgent: ua })).toBe(
+      "proving: 4 threads · hardwareConcurrency 8 · Chrome on Linux",
     );
   });
 

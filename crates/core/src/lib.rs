@@ -17,6 +17,8 @@ pub mod spend;
 pub mod sweep;
 
 #[cfg(target_arch = "wasm32")]
+mod gateway;
+#[cfg(target_arch = "wasm32")]
 mod grpc;
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;

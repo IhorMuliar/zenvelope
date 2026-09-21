@@ -70,6 +70,14 @@ export interface OpenResult {
   birthday_defaulted: boolean;
   /** Blocks streamed: `tip_height - birthday + 1`. */
   scanned_blocks: number;
+  /**
+   * Which gateway served this scan, as a host name.
+   *
+   * The core races the configured gateways for the chain tip at the start of a
+   * session and keeps the winner; this is the winner, so that two timing runs
+   * that differ can say whether they were even talking to the same server.
+   */
+  gateway: string;
 }
 
 /**
@@ -152,6 +160,8 @@ export interface SweepResult {
   /** null or 0 means success. Anything else means nothing moved. */
   error_code: number | null;
   error_message: string | null;
+  /** Which gateway served this sweep, as a host name. See {@link OpenResult.gateway}. */
+  gateway: string;
 }
 
 export interface ZenvelopeCore {

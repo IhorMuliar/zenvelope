@@ -104,6 +104,9 @@ pub struct SweepOutcome {
     /// `SendResponse.error_code`, which is 0 on acceptance and nonzero on rejection.
     pub error_code: Option<i32>,
     pub error_message: Option<String>,
+    /// Which gateway served this sweep, as a host name. Filled in by the caller that
+    /// chose it; empty in the native test, which is handed one channel and no choice.
+    pub gateway: String,
 }
 
 /// Decodes a display (byte-reversed) txid into the protocol byte order the wire uses.
@@ -148,7 +151,7 @@ pub async fn sweep<T>(
     on_stage: &mut dyn FnMut(&str, &str),
 ) -> Result<SweepOutcome, String>
 where
-    T: tonic::client::GrpcService<tonic::body::Body>,
+    T: tonic::client::GrpcService<tonic::body::Body> + Clone,
     T::Error: Into<StdError>,
     T::ResponseBody: Body<Data = Bytes> + Send + 'static,
     <T::ResponseBody as Body>::Error: Into<StdError> + Send,
@@ -190,13 +193,107 @@ where
         .map(|n| txid_to_protocol_bytes(&n.txid))
         .collect::<Result<_, _>>()?;
 
-    let tip = client
-        .get_latest_block(ChainSpec {})
-        .await
-        .map_err(|e| format!("GetLatestBlock failed: {}", e.message()))?
-        .into_inner()
-        .height;
-    let tip_height = u32::try_from(tip).map_err(|_| format!("chain tip height {tip} is absurd"))?;
+    // The replay runs from the earliest note's block to the anchor, and every note is
+    // witnessed as the replay passes its own commitment. Both bounds come out of the
+    // request, so they are known before a single byte crosses the network — which is what
+    // lets the frontier and the first block be fetched alongside everything else below.
+    let first_height = request
+        .notes
+        .iter()
+        .map(|n| n.height)
+        .min()
+        .expect("the request holds at least one note");
+    let last_height = request
+        .notes
+        .iter()
+        .map(|n| n.height)
+        .max()
+        .expect("the request holds at least one note");
+    if first_height == 0 {
+        return Err("a note cannot be in block 0".to_string());
+    }
+
+    // One transaction can hold more than one of the envelope's notes, so each distinct
+    // funding transaction is fetched once.
+    let mut distinct: Vec<(String, Vec<u8>)> = Vec::new();
+    for (slot, note_ref) in request.notes.iter().enumerate() {
+        if !distinct.iter().any(|(txid, _)| *txid == note_ref.txid) {
+            distinct.push((note_ref.txid.clone(), txids[slot].clone()));
+        }
+    }
+
+    // Everything the witness stage needs before the anchor walk is independent of
+    // everything else it needs, so it all goes out at once rather than one round trip at
+    // a time: the chain tip, each funding transaction, the frontier just before the
+    // earliest note's block, and that block itself. On a gateway answering in 110 ms that
+    // turns four or more serial trips into one.
+    let tip_call = {
+        let mut client = client.clone();
+        async move {
+            let height = client
+                .get_latest_block(ChainSpec {})
+                .await
+                .map_err(|e| format!("GetLatestBlock failed: {}", e.message()))?
+                .into_inner()
+                .height;
+            u32::try_from(height).map_err(|_| format!("chain tip height {height} is absurd"))
+        }
+    };
+
+    let tx_calls = futures_util::future::try_join_all(distinct.into_iter().map(
+        |(display_txid, wire_txid)| {
+            let mut client = client.clone();
+            async move {
+                let raw = client
+                    .get_transaction(TxFilter {
+                        block: None,
+                        index: 0,
+                        hash: wire_txid,
+                    })
+                    .await
+                    .map_err(|e| format!("GetTransaction failed: {}", e.message()))?
+                    .into_inner()
+                    .data;
+                Ok::<_, String>((display_txid, raw))
+            }
+        },
+    ));
+
+    let frontier_call = {
+        let mut client = client.clone();
+        async move {
+            client
+                .get_tree_state(BlockId {
+                    height: u64::from(first_height - 1),
+                    hash: Vec::new(),
+                })
+                .await
+                .map_err(|e| format!("GetTreeState({}) failed: {}", first_height - 1, e.message()))?
+                .into_inner()
+                .ironwood_tree()
+                .map_err(|e| format!("could not parse the Ironwood frontier: {e}"))
+        }
+    };
+
+    let first_block_call = {
+        let mut client = client.clone();
+        async move {
+            client
+                .get_block(BlockId {
+                    height: u64::from(first_height),
+                    hash: Vec::new(),
+                })
+                .await
+                .map(|r| r.into_inner())
+                .map_err(|e| format!("GetBlock({first_height}) failed: {}", e.message()))
+        }
+    };
+
+    let (tip_height, fetched_txs, start_tree, first_block) =
+        futures_util::future::try_join4(tip_call, tx_calls, frontier_call, first_block_call)
+            .await?;
+
+    let fetched: BTreeMap<String, Vec<u8>> = fetched_txs.into_iter().collect();
 
     let ufvk = ufvk_from_secret(&request.secret_b64url, network)?;
     let fvk = ufvk
@@ -204,32 +301,16 @@ where
         .ok_or("the link's viewing key carries no Orchard key")?;
 
     // Re-derive every note from the secret rather than trusting anything the caller says
-    // about them: fetch each funding transaction and decrypt the action ourselves. One
-    // transaction can hold more than one of the envelope's notes, so each is fetched once.
-    let mut fetched: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    // about them: decrypt the named action of the funding transaction ourselves.
     let mut notes = Vec::with_capacity(request.notes.len());
     let mut total_value_zat: u64 = 0;
 
-    for (slot, note_ref) in request.notes.iter().enumerate() {
-        let raw = match fetched.get(&note_ref.txid) {
-            Some(bytes) => bytes.clone(),
-            None => {
-                let raw = client
-                    .get_transaction(TxFilter {
-                        block: None,
-                        index: 0,
-                        hash: txids[slot].clone(),
-                    })
-                    .await
-                    .map_err(|e| format!("GetTransaction failed: {}", e.message()))?
-                    .into_inner()
-                    .data;
-                fetched.insert(note_ref.txid.clone(), raw.clone());
-                raw
-            }
-        };
+    for note_ref in request.notes.iter() {
+        let raw = fetched
+            .get(&note_ref.txid)
+            .ok_or_else(|| format!("transaction {} was not fetched", note_ref.txid))?;
 
-        let funding_tx = parse_transaction(&raw, note_ref.height, network)?;
+        let funding_tx = parse_transaction(raw, note_ref.height, network)?;
         let bundle = funding_tx
             .ironwood_bundle()
             .ok_or("that transaction has no Ironwood bundle")?;
@@ -255,24 +336,6 @@ where
         notes.push(note);
     }
 
-    // The replay runs from the earliest note's block to the anchor, and every note is
-    // witnessed as the replay passes its own commitment.
-    let first_height = request
-        .notes
-        .iter()
-        .map(|n| n.height)
-        .min()
-        .expect("the request holds at least one note");
-    let last_height = request
-        .notes
-        .iter()
-        .map(|n| n.height)
-        .max()
-        .expect("the request holds at least one note");
-    if first_height == 0 {
-        return Err("a note cannot be in block 0".to_string());
-    }
-
     // Which notes each block holds, keyed by height so the replay can hand `append_block`
     // exactly the targets that block contains.
     let mut targets_by_height: BTreeMap<u32, Vec<WitnessTarget<'_>>> = BTreeMap::new();
@@ -288,17 +351,7 @@ where
     }
 
     // Replay the Ironwood tree from the frontier just before the earliest note's block.
-    let start_tree = client
-        .get_tree_state(BlockId {
-            height: u64::from(first_height - 1),
-            hash: Vec::new(),
-        })
-        .await
-        .map_err(|e| format!("GetTreeState({}) failed: {}", first_height - 1, e.message()))?
-        .into_inner()
-        .ironwood_tree()
-        .map_err(|e| format!("could not parse the Ironwood frontier: {e}"))?;
-
+    // Both the frontier and that block were fetched above, alongside the chain tip.
     let mut scan = WitnessScan::new(start_tree, request.notes.len());
 
     // The root the replay reports at the end of each block that holds a note. Each one is
@@ -306,14 +359,6 @@ where
     // wrong at a note's block, and a proof built on it would be rejected.
     let mut roots_at_note_blocks: Vec<(u32, String)> = Vec::new();
 
-    let first_block = client
-        .get_block(BlockId {
-            height: u64::from(first_height),
-            hash: Vec::new(),
-        })
-        .await
-        .map_err(|e| format!("GetBlock({first_height}) failed: {}", e.message()))?
-        .into_inner();
     scan.append_block(
         &first_block,
         targets_by_height
@@ -375,10 +420,22 @@ where
     }
 
     // The ordering guard, once per note block: the replay must have seen the same
-    // commitments, in the same order, as the chain did.
-    for (height, replayed) in &roots_at_note_blocks {
-        let server = tree_state_root(client, *height).await?;
-        if *replayed != server {
+    // commitments, in the same order, as the chain did. Every one of these tree states,
+    // and the anchor's, is an independent read of a block that is already mined, so they
+    // are asked for together — one round trip instead of one per note block plus one.
+    // Not one of them is dropped: each answer is compared exactly as before, and a
+    // failure to fetch any of them fails the sweep.
+    let mut heights: Vec<u32> = roots_at_note_blocks.iter().map(|(h, _)| *h).collect();
+    heights.push(anchor_at);
+    let served = futures_util::future::try_join_all(heights.iter().map(|height| {
+        let mut client = client.clone();
+        let height = *height;
+        async move { tree_state_root(&mut client, height).await }
+    }))
+    .await?;
+
+    for ((height, replayed), server) in roots_at_note_blocks.iter().zip(served.iter()) {
+        if replayed != server {
             return Err(format!(
                 "the replayed Ironwood root at block {height} is {replayed} but the \
                  server reports {server}"
@@ -386,7 +443,10 @@ where
         }
     }
 
-    let anchor_root = tree_state_root(client, anchor_at).await?;
+    let anchor_root = served
+        .last()
+        .cloned()
+        .expect("the anchor height was pushed onto the list");
     let positions = scan.positions();
     let appended = scan.appended();
     let (merkle_paths, anchor) = scan.finish(&anchor_root)?;
@@ -461,6 +521,9 @@ where
         broadcast: false,
         error_code: None,
         error_message: None,
+        // Filled in by whoever chose the gateway; `sweep` itself is handed a transport
+        // and is not told what is behind it.
+        gateway: String::new(),
     };
 
     // --- stage: broadcast --------------------------------------------------

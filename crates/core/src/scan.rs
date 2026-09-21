@@ -75,6 +75,9 @@ pub struct OpenResult {
     pub birthday_defaulted: bool,
     /// Number of blocks streamed, `tip - birthday + 1`.
     pub scanned_blocks: u32,
+    /// Which gateway won the start-of-session race and served this scan, as a host name.
+    /// Empty when no race happened, which is every build that is not the browser.
+    pub gateway: String,
 }
 
 impl OpenResult {
@@ -300,6 +303,45 @@ pub fn normalize_endpoint(url: &str) -> Result<String, String> {
     Ok(trimmed.to_string())
 }
 
+/// Normalises a **comma-separated** list of lightwalletd base URLs, in preference order.
+///
+/// The JS boundary hands gateways down as one string so that adding a failover did not
+/// change any exported signature: `open_envelope` and `sweep_envelope` still take a single
+/// `lightwalletd_url`, and a string with no comma in it still means exactly one gateway,
+/// exactly as before. Duplicates are dropped, keeping the first mention, so a page that
+/// names the same host twice does not race it against itself.
+pub fn normalize_endpoints(urls: &str) -> Result<Vec<String>, String> {
+    let mut out: Vec<String> = Vec::new();
+    for part in urls.split(',') {
+        if part.trim().is_empty() {
+            continue;
+        }
+        let endpoint = normalize_endpoint(part)?;
+        if !out.contains(&endpoint) {
+            out.push(endpoint);
+        }
+    }
+    if out.is_empty() {
+        return Err("lightwalletd_url is empty".to_string());
+    }
+    Ok(out)
+}
+
+/// The host part of an endpoint, which is what the timing line names.
+///
+/// `https://zjs.zec.rocks/mainnet` becomes `zjs.zec.rocks`. Anything that does not look
+/// like a URL comes back whole rather than guessed at: this string is read by a human
+/// comparing two runs, and a wrong guess there is worse than a long name.
+pub fn gateway_label(endpoint: &str) -> String {
+    endpoint
+        .split_once("://")
+        .map_or(endpoint, |(_, rest)| rest)
+        .split('/')
+        .next()
+        .unwrap_or(endpoint)
+        .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -387,6 +429,54 @@ mod tests {
         );
         assert!(normalize_endpoint("").is_err());
         assert!(normalize_endpoint("zec.rocks:443").is_err());
+    }
+
+    #[test]
+    fn one_url_is_still_one_gateway() {
+        assert_eq!(
+            normalize_endpoints("https://zjs.zec.rocks/mainnet"),
+            Ok(vec!["https://zjs.zec.rocks/mainnet".to_string()])
+        );
+    }
+
+    #[test]
+    fn a_comma_separated_list_keeps_its_order() {
+        assert_eq!(
+            normalize_endpoints("https://zjs.zec.rocks/mainnet, https://zcash-mainnet.chainsafe.dev/"),
+            Ok(vec![
+                "https://zjs.zec.rocks/mainnet".to_string(),
+                "https://zcash-mainnet.chainsafe.dev".to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn a_gateway_named_twice_is_not_raced_against_itself() {
+        assert_eq!(
+            normalize_endpoints("https://a.example/x,https://a.example/x/,https://b.example"),
+            Ok(vec![
+                "https://a.example/x".to_string(),
+                "https://b.example".to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn an_empty_or_broken_gateway_list_is_refused() {
+        assert!(normalize_endpoints("").is_err());
+        assert!(normalize_endpoints(" , ").is_err());
+        assert!(normalize_endpoints("https://a.example,zec.rocks:443").is_err());
+    }
+
+    #[test]
+    fn a_gateway_is_named_by_its_host() {
+        assert_eq!(gateway_label("https://zjs.zec.rocks/mainnet"), "zjs.zec.rocks");
+        assert_eq!(
+            gateway_label("https://zcash-mainnet.chainsafe.dev"),
+            "zcash-mainnet.chainsafe.dev"
+        );
+        assert_eq!(gateway_label("http://127.0.0.1:9067"), "127.0.0.1:9067");
+        assert_eq!(gateway_label("nonsense"), "nonsense");
     }
 
     #[test]

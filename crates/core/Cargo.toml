@@ -82,6 +82,10 @@ getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
 # scoped to the wasm target and the module that uses it is `cfg`-gated to match.
 tonic-web-wasm-client = "0.9"
 wasm-bindgen-futures = "0.4"
+# `crate::gateway` rebuilds a request so it can be re-sent to the other gateway, which
+# means holding its body (`Full`) and reading the original one (`BodyExt::collect`).
+# Both are already in the tree under `tonic`; naming them here only makes them reachable.
+http-body-util = "0.1"
 
 # M4, `multicore` only. `no-bundler` because the threaded package is served as plain
 # files and loaded by URL from the core worker rather than put through Vite's module

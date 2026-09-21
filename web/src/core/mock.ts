@@ -175,6 +175,12 @@ const MOCK_TICK_MS = 100;
 /** Ticks reported before the mock "knows" the span, so the bar starts indeterminate. */
 const MOCK_UNKNOWN_TICKS = 4;
 export const MOCK_TIP_HEIGHT = 3490500;
+
+/**
+ * What the mock says served it. It is deliberately not a real host: a timing
+ * line that reads `gateway mock` can never be mistaken for a mainnet run.
+ */
+export const MOCK_GATEWAY = "mock";
 const MOCK_DEFAULT_SPAN = 12400;
 
 export const MOCK_NOTE = {
@@ -218,6 +224,7 @@ export async function openEnvelope(
           birthday: MOCK_TIP_HEIGHT - total + 1,
           birthday_defaulted: birthday === undefined,
           scanned_blocks: total,
+          gateway: MOCK_GATEWAY,
         });
         return;
       }
@@ -433,6 +440,7 @@ export async function sweepEnvelope(
     broadcast,
     error_code: null,
     error_message: null,
+    gateway: MOCK_GATEWAY,
   };
 }
 

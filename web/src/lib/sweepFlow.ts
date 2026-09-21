@@ -285,6 +285,15 @@ export interface DeviceInfo {
   userAgent: string;
   /** `navigator.brave` says so: Brave's user agent is Chrome's, to the letter. */
   brave?: boolean;
+  /**
+   * Which gRPC-web gateway the core raced and won with, as a host name.
+   *
+   * Two runs of the same envelope on the same machine can differ by tens of
+   * seconds purely because one of the public gateways was stalling, so a timing
+   * report that does not say which server answered is not a measurement. Absent
+   * or empty, the line leaves it out rather than inventing one.
+   */
+  gateway?: string;
 }
 
 /**
@@ -314,12 +323,15 @@ export function platformName(ua: string): string {
   return "unknown";
 }
 
-/** "proving: 4 threads · hardwareConcurrency 8 · Chrome on macOS". */
+/** "proving: 4 threads · hardwareConcurrency 8 · Chrome on macOS · gateway zjs.zec.rocks". */
 export function deviceLine(info: DeviceInfo): string {
   const threads = `proving: ${info.threads} thread${info.threads === 1 ? "" : "s"}`;
   const cores = `hardwareConcurrency ${info.hardwareConcurrency}`;
   const where = `${browserFamily(info.userAgent, info.brave)} on ${platformName(info.userAgent)}`;
-  return `${threads} · ${cores} · ${where}`;
+  const gateway = info.gateway?.trim();
+  const parts = [threads, cores, where];
+  if (gateway) parts.push(`gateway ${gateway}`);
+  return parts.join(" · ");
 }
 
 /** What the "Copy timing" button puts on the clipboard: the block, as text. */

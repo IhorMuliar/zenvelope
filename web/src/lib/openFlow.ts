@@ -189,16 +189,36 @@ export interface RunOpenOptions {
 }
 
 /**
- * Runs one scan: primary host, and on a thrown error exactly one retry against
- * the failover host. A second failure is surfaced as a retry-able error.
+ * The gateway list the core is handed, as one string.
+ *
+ * `lightwalletd_url` has always been a single URL, and it still is: a string
+ * with no comma in it means one gateway and behaves exactly as it did. Several,
+ * comma-separated, mean "these, in preference order", which is what lets the
+ * core race them for the chain tip and keep whichever answers first instead of
+ * finding out the hard way that the primary is stalling.
+ */
+export function gatewayList(hosts: readonly string[]): string {
+  return hosts.filter((h) => h.trim() !== "").join(",");
+}
+
+/**
+ * Runs one scan.
+ *
+ * The first attempt hands the core every gateway at once, so the choice between
+ * them is a 1.5 s race rather than a whole failed scan. The second attempt —
+ * only reached when that threw, which means every gateway refused — pins the
+ * failover on its own, because a gateway that answers slowly and one that
+ * answers wrongly need different treatment and only the second attempt can tell
+ * them apart. A second failure is surfaced as a retry-able error.
  */
 export async function runOpen(opts: RunOpenOptions): Promise<OpenResult> {
   const { core, secret, birthday, network, hosts, onProgress, onAttempt } = opts;
+  const tries = [gatewayList(hosts), ...hosts.slice(1)];
   let lastError: unknown;
-  for (let attempt = 0; attempt < hosts.length; attempt++) {
+  for (let attempt = 0; attempt < tries.length; attempt++) {
     onAttempt?.(attempt);
     try {
-      return await core.open_envelope(secret, birthday, network, hosts[attempt], onProgress);
+      return await core.open_envelope(secret, birthday, network, tries[attempt], onProgress);
     } catch (err) {
       lastError = err;
     }
