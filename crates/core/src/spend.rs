@@ -603,6 +603,11 @@ pub struct WitnessScan {
     witnesses: Vec<Option<IronwoodWitness>>,
     /// How many commitments have been appended since the scan started.
     appended: usize,
+    /// Slots still waiting for their commitment. While this is non-zero the tree has to
+    /// keep growing, because the next witness is cut from it; at zero it is [`sealed`].
+    ///
+    /// [`sealed`]: WitnessScan::sealed
+    awaiting: usize,
 }
 
 impl WitnessScan {
@@ -612,7 +617,28 @@ impl WitnessScan {
             tree,
             witnesses: (0..slots).map(|_| None).collect(),
             appended: 0,
+            awaiting: slots,
         }
+    }
+
+    /// Whether every slot has its witness, so the tree has no work left to do.
+    ///
+    /// A `CommitmentTree` and an `IncrementalWitness` cut from it hash the *same*
+    /// commitments into the *same* root: the witness carries its own copy of the
+    /// frontier and keeps it current as leaves arrive. So once the last witness has been
+    /// taken, appending each leaf to both is one Sinsemilla hash chain computed twice,
+    /// and the tree's copy is the one nothing reads — [`tree_root_hex`] and [`finish`]
+    /// take the root off a witness instead. Measured on the fee envelope, a 120-block
+    /// walk over 10,820 commitments: 19.3 s of `append_block` became 9.2 s
+    /// (web/docs/PERF-2026-09-21.md §9).
+    ///
+    /// A scan opened with no slots is never sealed: there would be no witness to read a
+    /// root from, and the tree is then the only thing there is.
+    ///
+    /// [`tree_root_hex`]: WitnessScan::tree_root_hex
+    /// [`finish`]: WitnessScan::finish
+    fn sealed(&self) -> bool {
+        self.awaiting == 0 && !self.witnesses.is_empty()
     }
 
     /// How many witness slots this scan was opened with.
@@ -632,9 +658,12 @@ impl WitnessScan {
         for tx in &block.vtx {
             for (i, action) in tx.ironwood_actions.iter().enumerate() {
                 let leaf = cmx_node(&action.cmx)?;
-                self.tree
-                    .append(leaf)
-                    .map_err(|_| "the Ironwood note commitment tree is full".to_string())?;
+                // Past the last witness the tree is dead weight; see `sealed`.
+                if !self.sealed() {
+                    self.tree
+                        .append(leaf)
+                        .map_err(|_| "the Ironwood note commitment tree is full".to_string())?;
+                }
                 self.appended += 1;
 
                 // Every witness already taken must see this leaf too — except any that
@@ -658,6 +687,7 @@ impl WitnessScan {
                         return Err(format!("note {} was witnessed twice", target.slot));
                     }
                     *slot = Some(witness);
+                    self.awaiting -= 1;
                 }
             }
         }
@@ -665,8 +695,14 @@ impl WitnessScan {
     }
 
     /// The root of the replayed tree, as hex.
+    ///
+    /// Once the scan is `sealed` this is read off a witness rather than off the tree:
+    /// they are the same root, and only one of them is still being kept current.
     pub fn tree_root_hex(&self) -> String {
-        node_hex(&self.tree.root())
+        match self.witnesses.iter().flatten().next() {
+            Some(witness) if self.sealed() => node_hex(&witness.root()),
+            _ => node_hex(&self.tree.root()),
+        }
     }
 
     /// How many commitments the replay has appended.
@@ -716,7 +752,7 @@ impl WitnessScan {
     /// be rejected. There is no fallback, because a wrong anchor is not a degraded sweep,
     /// it is a lost one.
     pub fn finish(self, server_root_hex: &str) -> Result<(Vec<MerklePath>, Anchor), String> {
-        let tree_root = node_hex(&self.tree.root());
+        let tree_root = self.tree_root_hex();
         if tree_root != server_root_hex {
             return Err(format!(
                 "the replayed Ironwood tree root {tree_root} does not match the server's \
@@ -1293,6 +1329,44 @@ abandon abandon abandon abandon abandon abandon art";
             action_index,
             slot,
         }
+    }
+
+    #[test]
+    fn sealing_the_tree_reports_the_same_root_as_carrying_it() {
+        // Two scans over the same blocks. The first takes its witness in block one, so
+        // it seals and everything after that is hashed once; the second never names a
+        // target, so it has no witness to seal on and carries the tree the whole way.
+        // The roots must be identical at every point, because that root is what is
+        // compared against the chain and what the proof is built on.
+        let first = block(3_490_472, &[(1, &[10]), (2, &[11, 12])]);
+        let rest = [
+            block(3_490_473, &[(3, &[13, 14, 15])]),
+            block(3_490_474, &[(4, &[16]), (5, &[17, 18])]),
+        ];
+
+        let mut sealed = WitnessScan::new(IronwoodTree::empty(), 1);
+        sealed
+            .append_block(&first, &[target(&[1u8; 32], 0, 0)])
+            .unwrap();
+        assert!(sealed.sealed(), "the only slot is filled, so the tree is done");
+
+        let mut carried = WitnessScan::new(IronwoodTree::empty(), 0);
+        carried.append_block(&first, &[]).unwrap();
+        assert!(!carried.sealed(), "a scan with no slots is never sealed");
+
+        assert_eq!(sealed.tree_root_hex(), carried.tree_root_hex());
+        for b in &rest {
+            sealed.append_block(b, &[]).unwrap();
+            carried.append_block(b, &[]).unwrap();
+            assert_eq!(sealed.tree_root_hex(), carried.tree_root_hex());
+        }
+        assert_eq!(sealed.appended(), carried.appended());
+
+        // And `finish` checks that same root against the server's, exactly as before:
+        // the right one is accepted and a wrong one is refused.
+        let root = sealed.tree_root_hex();
+        assert!(sealed.witness_root_hex(0) == Some(root.clone()));
+        assert!(WitnessScan::finish(sealed, &root).is_ok());
     }
 
     #[test]

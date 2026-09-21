@@ -393,7 +393,7 @@ async fn sweep_envelope_inner(
         }
     };
 
-    let mut outcome = sweep(&mut client, &request, &mut report).await?;
+    let mut outcome = sweep(&mut client, &request, Some(chosen.tip_height), &mut report).await?;
     outcome.gateway = chosen.label;
     Ok(outcome)
 }

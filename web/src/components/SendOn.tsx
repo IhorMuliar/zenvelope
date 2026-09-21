@@ -62,6 +62,14 @@ export const NO_SECRET_COPY =
 /** Desktop measurement: the proving key is about 29 s on one thread, about 15 s on four. */
 const WARM_ESTIMATE = "~30 s";
 
+/**
+ * Shown while the sweep is waiting for the background proving key rather than for
+ * anything on the chain. The core worker holds one wasm module and builds the key in a
+ * single call, so a sweep tapped before "Keys ready" waits for the rest of it before it
+ * can start; saying "Starting…" through that was the screen's only untrue line.
+ */
+export const PREPARING_KEYS_COPY = "Finishing the keys this sweep needs…";
+
 export const SEND_TIMING_COPY =
   "This takes about 1 to 2 minutes on a laptop and longer on a phone. Keep this tab open.";
 
@@ -138,6 +146,8 @@ export function SendOn({
   const [warm, setWarm] = useState<"warming" | "ready" | "failed">("warming");
   /** Wall clock of the background warm-up, for the Timing block. */
   const [warmMs, setWarmMs] = useState<number | null>(null);
+  /** When it finished, so a sweep tapped before then can say what it waited for. */
+  const [warmDoneAt, setWarmDoneAt] = useState<number | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const runId = useRef(0);
   /**
@@ -166,6 +176,7 @@ export function SendOn({
         // Measured here rather than taken from the core's own answer: this is
         // what the recipient waited, worker round trip and all.
         setWarmMs(Date.now() - startedAt);
+        setWarmDoneAt(Date.now());
         setWarm("ready");
       })
       .catch(() => {
@@ -402,7 +413,7 @@ export function SendOn({
           <span data-testid="elapsed">{elapsedLabel(elapsed)}</span>
         </p>
         <p className="hint" aria-live="polite" data-testid="stage-detail">
-          {state.detail ?? "Starting…"}
+          {state.detail ?? (warm === "ready" ? "Starting…" : PREPARING_KEYS_COPY)}
         </p>
         <p className="fine">{SEND_TIMING_COPY}</p>
       </div>
@@ -415,7 +426,7 @@ export function SendOn({
     const dry = state.result.broadcast === false;
     // Both endings get the same block: a dry run is measured for exactly the
     // reason a real one is, and it is the run we can repeat.
-    const rows = timingRows({ state, openMs, warmMs });
+    const rows = timingRows({ state, openMs, warmMs, warmDoneAt });
     const device = deviceLine({
       threads: core.threads,
       hardwareConcurrency: navigator.hardwareConcurrency ?? 0,

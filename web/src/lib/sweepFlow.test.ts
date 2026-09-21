@@ -17,6 +17,7 @@ import {
   sendReducer,
   stageChecklist,
   sweepFailure,
+  warmWaitMs,
   type SendEvent,
   type SendState,
 } from "./sweepFlow";
@@ -286,10 +287,16 @@ describe("timings", () => {
   });
 
   it("lays the block out in the order it happened, one decimal each", () => {
-    const rows = timingRows({ state: run(RUN), openMs: 4_120, warmMs: 30_500 });
+    const rows = timingRows({
+      state: run(RUN),
+      openMs: 4_120,
+      warmMs: 30_500,
+      warmDoneAt: null,
+    });
     expect(rows.map((r) => [r.label, r.value])).toEqual([
       ["open/scan", "4.1 s"],
       ["keys (warm)", "30.5 s"],
+      ["waiting for keys", "—"],
       ["witness", "2.5 s"],
       ["proving", "42.1 s"],
       ["send", "2.0 s"],
@@ -297,13 +304,27 @@ describe("timings", () => {
     ]);
   });
 
+  it("counts the wait for the proving key only when the sweep really waited", () => {
+    const state = run(RUN);
+    const tap = state.startedAt!;
+    // Warm-up finished before the tap: nothing was waited for.
+    expect(warmWaitMs(state, tap - 1_000)).toBe(0);
+    // Finished after it: the gap is the wait, and never longer than the first report.
+    expect(warmWaitMs(state, tap + 200)).toBe(200);
+    expect(warmWaitMs(state, tap + 10_000_000)).toBe(state.stageAt.witness! - tap);
+    // Nothing known, nothing claimed.
+    expect(warmWaitMs(state, null)).toBeNull();
+    expect(warmWaitMs(initialSendState, 5)).toBeNull();
+  });
+
   it("says nothing it does not know", () => {
     const rows = timingRows({
       state: run(RUN.slice(0, 3)),
       openMs: null,
       warmMs: null,
+      warmDoneAt: null,
     });
-    expect(rows.map((r) => r.value)).toEqual(["—", "—", "—", "—", "—", "—"]);
+    expect(rows.map((r) => r.value)).toEqual(["—", "—", "—", "—", "—", "—", "—"]);
     expect(rows.every((r) => r.ms === null)).toBe(true);
   });
 
@@ -370,11 +391,17 @@ describe("timings", () => {
   });
 
   it("copies as plain text, one measurement per line", () => {
-    const rows = timingRows({ state: run(RUN), openMs: 4_120, warmMs: 30_500 });
+    const rows = timingRows({
+      state: run(RUN),
+      openMs: 4_120,
+      warmMs: 30_500,
+      warmDoneAt: null,
+    });
     expect(timingText(rows, "proving: 4 threads · hardwareConcurrency 8 · Chrome on Linux")).toBe(
       [
         "open/scan 4.1 s",
         "keys (warm) 30.5 s",
+        "waiting for keys —",
         "witness 2.5 s",
         "proving 42.1 s",
         "send 2.0 s",

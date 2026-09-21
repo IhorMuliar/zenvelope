@@ -230,6 +230,17 @@ export interface TimingInput {
   openMs: number | null;
   /** How long `warm_proving_key` took, or null when it never finished. */
   warmMs: number | null;
+  /**
+   * `Date.now()` when the background warm-up finished, or null while it has not.
+   *
+   * The warm-up and the sweep share one worker thread, and building the proving key
+   * is one long call with no `await` in it. A recipient who taps "Send it on" before
+   * the key is ready therefore waits for the rest of that build before the core reads
+   * its first byte — and that wait used to appear nowhere at all: it fell between the
+   * tap and the first stage the core reports, so no row on this block covered it and
+   * only "total tap-to-done" moved. It gets its own line now (PERF-2026-09-21.md §9).
+   */
+  warmDoneAt: number | null;
 }
 
 export interface TimingRow {
@@ -246,6 +257,24 @@ export function formatSeconds(ms: number | null): string {
   return `${(ms / 1000).toFixed(1)} s`;
 }
 
+/**
+ * How much of the sweep was spent waiting for the background warm-up to finish.
+ *
+ * Zero when the key was already built when the recipient tapped, which is the case
+ * every measurement run arranges for and the case a recipient who reads the screen for
+ * half a minute gets for free. It is never negative and never longer than the run.
+ */
+export function warmWaitMs(state: SendState, warmDoneAt: number | null): number | null {
+  const started = state.startedAt;
+  if (started === null) return null;
+  if (warmDoneAt === null) return null;
+  const waited = warmDoneAt - started;
+  if (waited <= 0) return 0;
+  // It cannot have lasted past the first thing the core reported.
+  const firstReport = state.stageAt.witness;
+  return firstReport === undefined ? waited : Math.min(waited, Math.max(0, firstReport - started));
+}
+
 /** The gap between two reported stages, or null when either is missing. */
 export function stageSpan(times: StageTimes, from: SweepStage, to: SweepStage): number | null {
   const a = times[from];
@@ -259,7 +288,7 @@ export function stageSpan(times: StageTimes, from: SweepStage, to: SweepStage): 
  * on a dry run it is the time the core spent stopping short of one.
  */
 export function timingRows(input: TimingInput): TimingRow[] {
-  const { state, openMs, warmMs } = input;
+  const { state, openMs, warmMs, warmDoneAt } = input;
   const t = state.stageAt;
   const doneAt = t.done;
   const total =
@@ -269,6 +298,7 @@ export function timingRows(input: TimingInput): TimingRow[] {
   const rows: [string, string, number | null][] = [
     ["open", "open/scan", openMs],
     ["keys", "keys (warm)", warmMs],
+    ["waitkeys", "waiting for keys", warmWaitMs(state, warmDoneAt)],
     ["witness", "witness", stageSpan(t, "witness", "keys")],
     ["proving", "proving", stageSpan(t, "proving", "broadcast")],
     ["send", "send", stageSpan(t, "broadcast", "done")],

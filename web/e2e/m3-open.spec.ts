@@ -178,6 +178,9 @@ describeOnMock("M3: sending the envelope on", () => {
     // 6b. The Timing block: every line a measurement, to one decimal, and the
     // three stage rows telling the mock's three different stage lengths apart.
     const seconds = /^\d+\.\d s$/;
+    // The warm-up finished long before the tap in this run, so the wait for it is a
+    // measured zero rather than a dash: the row is there whether or not it cost anything.
+    await expect(page.getByTestId("timing-waitkeys")).toHaveText(seconds);
     for (const row of ["open", "keys", "witness", "proving", "send", "total"]) {
       await expect(page.getByTestId(`timing-${row}`)).toHaveText(seconds);
     }

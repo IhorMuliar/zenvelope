@@ -149,7 +149,7 @@ async fn sweeps_the_m1_note_on_mainnet_without_broadcasting() {
         );
     };
 
-    let outcome = sweep(&mut client, &request, &mut on_stage)
+    let outcome = sweep(&mut client, &request, None, &mut on_stage)
         .await
         .expect("the sweep builds and proves");
     if let Some(previous) = last_stage.take() {
@@ -364,7 +364,7 @@ async fn the_same_note_twice_is_refused_before_any_network_work() {
         broadcast: false,
     };
 
-    let err = sweep(&mut client, &request, &mut |_, _| {})
+    let err = sweep(&mut client, &request, None, &mut |_, _| {})
         .await
         .expect_err("the same note twice must be refused");
     assert!(err.contains("same note"), "{err}");
