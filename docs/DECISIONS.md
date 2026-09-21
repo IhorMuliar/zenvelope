@@ -3,6 +3,35 @@
 One entry per decision. Newest section first. Each entry: what we decided, why, and
 the evidence it rests on. If something here contradicts another doc, this file wins.
 
+## 2026-09-21
+
+### D12 Block explorer for the done screen
+
+**Decision.** Link finished sweeps to `https://mainnet.zcashexplorer.app/transactions/<txid>`,
+recorded as `EXPLORER_TX` in `web/src/config.ts`. Testnet uses the same host's
+`testnet.` subdomain.
+
+**Why.** The recipient needs one link that shows the transaction really happened, and the
+candidates are not equally alive.
+
+**Evidence.** Probed 2026-09-21 with the known mainnet txid
+`281e9f7bffa5bffc8ee1287cc6e245cc59eee302727ea9d93c7f8e5a99341d43`:
+`mainnet.zcashexplorer.app` **200** and the page renders the transaction (a bogus txid
+gives 404), `3xpl.com` 200, `zcashblockexplorer.com` did not resolve, `blockchair.com`
+401. First working candidate wins.
+
+### D13 No fee is taken until there is a real fee address
+
+**Decision.** `FEE_ADDRESS` in `web/src/config.ts` is the empty string, and the open flow
+passes `fee_zat "0"`, builds no fee output and shows no fee line. `FLAT_FEE_ZAT` stays as
+it is, and filling the address in is the only change needed to start charging.
+
+**Why.** The constant used to hold a made-up unified address. A sweep is the recipient's
+money, and a second output to an address that does not decode fails the whole
+transaction, so a placeholder that looks like an address is worse than no address at all.
+D5 is unchanged: the fee still rides on the sweep, it is just switched off until it has
+somewhere to go.
+
 ## 2026-09-20
 
 ### D1 Headline: not "first production ZIP-324"

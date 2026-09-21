@@ -13,6 +13,7 @@ import {
 import { formatCount, formatZecAmount, poolLabel, sumZat, truncateTxid } from "../lib/format";
 import { CopyField } from "../components/CopyField";
 import { Envelope } from "../components/Envelope";
+import { SendOn } from "../components/SendOn";
 
 interface Link {
   /** The address the sender paid. Safe to show: it reveals nothing and cannot spend. */
@@ -179,12 +180,15 @@ export function Open() {
     );
   }
 
-  if (state.phase === "opened" && state.result) {
+  if (state.phase === "opened" && state.result && core.current && secret.current) {
     return (
       <Opened
         notes={state.result.notes}
         tipHeight={state.result.tip_height}
         badge={badge}
+        core={core.current}
+        secret={secret.current}
+        network={link.network}
       />
     );
   }
@@ -222,14 +226,24 @@ function Opened({
   notes,
   tipHeight,
   badge,
+  core,
+  secret,
+  network,
 }: {
   notes: FoundNote[];
   tipHeight: number;
   badge: React.ReactNode;
+  core: LoadedCore;
+  /** Passed down to the sweep and to nothing else. */
+  secret: string;
+  network: Network;
 }) {
   const total = sumZat(notes.map((n) => n.amount_zat));
   const memo = notes.find((n) => n.memo && n.memo.trim() !== "")?.memo ?? null;
   const single = notes.length === 1 ? notes[0] : null;
+  // One sweep spends one note. With more than one, the largest goes first and
+  // the screen says so; the rest stay in the envelope and the link still works.
+  const biggest = notes.reduce((a, b) => (BigInt(b.amount_zat) > BigInt(a.amount_zat) ? b : a));
 
   return (
     <section className="stack">
@@ -291,7 +305,14 @@ function Opened({
         <p className="hint">Chain tip {formatCount(tipHeight)} when this scan finished.</p>
       </div>
 
-      <NextSteps />
+      <SendOn
+        core={core}
+        secret={secret}
+        network={network}
+        note={biggest}
+        noteCount={notes.length}
+        tipHeight={tipHeight}
+      />
 
       <p className="fine">
         The secret in this link stayed in your browser. Nothing about this envelope was sent
@@ -325,37 +346,6 @@ function FiatReveal({ amount }: { amount: string }) {
       {amount}, and that is all we will tell you. Asking a price server for a rate would tell
       it that you just opened an envelope, so this milestone shows ZEC only.
     </p>
-  );
-}
-
-const NEXT: [string, string][] = [
-  ["A Zcash address", "Paste any Zcash address and the money moves there, still shielded."],
-  [
-    "A new wallet in this browser",
-    "We generate a fresh Zcash wallet here and hand you the seed words to keep.",
-  ],
-  [
-    "USDC or SOL on Solana (leaves the shielded pool)",
-    "This leaves the shielded pool. A third-party rail you pick does the swap, we never hold funds on either side, and you see every cost before you commit.",
-  ],
-];
-
-function NextSteps() {
-  return (
-    <div className="card stack">
-      <h2>Where should it go?</h2>
-      <ul className="next-steps">
-        {NEXT.map(([title, body]) => (
-          <li key={title}>
-            <button type="button" disabled data-testid="next-step">
-              <span className="next-title">{title}</span>
-              <span className="hint">{body}</span>
-              <span className="soon">Coming in the next milestone</span>
-            </button>
-          </li>
-        ))}
-      </ul>
-    </div>
   );
 }
 

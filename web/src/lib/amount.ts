@@ -3,7 +3,14 @@
  * floating point never touches an amount.
  */
 
-import { FLAT_FEE_ZAT, MIN_ENVELOPE_ZAT } from "../config";
+import {
+  FLAT_FEE_ZAT,
+  MIN_ENVELOPE_ZAT,
+  NETWORK_FEE_TRANSPARENT_ZAT,
+  NETWORK_FEE_ZAT,
+  SWEEP_FEE_ZAT,
+} from "../config";
+import type { AddressKind } from "../core/types";
 import { zatToZecString, zecStringToZat } from "../core/mock";
 
 export interface AmountOk {
@@ -63,4 +70,54 @@ export function feeBreakdown(envelopeZat: bigint, feeZat: bigint = FLAT_FEE_ZAT)
 /** The two lines shown under the QR. */
 export function breakdownLines(b: Breakdown): [string, string] {
   return [`Envelope ${b.envelope} ZEC + service fee ${b.fee} ZEC`, `= ${b.total} ZEC`];
+}
+
+/* ------------------------------------------------- M3: what the recipient gets */
+
+/**
+ * The ZIP-317 miner fee for the sweep: 0.0001 ZEC for the two-action shielded
+ * case, 0.00015 ZEC when the destination is transparent and costs another
+ * logical action.
+ */
+export function networkFeeFor(kind: AddressKind): bigint {
+  return kind === "transparent" ? NETWORK_FEE_TRANSPARENT_ZAT : NETWORK_FEE_ZAT;
+}
+
+export interface SweepAmounts {
+  /** What the scan found in the envelope. */
+  inEnvelopeZat: bigint;
+  /** The miner fee. */
+  networkFeeZat: bigint;
+  /** The flat Zenvelope fee. 0n while there is no fee address, and then no line. */
+  serviceFeeZat: bigint;
+  /** What lands at the destination. Never negative: see `ok`. */
+  receiveZat: bigint;
+  /** False when the envelope cannot cover the fees, and then nothing is offered. */
+  ok: boolean;
+  /** How much short it is, 0n when ok. */
+  shortfallZat: bigint;
+}
+
+/**
+ * envelope - miner fee - flat fee = what the recipient receives.
+ *
+ * All bigint zatoshi: no float ever touches an amount, and the review screen and
+ * the done screen do the same arithmetic on the same numbers.
+ */
+export function sweepAmounts(
+  inEnvelopeZat: bigint,
+  kind: AddressKind,
+  serviceFeeZat: bigint = SWEEP_FEE_ZAT,
+): SweepAmounts {
+  const networkFee = networkFeeFor(kind);
+  const fee = serviceFeeZat < 0n ? 0n : serviceFeeZat;
+  const receive = inEnvelopeZat - networkFee - fee;
+  return {
+    inEnvelopeZat,
+    networkFeeZat: networkFee,
+    serviceFeeZat: fee,
+    receiveZat: receive > 0n ? receive : 0n,
+    ok: receive > 0n,
+    shortfallZat: receive > 0n ? 0n : -receive + 1n,
+  };
 }

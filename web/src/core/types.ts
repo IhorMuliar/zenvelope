@@ -2,8 +2,10 @@
  * The interface the WASM core exposes. The Rust side (web/src/wasm/core) and the
  * MOCK implementation in ./mock.ts both satisfy this.
  *
- * Nothing here ever touches the network or storage: it is pure key material and
- * string formatting. The secret stays in memory.
+ * Everything up to M2 is pure key material and string formatting plus the scan.
+ * M3 adds the spend: `warm_proving_key`, `classify_address`, `new_wallet` and
+ * `sweep_envelope`. The secret stays in memory throughout: it is handed to the
+ * core and to nothing else.
  */
 
 export type Network = "main" | "test";
@@ -42,6 +44,11 @@ export interface FoundNote {
   height: number;
   txid: string;
   pool: Pool;
+  /**
+   * Which action of that transaction holds the note. M3 needs it to point the
+   * spend at the right note without scanning the block again.
+   */
+  action_index: number;
 }
 
 /**
@@ -70,6 +77,73 @@ export interface OpenResult {
  * cover, which is what puts the progress bar in its indeterminate state.
  */
 export type ProgressFn = (scanned: number, total: number) => void;
+
+/* ----------------------------------------------------------------- M3: spend */
+
+/**
+ * What a pasted destination turns out to be.
+ *
+ * `unified_orchard` is the only kind that keeps the money shielded and in
+ * Ironwood. `transparent` works but leaves the pool. The other two cannot
+ * receive this note at all.
+ */
+export type AddressKind =
+  | "unified_orchard"
+  | "unified_no_orchard"
+  | "sapling"
+  | "transparent"
+  | "invalid";
+
+export interface AddressClass {
+  kind: AddressKind;
+  /** Why, when the core has something to add. Diagnostic, not recipient copy. */
+  reason: string | null;
+}
+
+/**
+ * A wallet generated in the browser for a recipient who has none. The mnemonic
+ * is shown once, on screen, and is stored nowhere: not in localStorage, not in
+ * a URL, not in a log.
+ */
+export interface NewWallet {
+  /** 24 BIP-39 words, space separated. */
+  mnemonic: string;
+  address: string;
+  ufvk: string;
+  /** Height to restore from, so a restoring wallet has no history to scan. */
+  birthday: number;
+}
+
+/** The stages `sweep_envelope` reports, in order. */
+export type SweepStage = "witness" | "keys" | "proving" | "broadcast" | "done";
+
+/** Called as the sweep moves from stage to stage. `detail` is a short line. */
+export type StageFn = (stage: SweepStage, detail: string) => void;
+
+/** Which note to spend: enough to find it again without scanning again. */
+export interface NoteRef {
+  txid: string;
+  height: number;
+  action_index: number;
+}
+
+/** What a finished, or failed, sweep hands back. */
+export interface SweepResult {
+  txid: string;
+  /** The signed transaction, when `broadcast` was false. */
+  raw_tx_hex: string | null;
+  /** Zatoshi as a decimal string: what the destination gets. */
+  amount_to_destination_zat: string;
+  /** The flat Zenvelope fee actually taken. "0" when there is no fee address. */
+  fee_zat: string;
+  /** The ZIP-317 miner fee. */
+  network_fee_zat: string;
+  anchor_height: number;
+  broadcast: boolean;
+  /** null or 0 means success. Anything else means nothing moved. */
+  error_code: number | null;
+  error_message: string | null;
+}
 
 export interface ZenvelopeCore {
   derive(secret_b64url: string, network: Network): Derived;
@@ -102,6 +176,54 @@ export interface ZenvelopeCore {
     lightwalletd_url: string,
     on_progress?: ProgressFn,
   ): Promise<OpenResult>;
+
+  /**
+   * Builds the Ironwood proving key and keeps it. Resolves with the
+   * milliseconds it took. Safe to call more than once: later calls return at
+   * once.
+   *
+   * Proving is single-threaded in this milestone. Measured on a desktop the key
+   * costs about 35 s and the proof about 52 s, and a slow phone is up to four
+   * times that. That is why the open flow starts this in the background the
+   * moment the envelope is found, so the wait overlaps with reading.
+   */
+  warm_proving_key(): Promise<number>;
+
+  /** What a pasted address is, and so whether this note can be sent to it. */
+  classify_address(addr: string, network: Network): AddressClass;
+
+  /**
+   * A fresh wallet for a recipient who has none. `birthday` should be the
+   * current chain tip, so a restore has nothing to scan. The mnemonic it
+   * returns is shown once and stored nowhere.
+   */
+  new_wallet(network: Network, birthday: number): NewWallet;
+
+  /**
+   * Spends the envelope note to `destination`, with the flat Zenvelope fee as a
+   * second output to `fee_address` (DECISIONS D5). `fee_zat` is a decimal
+   * string, and "0" with an empty `fee_address` means no fee output at all.
+   *
+   * The witness, key and proving work run in this browser; the only outbound
+   * traffic is gRPC-web to `lightwalletd_url`. `broadcast: false` builds and
+   * signs without sending and puts the transaction in `raw_tx_hex`.
+   *
+   * A failure that leaves the funds untouched comes back as a resolved result
+   * with `error_code` set, rather than as a rejection; the caller treats a
+   * rejection as meaning the same thing.
+   */
+  sweep_envelope(
+    secret_b64url: string,
+    network: Network,
+    lightwalletd_url: string,
+    note: NoteRef,
+    destination: string,
+    fee_address: string,
+    fee_zat: string,
+    memo: string | null,
+    broadcast: boolean,
+    on_stage: StageFn,
+  ): Promise<SweepResult>;
 }
 
 export interface LoadedCore extends ZenvelopeCore {

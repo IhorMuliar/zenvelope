@@ -14,12 +14,17 @@
  */
 
 import type {
+  AddressClass,
   Derived,
   LoadedCore,
   Network,
+  NewWallet,
+  NoteRef,
   OpenResult,
   ParsedFragment,
   ProgressFn,
+  StageFn,
+  SweepResult,
   ZatLike,
 } from "./types";
 import { mockCore } from "./mock";
@@ -41,37 +46,79 @@ const REQUIRED = [
   "zat_to_zec_string",
   "zec_string_to_zat",
   "open_envelope",
+  // M3: the spend.
+  "warm_proving_key",
+  "classify_address",
+  "new_wallet",
+  "sweep_envelope",
 ] as const;
 
 /**
- * The wasm exports for derive() and parse_fragment() return wasm-bindgen objects whose
- * fields are getters and whose memory has to be released. Everything past this module
- * sees plain, already-freed JS objects.
+ * The wasm exports that return structs hand back wasm-bindgen objects whose fields
+ * are getters and whose memory has to be released. Everything past this module sees
+ * plain, already-freed JS objects.
  */
 interface Disposable {
   free(): void;
 }
 
-function takeDerived(v: Derived & Disposable): Derived {
+/**
+ * Copies the named fields off a wasm-bindgen object and frees it. A plain JS object
+ * (which is what the MOCK and some `serde_wasm_bindgen` returns are) has no `free`,
+ * so the call is optional.
+ */
+function take<T extends object>(v: T & Partial<Disposable>, keys: readonly (keyof T)[]): T {
   try {
-    return {
-      address: v.address,
-      ufvk: v.ufvk,
-      diversifier_index: v.diversifier_index,
-    };
+    const out = {} as T;
+    for (const k of keys) out[k] = v[k];
+    return out;
   } finally {
-    v.free();
+    if (typeof v.free === "function") v.free();
   }
 }
 
-function takeFragment(v: ParsedFragment & Disposable): ParsedFragment {
+function takeDerived(v: Derived & Partial<Disposable>): Derived {
+  return take(v, ["address", "ufvk", "diversifier_index"]);
+}
+
+function takeFragment(v: ParsedFragment & Partial<Disposable>): ParsedFragment {
   try {
     const birthday = v.birthday;
     return birthday === undefined || birthday === null
       ? { secret: v.secret }
       : { secret: v.secret, birthday };
   } finally {
-    v.free();
+    if (typeof v.free === "function") v.free();
+  }
+}
+
+function takeAddressClass(v: AddressClass & Partial<Disposable>): AddressClass {
+  try {
+    return { kind: v.kind, reason: v.reason ?? null };
+  } finally {
+    if (typeof v.free === "function") v.free();
+  }
+}
+
+function takeWallet(v: NewWallet & Partial<Disposable>): NewWallet {
+  return take(v, ["mnemonic", "address", "ufvk", "birthday"]);
+}
+
+function takeSweep(v: SweepResult & Partial<Disposable>): SweepResult {
+  try {
+    return {
+      txid: v.txid,
+      raw_tx_hex: v.raw_tx_hex ?? null,
+      amount_to_destination_zat: v.amount_to_destination_zat,
+      fee_zat: v.fee_zat,
+      network_fee_zat: v.network_fee_zat,
+      anchor_height: v.anchor_height,
+      broadcast: v.broadcast,
+      error_code: v.error_code ?? null,
+      error_message: v.error_message ?? null,
+    };
+  } finally {
+    if (typeof v.free === "function") v.free();
   }
 }
 
@@ -90,6 +137,21 @@ interface WasmModule {
     lightwalletd_url: string,
     on_progress?: ProgressFn,
   ): Promise<OpenResult>;
+  warm_proving_key(): Promise<number>;
+  classify_address(addr: string, network: Network): AddressClass & Disposable;
+  new_wallet(network: Network, birthday: number): NewWallet & Disposable;
+  sweep_envelope(
+    secret_b64url: string,
+    network: Network,
+    lightwalletd_url: string,
+    note: NoteRef,
+    destination: string,
+    fee_address: string,
+    fee_zat: string,
+    memo: string | null,
+    broadcast: boolean,
+    on_stage: StageFn,
+  ): Promise<SweepResult & Disposable>;
 }
 
 async function load(): Promise<LoadedCore> {
@@ -136,6 +198,36 @@ async function load(): Promise<LoadedCore> {
     // straight through to WASM and is never copied anywhere else.
     open_envelope: (secret, birthday, network, url, onProgress) =>
       core.open_envelope(secret, birthday, network, url, onProgress),
+    warm_proving_key: () => core.warm_proving_key(),
+    classify_address: (addr, network) => takeAddressClass(core.classify_address(addr, network)),
+    new_wallet: (network, birthday) => takeWallet(core.new_wallet(network, birthday)),
+    // The spend. Same rule as the scan: the secret goes to WASM and nowhere else.
+    sweep_envelope: async (
+      secret,
+      network,
+      url,
+      note,
+      destination,
+      feeAddress,
+      feeZat,
+      memo,
+      broadcast,
+      onStage,
+    ) =>
+      takeSweep(
+        await core.sweep_envelope(
+          secret,
+          network,
+          url,
+          note,
+          destination,
+          feeAddress,
+          feeZat,
+          memo,
+          broadcast,
+          onStage,
+        ),
+      ),
   };
 }
 

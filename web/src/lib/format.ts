@@ -45,10 +45,15 @@ export function formatCount(n: number): string {
   return groupThousands(v.toString());
 }
 
+/** A long string short enough to read on a phone, with both ends intact. */
+export function truncateMiddle(s: string, keep = 8): string {
+  if (s.length <= keep * 2 + 1) return s;
+  return `${s.slice(0, keep)}…${s.slice(-keep)}`;
+}
+
 /** A txid short enough to read on a phone, with the ends intact. */
 export function truncateTxid(txid: string, keep = 8): string {
-  if (txid.length <= keep * 2 + 1) return txid;
-  return `${txid.slice(0, keep)}…${txid.slice(-keep)}`;
+  return truncateMiddle(txid, keep);
 }
 
 /** How a pool is named to the recipient. Never a raw crate name. */

@@ -1,0 +1,496 @@
+/**
+ * "Where should it go?" — the M3 send-on flow, shown once the envelope is open.
+ *
+ * Four screens, driven by the reducer in ../lib/sweepFlow: choose a destination,
+ * review the numbers, watch the four stages, and land on Sent or on an error that
+ * says the money never moved.
+ *
+ * The secret arrives as a prop, is handed to `sweep_envelope`, and goes nowhere
+ * else: not into storage, not into a URL, not into a log. Neither does the
+ * mnemonic of a wallet generated here — it exists on screen and in one piece of
+ * React state, and it is gone when the tab is.
+ */
+
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import {
+  EXPLORER_NAME,
+  FEE_ADDRESS,
+  FEE_ENABLED,
+  LIGHTWALLETD,
+  SWEEP_FEE_ZAT,
+  explorerTxUrl,
+} from "../config";
+import type { FoundNote, LoadedCore, Network, NewWallet } from "../core/types";
+import { sweepAmounts } from "../lib/amount";
+import {
+  classifyDestination,
+  emptyDestination,
+  type DestinationState,
+} from "../lib/destination";
+import { formatCount, formatZecAmount, truncateMiddle } from "../lib/format";
+import {
+  FUNDS_SAFE_COPY,
+  SWEEP_FAILED_COPY,
+  elapsedLabel,
+  initialSendState,
+  needsUnloadWarning,
+  sendReducer,
+  stageChecklist,
+} from "../lib/sweepFlow";
+import { CopyField } from "./CopyField";
+
+/** Desktop measurement: proving key about 35 s, proof about 52 s, single-threaded. */
+const WARM_ESTIMATE = "~40 s";
+
+export const SEND_TIMING_COPY =
+  "This takes about 1 to 2 minutes on a laptop and longer on a phone. Keep this tab open.";
+
+export const RESTORE_COPY = "Restore in Zodl or Zingo with these words and this birthday height";
+
+type Choice = "address" | "wallet" | null;
+
+interface Props {
+  core: LoadedCore;
+  /** Lives here only for the length of the sweep call. */
+  secret: string;
+  network: Network;
+  /** The note being sent on. */
+  note: FoundNote;
+  /** How many notes the scan found, so a multi-note envelope can say so. */
+  noteCount: number;
+  /** Chain tip at the end of the scan: the birthday a new wallet restores from. */
+  tipHeight: number;
+}
+
+export function SendOn({ core, secret, network, note, noteCount, tipHeight }: Props) {
+  const [state, dispatch] = useReducer(sendReducer, initialSendState);
+  const [choice, setChoice] = useState<Choice>(null);
+  const [dest, setDest] = useState<DestinationState>(emptyDestination);
+  const [wallet, setWallet] = useState<NewWallet | null>(null);
+  const [walletError, setWalletError] = useState<string | null>(null);
+  const [wroteDown, setWroteDown] = useState(false);
+  const [warm, setWarm] = useState<"warming" | "ready" | "failed">("warming");
+  const [elapsed, setElapsed] = useState(0);
+  const runId = useRef(0);
+
+  /**
+   * The proving key starts building the moment the envelope is found, before the
+   * recipient has chosen anything, so most of the wait happens while they read.
+   */
+  useEffect(() => {
+    let alive = true;
+    core
+      .warm_proving_key()
+      .then(() => {
+        if (alive) setWarm("ready");
+      })
+      .catch(() => {
+        // A failed warm-up is not fatal: the sweep builds the key itself.
+        if (alive) setWarm("failed");
+      });
+    return () => {
+      alive = false;
+    };
+  }, [core]);
+
+  const inEnvelopeZat = useMemo(() => BigInt(note.amount_zat), [note.amount_zat]);
+
+  const walletDest = useMemo<DestinationState | null>(
+    () => (wallet ? classifyDestination(wallet.address, core.classify_address, network) : null),
+    [wallet, core, network],
+  );
+
+  const active = choice === "wallet" ? walletDest : choice === "address" ? dest : null;
+  const destination = active?.input.trim() ?? "";
+  const amounts = sweepAmounts(inEnvelopeZat, active?.kind ?? "unified_orchard");
+
+  const ready =
+    active !== null &&
+    active.canContinue &&
+    amounts.ok &&
+    (choice !== "wallet" || wroteDown);
+
+  /* ------------------------------------------------------------- the sweep */
+
+  const send = useCallback(async () => {
+    const id = ++runId.current;
+    dispatch({ type: "send", at: Date.now() });
+    try {
+      const result = await core.sweep_envelope(
+        secret,
+        network,
+        LIGHTWALLETD[network],
+        { txid: note.txid, height: note.height, action_index: note.action_index },
+        destination,
+        FEE_ADDRESS,
+        SWEEP_FEE_ZAT.toString(),
+        null,
+        true,
+        (stage, detail) => {
+          if (id === runId.current) dispatch({ type: "stage", stage, detail });
+        },
+      );
+      if (id === runId.current) dispatch({ type: "result", result });
+    } catch (err) {
+      const message = (err as Error)?.message?.trim();
+      if (id === runId.current) {
+        dispatch({ type: "failed", message: message ? message : SWEEP_FAILED_COPY });
+      }
+    }
+  }, [core, secret, network, note, destination]);
+
+  /* --------------------------------------------- keep the screen and the tab */
+
+  // A phone that sleeps mid-proof throws the proof away. The lock is best
+  // effort: a browser without the API, or one that refuses, changes nothing.
+  useEffect(() => {
+    if (state.phase !== "sending") return;
+    const nav = navigator as Navigator & {
+      wakeLock?: { request(type: "screen"): Promise<{ release(): Promise<void> }> };
+    };
+    let sentinel: { release(): Promise<void> } | null = null;
+    let released = false;
+    nav.wakeLock
+      ?.request("screen")
+      .then((s) => {
+        if (released) void s.release().catch(() => {});
+        else sentinel = s;
+      })
+      .catch(() => {});
+    return () => {
+      released = true;
+      void sentinel?.release().catch(() => {});
+    };
+  }, [state.phase]);
+
+  // Only the proof and the broadcast are worth warning about: everything before
+  // them is cheap to redo, and nothing is ever persisted to come back to.
+  useEffect(() => {
+    if (!needsUnloadWarning(state)) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [state]);
+
+  useEffect(() => {
+    if (state.phase !== "sending" || state.startedAt === null) return;
+    const started = state.startedAt;
+    setElapsed(Date.now() - started);
+    const timer = window.setInterval(() => setElapsed(Date.now() - started), 250);
+    return () => window.clearInterval(timer);
+  }, [state.phase, state.startedAt]);
+
+  /* ------------------------------------------------------------- the screens */
+
+  if (state.phase === "sending") {
+    const rows = stageChecklist(state);
+    return (
+      <div className="card stack">
+        <h2 data-testid="sending">Sending it on</h2>
+        <ul className="stage-list" data-testid="stage-list">
+          {rows.map((row) => (
+            <li key={row.stage} data-stage={row.stage} data-state={row.state} data-testid="stage-row">
+              <span className="stage-mark" aria-hidden="true">
+                {row.state === "done" ? "✓" : row.state === "active" ? "•" : "·"}
+              </span>
+              <span>{row.label}</span>
+            </li>
+          ))}
+        </ul>
+        <p className="row">
+          <span className="label">Elapsed</span>
+          <span data-testid="elapsed">{elapsedLabel(elapsed)}</span>
+        </p>
+        <p className="hint" aria-live="polite" data-testid="stage-detail">
+          {state.detail ?? "Starting…"}
+        </p>
+        <p className="fine">{SEND_TIMING_COPY}</p>
+      </div>
+    );
+  }
+
+  if (state.phase === "sent" && state.result) {
+    const received = BigInt(state.result.amount_to_destination_zat);
+    return (
+      <div className="card stack">
+        <h2 data-testid="sent-heading">Sent.</h2>
+        <p className="sent-amount" data-testid="sent-amount">
+          {formatZecAmount(received)}
+        </p>
+        <CopyField
+          label="Transaction"
+          value={state.result.txid}
+          display={truncateMiddle(state.result.txid, 10)}
+          testId="sent-txid"
+        />
+        <p>
+          <a
+            href={explorerTxUrl(state.result.txid, network)}
+            rel="noreferrer noopener"
+            target="_blank"
+            data-testid="explorer-link"
+          >
+            See it on {EXPLORER_NAME}
+          </a>
+        </p>
+        <p className="hint" data-testid="sent-destination">
+          To {truncateMiddle(destination, 12)}
+        </p>
+        <p data-testid="envelope-empty">The envelope is now empty.</p>
+      </div>
+    );
+  }
+
+  if (state.phase === "failed") {
+    return (
+      <div className="card stack">
+        <h2>It did not go through</h2>
+        <p className="error" data-testid="send-error">
+          {state.message ?? SWEEP_FAILED_COPY}
+        </p>
+        <button type="button" className="primary" onClick={() => void send()} data-testid="send-retry">
+          Try again
+        </button>
+        <button
+          type="button"
+          className="ghost"
+          onClick={() => dispatch({ type: "choose" })}
+          data-testid="send-restart"
+        >
+          Choose somewhere else
+        </button>
+        <p className="fine" data-testid="funds-safe">
+          {FUNDS_SAFE_COPY}
+        </p>
+      </div>
+    );
+  }
+
+  if (state.phase === "review" && active) {
+    return (
+      <div className="card stack">
+        <h2>Check this over</h2>
+        <p className="row">
+          <span className="label">In the envelope</span>
+          <span data-testid="review-in-envelope">{formatZecAmount(amounts.inEnvelopeZat)}</span>
+        </p>
+        <p className="row">
+          <span className="label">Network fee</span>
+          <span data-testid="review-network-fee">{formatZecAmount(amounts.networkFeeZat)}</span>
+        </p>
+        {FEE_ENABLED && amounts.serviceFeeZat > 0n ? (
+          <p className="row">
+            <span className="label">Zenvelope fee</span>
+            <span data-testid="review-service-fee">{formatZecAmount(amounts.serviceFeeZat)}</span>
+          </p>
+        ) : null}
+        <p className="row receive">
+          <span className="label">You receive</span>
+          <strong data-testid="review-receive">{formatZecAmount(amounts.receiveZat)}</strong>
+        </p>
+        <p className="row">
+          <span className="label">Goes to</span>
+          <span className="mono" data-testid="review-destination">
+            {truncateMiddle(destination, 12)}
+          </span>
+        </p>
+        {active.status === "warn" ? (
+          <p className="warn" data-testid="review-warning">
+            {active.message}
+          </p>
+        ) : null}
+        <button type="button" className="primary" onClick={() => void send()} data-testid="send-it-on">
+          Send it on
+        </button>
+        <p className="fine" data-testid="send-timing">
+          {SEND_TIMING_COPY}
+        </p>
+        <button
+          type="button"
+          className="ghost"
+          onClick={() => dispatch({ type: "choose" })}
+          data-testid="review-back"
+        >
+          Choose somewhere else
+        </button>
+      </div>
+    );
+  }
+
+  /* ------------------------------------------------------------ choose phase */
+
+  const onPickAddress = () => {
+    setChoice("address");
+    setWallet(null);
+    setWroteDown(false);
+  };
+
+  const onPickWallet = () => {
+    setChoice("wallet");
+    setDest(emptyDestination);
+    setWroteDown(false);
+    if (wallet) return;
+    try {
+      // The mnemonic lands in React state and on the screen. Nowhere else.
+      setWallet(core.new_wallet(network, tipHeight));
+      setWalletError(null);
+    } catch (err) {
+      setWalletError((err as Error).message);
+    }
+  };
+
+  return (
+    <div className="card stack">
+      <h2>Where should it go?</h2>
+      <p className="hint" data-testid="warm-status">
+        {warm === "warming"
+          ? `Preparing keys… ${WARM_ESTIMATE}`
+          : warm === "ready"
+            ? "Keys ready"
+            : "The keys will be built when you send."}
+      </p>
+      {noteCount > 1 ? (
+        <p className="hint" data-testid="multi-note">
+          This sends on the payment shown above. Any others stay in the envelope.
+        </p>
+      ) : null}
+
+      <ul className="next-steps">
+        <li>
+          <button
+            type="button"
+            onClick={onPickAddress}
+            aria-pressed={choice === "address"}
+            data-testid="dest-address"
+          >
+            <span className="next-title">A Zcash address</span>
+            <span className="hint">
+              Paste any Zcash address and the money moves there, still shielded.
+            </span>
+          </button>
+          {choice === "address" ? (
+            <div className="stack dest-panel">
+              <label className="field">
+                <span className="label">Zcash address</span>
+                <input
+                  type="text"
+                  inputMode="text"
+                  autoComplete="off"
+                  spellCheck={false}
+                  value={dest.input}
+                  placeholder="u1…"
+                  onChange={(e) =>
+                    setDest(classifyDestination(e.target.value, core.classify_address, network))
+                  }
+                  data-testid="dest-input"
+                />
+              </label>
+              {dest.message ? (
+                <p
+                  className={dest.status === "error" ? "error" : dest.status === "warn" ? "warn" : "hint"}
+                  data-status={dest.status}
+                  aria-live="polite"
+                  data-testid="dest-feedback"
+                >
+                  {dest.message}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+        </li>
+
+        <li>
+          <button
+            type="button"
+            onClick={onPickWallet}
+            aria-pressed={choice === "wallet"}
+            data-testid="dest-wallet"
+          >
+            <span className="next-title">A new wallet in this browser</span>
+            <span className="hint">
+              We generate a fresh Zcash wallet here and hand you the seed words to keep.
+            </span>
+          </button>
+          {choice === "wallet" ? (
+            <div className="stack dest-panel">
+              {walletError ? (
+                <p className="error" data-testid="wallet-error">
+                  {walletError}
+                </p>
+              ) : null}
+              {wallet ? (
+                <>
+                  <p className="hint">
+                    These 24 words are the wallet. Write them down now: they are shown here once
+                    and are saved nowhere.
+                  </p>
+                  <ol className="words" data-testid="wallet-words">
+                    {wallet.mnemonic.split(" ").map((word, i) => (
+                      <li key={`${i}-${word}`} data-testid="wallet-word">
+                        <span className="word-n">{i + 1}</span>
+                        <span className="word">{word}</span>
+                      </li>
+                    ))}
+                  </ol>
+                  <CopyField
+                    label="Address"
+                    value={wallet.address}
+                    display={truncateMiddle(wallet.address, 12)}
+                    testId="wallet-address"
+                  />
+                  <p className="row">
+                    <span className="label">Birthday height</span>
+                    <span data-testid="wallet-birthday">{formatCount(wallet.birthday)}</span>
+                  </p>
+                  <p className="hint" data-testid="wallet-restore">
+                    {RESTORE_COPY}.
+                  </p>
+                  <label className="check">
+                    <input
+                      type="checkbox"
+                      checked={wroteDown}
+                      onChange={(e) => setWroteDown(e.target.checked)}
+                      data-testid="wallet-confirm"
+                    />
+                    <span>I wrote these down</span>
+                  </label>
+                </>
+              ) : null}
+            </div>
+          ) : null}
+        </li>
+
+        <li>
+          <button type="button" disabled data-testid="dest-solana">
+            <span className="next-title">USDC or SOL on Solana</span>
+            <span className="hint">
+              This leaves the shielded pool. A third-party rail you pick does the swap, we never
+              hold funds on either side, and you see every cost before you commit.
+            </span>
+            <span className="soon">Coming in the next milestone</span>
+          </button>
+        </li>
+      </ul>
+
+      {active && !amounts.ok ? (
+        <p className="error" data-testid="too-small">
+          There is not enough in this envelope to cover the network fee of{" "}
+          {formatZecAmount(amounts.networkFeeZat)}.
+        </p>
+      ) : null}
+
+      <button
+        type="button"
+        className="primary"
+        disabled={!ready}
+        onClick={() => dispatch({ type: "review" })}
+        data-testid="to-review"
+      >
+        Continue
+      </button>
+    </div>
+  );
+}

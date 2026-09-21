@@ -20,7 +20,7 @@
  *   - tapping "Open envelope" shows scan progress driven by on_progress
  *   - the amount reads 0.0013 ZEC and the memo is shown as the sender's message
  *   - the fiat equivalent is behind a tap and never a price request
- *   - the M3 next-step cards are present and disabled
+ *   - the M3 destination cards are live, with the Solana rail still disabled
  *   - no link on the page carries the secret fragment onward
  *   - a link with no fragment gets a friendly error and never scans
  */
@@ -74,11 +74,12 @@ describeOnMock("M2: opening an envelope", () => {
     await expect(page.getByTestId("height")).toHaveText("3,490,472");
     await expect(page.getByTestId("txid")).toHaveText(/^[0-9a-f]{8}…[0-9a-f]{8}$/);
 
-    // M3 placeholders, all three disabled.
-    const next = page.getByTestId("next-step");
-    await expect(next).toHaveCount(3);
-    for (let i = 0; i < 3; i++) await expect(next.nth(i)).toBeDisabled();
-    await expect(next.nth(2)).toContainText("leaves the shielded pool");
+    // The M3 destination cards are live now; only the Solana rail is still a
+    // placeholder. The flow itself is proved in m3-open.spec.ts.
+    await expect(page.getByTestId("dest-address")).toBeEnabled();
+    await expect(page.getByTestId("dest-wallet")).toBeEnabled();
+    await expect(page.getByTestId("dest-solana")).toBeDisabled();
+    await expect(page.getByTestId("dest-solana")).toContainText("leaves the shielded pool");
 
     // The amount slides in on a delay: wait for the unwrap to settle, so the
     // screenshot is of the finished screen and not of a frame mid-animation.
