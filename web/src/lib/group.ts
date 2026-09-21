@@ -8,14 +8,19 @@
  * a group is shared except the amount and the message, and nothing on the chain
  * says the N envelopes belong together.
  *
- * Every secret is generated in the browser and lives in this module's return
+ * From M4 the core lives in a Web Worker, so every derivation is a message round
+ * trip and {@link generateGroup} is asynchronous: N envelopes are N awaited
+ * round trips, reported one by one so the page can say which one it is on
+ * instead of freezing on "Creating…".
+ *
+ * Every secret is generated in the core worker and lives in this module's return
  * value, in React state, and in the CSV the sender chooses to download. It is
  * never stored, never sent anywhere and never recoverable — losing it means the
  * envelope stays funded and unopenable, which is the honest trade for a design
  * where we hold nothing.
  */
 
-import type { Network, ZenvelopeCore } from "../core/types";
+import type { AsyncCore, Network } from "../core/types";
 import { zatToZecString } from "../core/mock";
 
 /** The most links one submission will make. Fifty QRs is already a lot of paper. */
@@ -83,15 +88,34 @@ export function validateCount(input: string): CountResult {
   return { ok: true, count: n };
 }
 
+/** Called after each envelope is finished, so the form can count up rather than freeze. */
+export type GroupProgressFn = (made: number, total: number) => void;
+
+/**
+ * The part of the core a group needs: four calls, each a round trip to the core
+ * worker. Narrower than the whole core on purpose, so the tests can hand this a
+ * four-method object instead of a whole fake wasm module.
+ */
+export type GroupCore = Pick<
+  AsyncCore,
+  "generate_secret" | "derive" | "build_fragment" | "payment_uri"
+>;
+
 /**
  * Makes `count` envelopes with the given core.
  *
- * Synchronous and pure apart from the core's CSPRNG: the chain height is
- * fetched once by the caller and passed in, so N links cost N derivations and
- * no extra network. A duplicate secret would be a catastrophic core bug, so it
- * is checked rather than assumed.
+ * The chain height is fetched once by the caller and passed in, so N links cost
+ * N derivations and no extra network. The derivations themselves are sequential
+ * rather than a `Promise.all`: the worker is one thread holding one wasm module,
+ * so racing them would only queue them out of order and lose the running count.
+ * A duplicate secret would be a catastrophic core bug, so it is checked rather
+ * than assumed.
  */
-export function generateGroup(core: ZenvelopeCore, req: GroupRequest): GroupEnvelope[] {
+export async function generateGroup(
+  core: GroupCore,
+  req: GroupRequest,
+  onProgress?: GroupProgressFn,
+): Promise<GroupEnvelope[]> {
   const count = Math.floor(req.count);
   if (count < 1 || count > MAX_ENVELOPES) {
     throw new Error(`count must be 1 to ${MAX_ENVELOPES}`);
@@ -104,12 +128,17 @@ export function generateGroup(core: ZenvelopeCore, req: GroupRequest): GroupEnve
   const out: GroupEnvelope[] = [];
 
   for (let i = 1; i <= count; i++) {
-    const secret = core.generate_secret();
+    const secret = await core.generate_secret();
     if (seen.has(secret)) throw new Error("the core produced the same secret twice");
     seen.add(secret);
 
-    const derived = core.derive(secret, req.network);
-    const fragment = core.build_fragment(secret, req.birthday);
+    const derived = await core.derive(secret, req.network);
+    const fragment = await core.build_fragment(secret, req.birthday);
+    const uri = await core.payment_uri(
+      derived.address,
+      amountZat,
+      req.message === "" ? undefined : req.message,
+    );
     out.push({
       index: i,
       link: `${req.origin}/e#${fragment}`,
@@ -118,12 +147,9 @@ export function generateGroup(core: ZenvelopeCore, req: GroupRequest): GroupEnve
       amountZat,
       amount,
       memo: req.message,
-      uri: core.payment_uri(
-        derived.address,
-        amountZat,
-        req.message === "" ? undefined : req.message,
-      ),
+      uri,
     });
+    onProgress?.(i, count);
   }
   return out;
 }

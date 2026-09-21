@@ -23,7 +23,7 @@ import {
 import type { FoundNote, LoadedCore, Network, NewWallet } from "../core/types";
 import { sweepAmounts } from "../lib/amount";
 import {
-  classifyDestination,
+  classifyDestinationAsync,
   emptyDestination,
   type DestinationState,
 } from "../lib/destination";
@@ -40,8 +40,8 @@ import {
 } from "../lib/sweepFlow";
 import { CopyField } from "./CopyField";
 
-/** Desktop measurement: proving key about 35 s, proof about 52 s, single-threaded. */
-const WARM_ESTIMATE = "~40 s";
+/** Desktop measurement: the proving key is about 29 s on one thread, about 15 s on four. */
+const WARM_ESTIMATE = "~30 s";
 
 export const SEND_TIMING_COPY =
   "This takes about 1 to 2 minutes on a laptop and longer on a phone. Keep this tab open.";
@@ -68,11 +68,17 @@ export function SendOn({ core, secret, network, note, noteCount, tipHeight }: Pr
   const [choice, setChoice] = useState<Choice>(null);
   const [dest, setDest] = useState<DestinationState>(emptyDestination);
   const [wallet, setWallet] = useState<NewWallet | null>(null);
+  const [walletDest, setWalletDest] = useState<DestinationState | null>(null);
   const [walletError, setWalletError] = useState<string | null>(null);
   const [wroteDown, setWroteDown] = useState(false);
   const [warm, setWarm] = useState<"warming" | "ready" | "failed">("warming");
   const [elapsed, setElapsed] = useState(0);
   const runId = useRef(0);
+  /**
+   * Bumped per keystroke. Classification is a round trip to the core worker now, so two
+   * answers can come back out of order; only the newest one is allowed to land.
+   */
+  const destId = useRef(0);
 
   /**
    * `?dry=1` in the query string: build and prove the sweep, then stop. Read once,
@@ -102,10 +108,21 @@ export function SendOn({ core, secret, network, note, noteCount, tipHeight }: Pr
 
   const inEnvelopeZat = useMemo(() => BigInt(note.amount_zat), [note.amount_zat]);
 
-  const walletDest = useMemo<DestinationState | null>(
-    () => (wallet ? classifyDestination(wallet.address, core.classify_address, network) : null),
-    [wallet, core, network],
-  );
+  // The generated wallet's own address goes through the same classifier as a pasted
+  // one: nothing is trusted just because this page made it.
+  useEffect(() => {
+    if (!wallet) {
+      setWalletDest(null);
+      return;
+    }
+    let alive = true;
+    void classifyDestinationAsync(wallet.address, core.classify_address, network).then((d) => {
+      if (alive) setWalletDest(d);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [wallet, core, network]);
 
   const active = choice === "wallet" ? walletDest : choice === "address" ? dest : null;
   const destination = active?.input.trim() ?? "";
@@ -358,14 +375,15 @@ export function SendOn({ core, secret, network, note, noteCount, tipHeight }: Pr
     setWroteDown(false);
   };
 
-  const onPickWallet = () => {
+  const onPickWallet = async () => {
     setChoice("wallet");
     setDest(emptyDestination);
     setWroteDown(false);
     if (wallet) return;
     try {
-      // The mnemonic lands in React state and on the screen. Nowhere else.
-      setWallet(core.new_wallet(network, tipHeight));
+      // The mnemonic is generated in the core worker, lands in React state and on the
+      // screen, and goes nowhere else.
+      setWallet(await core.new_wallet(network, tipHeight));
       setWalletError(null);
     } catch (err) {
       setWalletError((err as Error).message);
@@ -412,9 +430,20 @@ export function SendOn({ core, secret, network, note, noteCount, tipHeight }: Pr
                   spellCheck={false}
                   value={dest.input}
                   placeholder="u1…"
-                  onChange={(e) =>
-                    setDest(classifyDestination(e.target.value, core.classify_address, network))
-                  }
+                  onChange={(e) => {
+                    const input = e.target.value;
+                    const id = ++destId.current;
+                    // The typed text has to show at once; the verdict lands when the
+                    // worker answers, and only if nothing newer has been typed since.
+                    setDest({ ...emptyDestination, input });
+                    void classifyDestinationAsync(
+                      input,
+                      core.classify_address,
+                      network,
+                    ).then((d) => {
+                      if (id === destId.current) setDest(d);
+                    });
+                  }}
                   data-testid="dest-input"
                 />
               </label>
@@ -435,7 +464,7 @@ export function SendOn({ core, secret, network, note, noteCount, tipHeight }: Pr
         <li>
           <button
             type="button"
-            onClick={onPickWallet}
+            onClick={() => void onPickWallet()}
             aria-pressed={choice === "wallet"}
             data-testid="dest-wallet"
           >

@@ -33,4 +33,7 @@ test-results/
 
 # M4 threaded proving spike (throwaway): its own cargo target dir
 target-mt/
+# M4: the threaded core build has different rustflags, so it gets its own target dir
+# (scripts/build-core.sh) rather than invalidating the stable one on every alternation
+target-mt-core/
 package-lock.json

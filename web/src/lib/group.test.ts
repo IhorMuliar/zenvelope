@@ -1,5 +1,17 @@
-import { describe, expect, it } from "vitest";
-import { mockCore } from "../core/mock";
+/**
+ * Group envelopes, across the core worker.
+ *
+ * `generateGroup` is asynchronous from M4 on, because every derivation is a message
+ * round trip. These drive it through the *real* RPC client (`createCoreClient`) over the
+ * fake worker from `src/core/fakeWorker.ts`, with the MOCK core answering on the far
+ * side — so what is under test is the same promise-per-call surface the page holds, not
+ * a stub that happens to be `async`.
+ */
+
+import { beforeAll, describe, expect, it } from "vitest";
+import { createCoreClient } from "../core/client";
+import { coreBackedWorker } from "../core/fakeWorker";
+import type { LoadedCore } from "../core/types";
 import {
   CSV_COLUMNS,
   MAX_ENVELOPES,
@@ -23,6 +35,12 @@ const REQ = {
   origin: "https://zenvelope.example",
 };
 
+/** The MOCK core, reached exactly as the page reaches it: over the worker protocol. */
+let core: LoadedCore;
+beforeAll(async () => {
+  core = await createCoreClient(coreBackedWorker(), { maxThreads: 1 });
+});
+
 describe("validateCount", () => {
   it("takes 1 through 50", () => {
     expect(validateCount("1")).toEqual({ ok: true, count: 1 });
@@ -44,22 +62,36 @@ describe("validateCount", () => {
   });
 });
 
-describe("generateGroup with the mock core", () => {
-  it("makes N envelopes, numbered from 1", () => {
-    const rows = generateGroup(mockCore, REQ);
+describe("generateGroup over the core worker", () => {
+  it("makes N envelopes, numbered from 1", async () => {
+    const rows = await generateGroup(core, REQ);
     expect(rows).toHaveLength(3);
     expect(rows.map((r) => r.index)).toEqual([1, 2, 3]);
   });
 
-  it("gives every envelope its own secret, link and address", () => {
-    const rows = generateGroup(mockCore, { ...REQ, count: 12 });
+  it("gives every envelope its own secret, link and address", async () => {
+    const rows = await generateGroup(core, { ...REQ, count: 12 });
     expect(new Set(rows.map((r) => r.link)).size).toBe(12);
     expect(new Set(rows.map((r) => r.address)).size).toBe(12);
     expect(new Set(rows.map((r) => r.uri)).size).toBe(12);
   });
 
-  it("puts the secret in the fragment, with the birthday, and nowhere else", () => {
-    const rows = generateGroup(mockCore, REQ);
+  it("reports progress one envelope at a time, in order", async () => {
+    const seen: Array<[number, number]> = [];
+    const rows = await generateGroup(core, { ...REQ, count: 4 }, (made, total) =>
+      seen.push([made, total]),
+    );
+    expect(rows).toHaveLength(4);
+    expect(seen).toEqual([
+      [1, 4],
+      [2, 4],
+      [3, 4],
+      [4, 4],
+    ]);
+  });
+
+  it("puts the secret in the fragment, with the birthday, and nowhere else", async () => {
+    const rows = await generateGroup(core, REQ);
     for (const r of rows) {
       const [base, fragment] = r.link.split("#");
       expect(base).toBe("https://zenvelope.example/e");
@@ -72,8 +104,8 @@ describe("generateGroup with the mock core", () => {
     }
   });
 
-  it("charges the same amount for each: envelope plus the flat fee", () => {
-    const rows = generateGroup(mockCore, REQ);
+  it("charges the same amount for each: envelope plus the flat fee", async () => {
+    const rows = await generateGroup(core, REQ);
     for (const r of rows) {
       expect(r.amountZat).toBe(1_030_000n);
       expect(r.amount).toBe("0.0103");
@@ -82,8 +114,8 @@ describe("generateGroup with the mock core", () => {
     expect(groupTotal(rows)).toBe("0.0309");
   });
 
-  it("builds a single-output ZIP-321 URI per envelope, with the message in memo=", () => {
-    const rows = generateGroup(mockCore, REQ);
+  it("builds a single-output ZIP-321 URI per envelope, with the message in memo=", async () => {
+    const rows = await generateGroup(core, REQ);
     for (const r of rows) {
       expect(r.uri.startsWith(`zcash:${r.address}?`)).toBe(true);
       expect(r.uri).toContain("&memo=");
@@ -93,33 +125,41 @@ describe("generateGroup with the mock core", () => {
     }
   });
 
-  it("leaves memo= out when there is no message", () => {
-    const rows = generateGroup(mockCore, { ...REQ, message: "" });
+  it("leaves memo= out when there is no message", async () => {
+    const rows = await generateGroup(core, { ...REQ, message: "" });
     expect(rows[0].uri).not.toContain("memo=");
     expect(rows[0].memo).toBe("");
   });
 
-  it("omits the birthday when the chain height was unavailable", () => {
-    const rows = generateGroup(mockCore, { ...REQ, birthday: undefined });
+  it("omits the birthday when the chain height was unavailable", async () => {
+    const rows = await generateGroup(core, { ...REQ, birthday: undefined });
     expect(rows[0].link.split("#")[1]).toMatch(/^[A-Za-z0-9_-]{43}$/);
   });
 
-  it("makes one envelope for a group of one, so N=1 is not a special case", () => {
-    const rows = generateGroup(mockCore, { ...REQ, count: 1 });
+  it("makes one envelope for a group of one, so N=1 is not a special case", async () => {
+    const rows = await generateGroup(core, { ...REQ, count: 1 });
     expect(rows).toHaveLength(1);
     expect(rows[0].index).toBe(1);
   });
 
-  it("makes the full 50", () => {
-    const rows = generateGroup(mockCore, { ...REQ, count: MAX_ENVELOPES });
+  it("makes the full 50", async () => {
+    const rows = await generateGroup(core, { ...REQ, count: MAX_ENVELOPES });
     expect(rows).toHaveLength(50);
     expect(new Set(rows.map((r) => r.link)).size).toBe(50);
   });
 
-  it("refuses a count outside the range and a non-positive amount", () => {
-    expect(() => generateGroup(mockCore, { ...REQ, count: 0 })).toThrow(/1 to 50/);
-    expect(() => generateGroup(mockCore, { ...REQ, count: 51 })).toThrow(/1 to 50/);
-    expect(() => generateGroup(mockCore, { ...REQ, envelopeZat: 0n })).toThrow(/positive/);
+  it("refuses a count outside the range and a non-positive amount", async () => {
+    await expect(generateGroup(core, { ...REQ, count: 0 })).rejects.toThrow(/1 to 50/);
+    await expect(generateGroup(core, { ...REQ, count: 51 })).rejects.toThrow(/1 to 50/);
+    await expect(generateGroup(core, { ...REQ, envelopeZat: 0n })).rejects.toThrow(/positive/);
+  });
+
+  it("surfaces a worker that fails rather than making half a group", async () => {
+    const broken = {
+      ...core,
+      generate_secret: () => Promise.reject(new Error("the core worker stopped unexpectedly")),
+    };
+    await expect(generateGroup(broken, REQ)).rejects.toThrow(/stopped unexpectedly/);
   });
 });
 
@@ -160,9 +200,15 @@ describe("csvCell", () => {
 });
 
 describe("buildCsv", () => {
-  const rows = generateGroup(mockCore, REQ);
-  const csv = buildCsv(rows);
-  const lines = csv.split("\r\n");
+  let rows: GroupEnvelope[];
+  let csv: string;
+  let lines: string[];
+
+  beforeAll(async () => {
+    rows = await generateGroup(core, REQ);
+    csv = buildCsv(rows);
+    lines = csv.split("\r\n");
+  });
 
   it("starts with the documented header, in order", () => {
     expect(lines[0]).toBe("index,link,address,amount,memo,payment_uri");
@@ -187,15 +233,15 @@ describe("buildCsv", () => {
     });
   });
 
-  it("quotes a memo with a comma in it rather than breaking the row", () => {
-    const tricky = generateGroup(mockCore, {
+  it("quotes a memo with a comma in it rather than breaking the row", async () => {
+    const tricky = await generateGroup(core, {
       ...REQ,
       count: 1,
       message: 'Payroll, March, "final"',
     });
     const line = buildCsv(tricky).split("\r\n")[1];
     expect(line).toContain('"Payroll, March, ""final"""');
-    // Still six fields once the quoting is honoured.
+    // Still well formed once the quoting is honoured.
     expect(line.match(/(^|,)"/g)?.length).toBeGreaterThan(0);
   });
 

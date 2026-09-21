@@ -226,10 +226,45 @@ export interface ZenvelopeCore {
   ): Promise<SweepResult>;
 }
 
-export interface LoadedCore extends ZenvelopeCore {
+/**
+ * A core as it is implemented: synchronously, in whichever thread holds the wasm.
+ * The MOCK satisfies this too. From M4 this shape lives only inside the core worker.
+ */
+export interface SyncCore extends ZenvelopeCore {
   /** true when no WASM build was found and the MOCK is in use. */
   isMock: boolean;
 }
+
+/** Which wasm package answered. `mock` means no build was found at all. */
+export type CoreBackend = "threads" | "single" | "mock";
+
+/** What loading the core reports back: the footer note is drawn from this. */
+export interface CoreInfo {
+  backend: CoreBackend;
+  isMock: boolean;
+  /**
+   * Threads in the proving pool, as `rayon::current_num_threads()` reports it once the
+   * pool is up — measured, not asked for. 1 on the single-threaded package.
+   */
+  threads: number;
+  /** Why the threaded package was not used, when it was not. Diagnostic, not copy. */
+  reason: string | null;
+}
+
+/**
+ * Every method of {@link ZenvelopeCore} as the page sees it from M4 on: the core runs
+ * in a Web Worker, so every call is a message round trip and therefore a promise. The
+ * callbacks keep their place in the argument list; the client strips them before
+ * posting and the worker forwards their calls back as messages.
+ */
+export type AsyncCore = {
+  [K in keyof ZenvelopeCore]: ZenvelopeCore[K] extends (...args: infer A) => infer R
+    ? (...args: A) => Promise<Awaited<R>>
+    : never;
+};
+
+/** What `loadCore()` hands the pages. */
+export interface LoadedCore extends AsyncCore, CoreInfo {}
 
 /** Normalises whatever the WASM boundary returns into a bigint. */
 export function toZat(v: ZatLike): bigint {

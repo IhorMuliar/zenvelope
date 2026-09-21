@@ -940,3 +940,14 @@ h3 {
     gap: 0.2rem 1rem;
   }
 }
+
+/*
+ * The core worker's own footer note: which of the two wasm packages is proving.
+ * Deliberately the quietest thing on the page -- it explains a slow sweep, it does not
+ * ask for anything.
+ */
+.proving-note {
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  opacity: 0.65;
+}

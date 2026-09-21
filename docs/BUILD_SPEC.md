@@ -68,8 +68,14 @@ M3 (built 2026-09-21, broadcast pending) Spend from the link to a pasted Zcash
    done screen with the key already warm. Broadcast pending: every run so far used
    the ?dry=1 path with broadcast: false and nothing has been sent. Transcript in
    web/docs/M3-VERIFICATION.md. Demo video 1 recorded here.
-M4 Drainer-safe copy, trust-boundary screens, in-browser fresh wallet with seed
-   export for recipients who have nothing.
+M4 (in progress 2026-09-21) Drainer-safe copy, trust-boundary screens, in-browser
+   fresh wallet with seed export for recipients who have nothing — plus the proving
+   work those screens need to be worth reading. In: the core runs in a Web Worker
+   and proves on a 4-thread rayon pool from a second wasm package, so a desktop dry
+   sweep is 23 s tap to done against M3's 49 s and the progress screen keeps
+   painting throughout; the sender-side copy is one audited module with "claim"
+   banned outright; the trust boundary is its own screen behind a required tick;
+   and group envelopes with a CSV export ship early as an M6 preview. Transcript in web/docs/M4-VERIFICATION.md.
 M5 Solana receive option via 1Click, with the warning screen and a fresh Solana
    keypair path. Demo video 2 recorded here.
 M6 Group envelopes and CSV export.
@@ -87,10 +93,13 @@ M6 first, then M5, then Noir connect. M0 to M4 are the product.
   the M3 core carries the Orchard/Ironwood halo2 circuit and is 2,231,657 bytes
   (1,030 KB gzip), up from 788,781 bytes (390 KB gzip) at M2 and 435,317 bytes
   (253 KB gzip) at M1. On a desktop in Playwright chromium the proving key costs
-  about 27 s and the proof about 42 s, single-threaded; a phone is still
-  unmeasured, and threading the prover is the M4 spike. Single-threaded proving
-  also holds the browser's main thread, so the progress screen cannot repaint
-  while it runs — see web/docs/M3-VERIFICATION.md.
+  about 27 s and the proof about 42 s, single-threaded. **Answered at M4 for the
+  desktop**: the core moved into a Web Worker, so the main thread is free and the
+  progress screen repaints throughout, and a second wasm package built with
+  `orchard/multicore` and wasm-bindgen-rayon proves on 4 threads — key 16 s, proof
+  15 s, 23 s from the tap to the done screen, at a cost of 53,545 bytes of wasm
+  (+2.4%). The pool is capped at 4 because the curve flattens there. A phone is
+  still unmeasured. See web/docs/M4-VERIFICATION.md.
 - 1Click quote for ZEC in, USDC-on-Solana out, minimum amount and fee. Still open,
   needed at M5.
 

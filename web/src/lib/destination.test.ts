@@ -3,6 +3,7 @@ import {
   DESTINATION_COPY,
   WRONG_NETWORK_HINT,
   classifyDestination,
+  classifyDestinationAsync,
   emptyDestination,
   isSendable,
 } from "./destination";
@@ -126,4 +127,43 @@ describe("against the MOCK classifier", () => {
       expect(classifyDestination(addr, classifyAddress, network).kind).toBe(kind);
     });
   }
+});
+
+describe("across the core worker", () => {
+  /** The same verdict, one message round trip away. */
+  const asyncSays =
+    (kind: AddressKind) =>
+    async (): Promise<AddressClass> => ({ kind, reason: null });
+
+  it("gives the same answer the synchronous classifier does", async () => {
+    for (const kind of Object.keys(DESTINATION_COPY) as AddressKind[]) {
+      const over = await classifyDestinationAsync("u1abc", asyncSays(kind));
+      expect(over, kind).toEqual(classifyDestination("u1abc", says(kind)));
+    }
+  });
+
+  it("short-circuits an empty field without asking the worker anything", async () => {
+    let asked = 0;
+    const counting = async () => {
+      asked += 1;
+      return { kind: "invalid", reason: null } as AddressClass;
+    };
+    expect(await classifyDestinationAsync("   ", counting)).toEqual({
+      ...emptyDestination,
+      input: "   ",
+    });
+    expect(asked).toBe(0);
+  });
+
+  it("treats a rejection as 'not an address' rather than taking the page down", async () => {
+    const boom = () => Promise.reject(new Error("the core worker stopped unexpectedly"));
+    const s = await classifyDestinationAsync("u1abc", boom);
+    expect(s.kind).toBe("invalid");
+    expect(s.canContinue).toBe(false);
+  });
+
+  it("still adds the testnet hint on a mainnet page", async () => {
+    const s = await classifyDestinationAsync("utest1abc", asyncSays("invalid"), "main");
+    expect(s.message).toContain(WRONG_NETWORK_HINT);
+  });
 });

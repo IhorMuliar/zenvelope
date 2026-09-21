@@ -50,6 +50,14 @@ export function Create() {
   const [count, setCount] = useState("1");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  /**
+   * How far a group is: `[made, total]`, or null when nothing is being made.
+   *
+   * From M4 every derivation is a round trip to the core worker, so fifty
+   * envelopes are fifty awaited round trips. The button counts them off rather
+   * than sitting on "Creating…" for the whole run.
+   */
+  const [madeSoFar, setMadeSoFar] = useState<[number, number] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<Created | null>(null);
 
@@ -97,6 +105,7 @@ export function Create() {
       return;
     }
     setBusy(true);
+    setMadeSoFar(c.count > 1 ? [0, c.count] : null);
     try {
       const loaded = core ?? (await loadCore());
       if (!core) setCore(loaded);
@@ -105,15 +114,23 @@ export function Create() {
       // extra network.
       const chain = await fetchChainHeight(LIGHTWALLETD[network], LIGHTWALLETD_FALLBACK[network]);
       const trimmed = message.trim();
-      const rows = generateGroup(loaded, {
-        count: c.count,
-        envelopeZat: v.zat,
-        feeZat: FLAT_FEE_ZAT,
-        message: trimmed,
-        network,
-        birthday: chain?.height,
-        origin: window.location.origin,
-      });
+
+      // Every secret, address, fragment and URI below is a round trip to the core
+      // worker: the wasm lives there and only there, so the secrets are made there
+      // and kept on neither side once the call is answered.
+      const rows = await generateGroup(
+        loaded,
+        {
+          count: c.count,
+          envelopeZat: v.zat,
+          feeZat: FLAT_FEE_ZAT,
+          message: trimmed,
+          network,
+          birthday: chain?.height,
+          origin: window.location.origin,
+        },
+        c.count > 1 ? (made, total) => setMadeSoFar([made, total]) : undefined,
+      );
 
       setCreated({
         rows,
@@ -127,6 +144,7 @@ export function Create() {
       setError((err as Error).message || "Could not create the envelope.");
     } finally {
       setBusy(false);
+      setMadeSoFar(null);
     }
   }
 
@@ -145,6 +163,15 @@ export function Create() {
       <GroupResult created={created} isMock={isMock} onReset={reset} />
     );
   }
+
+  /** "Creating…", or "Creating 7 of 20…" once a group is under way. */
+  const submitLabel = busy
+    ? madeSoFar
+      ? `Creating ${madeSoFar[0]} of ${madeSoFar[1]}…`
+      : landing.submitBusy
+    : n === 1
+      ? landing.submit
+      : landing.submitMany;
 
   return (
     <section className="stack">
@@ -272,8 +299,16 @@ export function Create() {
         {error ? <p className="error">{error}</p> : null}
 
         <button type="submit" className="primary" disabled={busy} data-testid="create">
-          {busy ? landing.submitBusy : n === 1 ? landing.submit : landing.submitMany}
+          {submitLabel}
         </button>
+
+        {/* The core is one worker thread holding one wasm module, so a group of
+            fifty is fifty round trips and takes a visible moment. Say so. */}
+        {madeSoFar ? (
+          <p className="hint" data-testid="group-progress" aria-live="polite">
+            {`Making ${madeSoFar[1]} envelopes in your browser: ${madeSoFar[0]} done.`}
+          </p>
+        ) : null}
       </form>
 
       <p className="fine" data-testid="never-ask">

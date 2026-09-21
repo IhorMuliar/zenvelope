@@ -9,6 +9,16 @@ description = "Zenvelope key derivation core: link secret to Orchard-only unifie
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+default = []
+# M4: threaded proving. Turns on `orchard/multicore`, which is what puts rayon inside
+# halo2's MSM and FFT, and links wasm-bindgen-rayon so the browser can hand that rayon a
+# real thread pool. It is a *build* feature, not a runtime one: a module built with it
+# imports a shared memory and only instantiates on a cross-origin-isolated page, so the
+# app ships both packages (web/src/wasm/core and web/src/wasm/core-mt) and picks between
+# them at load time. See scripts/build-core.sh.
+multicore = ["orchard/multicore", "dep:rayon", "dep:wasm-bindgen-rayon"]
+
 [dependencies]
 # `unstable-frost` is on only for `UnifiedFullViewingKey::from_orchard_fvk`, which is
 # how the viewing key is kept to a single Orchard item; nothing FROST-related is used.
@@ -34,8 +44,9 @@ zcash_client_backend = { version = "0.24.0", default-features = false, features 
 # `circuits` is what makes `Builder::build` exist at all, and it is also what pulls the
 # Orchard/Ironwood halo2 circuit into the wasm. `std` is what gives that build path the
 # process-wide `cached_orchard_proving_key` OnceLock that `warm_proving_key` primes.
-# `multicore` stays OFF: it would pull rayon, and a plain `--target web` build has no
-# threads. `circuits` also turns on `sapling/circuit`, which is why `sapling-crypto` is a
+# `multicore` is off unless this crate's own `multicore` feature is on, which is the
+# threaded build: a plain `--target web` build has no threads to give rayon.
+# `circuits` also turns on `sapling/circuit`, which is why `sapling-crypto` is a
 # direct dependency below: the `SpendProver`/`OutputProver` traits live there and `build`
 # demands a prover for each, even when no Sapling bundle is ever constructed.
 zcash_primitives = { version = "0.30.1", default-features = false, features = ["circuits", "std"] }
@@ -72,6 +83,13 @@ getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
 tonic-web-wasm-client = "0.9"
 wasm-bindgen-futures = "0.4"
 
+# M4, `multicore` only. `no-bundler` because the threaded package is served as plain
+# files and loaded by URL from the core worker rather than put through Vite's module
+# graph: the bundler glue resolves the main module as `import("../../..")`, which only a
+# bundler holding the package in its graph can answer.
+rayon = { version = "1.8", optional = true }
+wasm-bindgen-rayon = { version = "1.3.0", features = ["no-bundler"], optional = true }
+
 # The native M3 integration test (tests/m3_sweep.rs, `#[ignore]`d) talks plain gRPC to a
 # mainnet lightwalletd, which a browser cannot do and the shipped wasm must not carry.
 # Dev dependencies are not part of a `wasm-pack build`, so the native transport and its
@@ -89,8 +107,11 @@ zcash_client_backend = { version = "0.24.0", default-features = false, features 
 # rustc emits post-MVP wasm (bulk memory, sign extension, and friends) by default, and
 # the wasm-opt build wasm-pack ships with rejects those unless each one is named.
 [package.metadata.wasm-pack.profile.release]
+# `--enable-threads` is named for the `multicore` build; on the single-threaded build it
+# permits a feature the module never uses, which costs nothing.
 wasm-opt = [
     "-Oz",
+    "--enable-threads",
     "--enable-bulk-memory",
     "--enable-sign-ext",
     "--enable-mutable-globals",

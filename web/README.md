@@ -30,13 +30,55 @@ the only network shown otherwise (DECISIONS D4).
 
 ## The WASM core
 
-`src/core/index.ts` dynamically imports `src/wasm/core/zenvelope_core.js` and
-calls its `default()` init. That directory is produced by `wasm-pack` from
-`crates/core`, is gitignored, and is rebuilt with:
+**The core runs in a Web Worker and nowhere else** (`src/core/worker.ts`). The
+page holds only an RPC client (`src/core/client.ts`); `loadCore()` in
+`src/core/index.ts` spawns the worker and hands back a core whose every method is
+a promise, because every call is a message round trip.
+
+That is not tidiness, it is the M3 finding: proving on the page's main thread
+held it for 42 seconds with no `await` in it, so the progress checklist froze on
+its first row and the elapsed clock stopped
+([docs/M3-VERIFICATION.md](docs/M3-VERIFICATION.md) §4). Off the main thread the
+page has nothing to do during a proof but paint, which
+[docs/M4-VERIFICATION.md](docs/M4-VERIFICATION.md) measures.
+
+The secret is posted to the worker as an ordinary argument and kept by neither
+side: no storage, no log, no module-level variable.
+
+### Two packages, and which one loads
+
+`wasm-pack` produces two of them from `crates/core`. Both are gitignored and both
+are rebuilt with:
 
 ```sh
 ../scripts/build-core.sh     # from the repo root: ./scripts/build-core.sh
+ZENVELOPE_SKIP_MT=1 ../scripts/build-core.sh   # single-threaded only
 ```
+
+| | `src/wasm/core` | `src/wasm/core-mt` |
+| --- | --- | --- |
+| built with | stable, default features | nightly, `--features multicore`, `-Z build-std` |
+| memory | its own | **imported and shared** |
+| proving | one thread | a `wasm-bindgen-rayon` pool, capped at 4 |
+| loaded by | `import.meta.glob`, inside the worker's bundle | a plain `import()` of `/wasm/core-mt/…` |
+
+The worker takes the threaded package when `self.crossOriginIsolated` is true,
+the engine passes a hand-rolled wasm-threads probe, and the machine reports more
+than one core; **any** failure after that — a missing build, a rejected
+`initThreadPool`, a module that is not stamped `is_threaded()` — falls back to
+the single-threaded package rather than leaving the recipient unable to open an
+envelope. Which one won is on screen, as a footer note: `proving: 4 threads` or
+`proving: 1 thread`. `?threads=1` on `/e` caps the pool, which is how both rows
+of the M4 timing table come off one build.
+
+The threaded package is served **verbatim**, outside Vite's module graph, by the
+`zenvelope-core-mt` plugin in `vite.config.ts` (dev middleware, and copied to
+`dist/wasm/core-mt/` at build). It has to be: wasm-bindgen-rayon's no-bundler
+glue spawns each rayon worker by fetching its own `import.meta.url` as a blob and
+re-importing the main module by URL, and bundling would rewrite exactly those two
+URLs. Cross-origin isolation comes from `public/_headers` in production and from
+the `server`/`preview` headers in `vite.config.ts` locally; without it there is
+no `SharedArrayBuffer` and the threaded module cannot instantiate at all.
 
 **If the build is absent, the app falls back to a MOCK core**
 (`src/core/mock.ts`) so the UI stays testable. The MOCK is loud about it: a
@@ -46,8 +88,13 @@ moment a real build is present. A build that is present but *fails to load* is a
 bug, not a reason to fall back — the loader throws instead.
 
 The wasm-bindgen glue returns `derive()` and `parse_fragment()` as objects
-holding WASM memory. The loader copies their fields into plain objects and calls
-`.free()`, so nothing past `src/core/index.ts` has to think about it.
+holding WASM memory. The worker copies their fields into plain objects and calls
+`.free()` before posting them, so nothing outside `src/core/worker.ts` ever holds
+one — which it could not anyway, since only cloneable values cross the boundary.
+The two callbacks (`on_progress`, `on_stage`) are not cloneable either: the
+client keeps them, strips them from the posted arguments, and calls them from the
+worker's `progress` and `stage` messages. `src/core/client.test.ts` drives that
+whole protocol against a fake worker.
 
 The interface both implementations satisfy is in `src/core/types.ts`:
 

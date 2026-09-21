@@ -66,6 +66,9 @@ export function isSendable(kind: AddressKind): boolean {
 
 export type Classify = (addr: string, network: Network) => AddressClass;
 
+/** The same call across the core worker, which is where it lives from M4 on. */
+export type ClassifyAsync = (addr: string, network: Network) => Promise<AddressClass>;
+
 /**
  * One keystroke of the destination field. Pure: the only outside call is
  * `classify`, and a throw from it is treated as "not an address" rather than
@@ -85,7 +88,41 @@ export function classifyDestination(
   } catch {
     result = { kind: "invalid", reason: null };
   }
+  return describeDestination(input, result, network);
+}
 
+/**
+ * The same thing over the core worker. The classification is a message round trip now,
+ * so this is a promise; the verdict it turns into is the very same pure function, which
+ * is why the whole matrix is still tested synchronously.
+ *
+ * A rejection is "not an address", exactly as a throw is above: a destination field must
+ * never be able to take the page down.
+ */
+export async function classifyDestinationAsync(
+  input: string,
+  classify: ClassifyAsync,
+  network: Network = "main",
+): Promise<DestinationState> {
+  const addr = input.trim();
+  if (addr === "") return { ...emptyDestination, input };
+
+  let result: AddressClass;
+  try {
+    result = await classify(addr, network);
+  } catch {
+    result = { kind: "invalid", reason: null };
+  }
+  return describeDestination(input, result, network);
+}
+
+/** The product's answer to a classification. The only place the copy is chosen. */
+export function describeDestination(
+  input: string,
+  result: AddressClass,
+  network: Network = "main",
+): DestinationState {
+  const addr = input.trim();
   const kind = result.kind;
   let message = DESTINATION_COPY[kind];
   if (kind === "invalid" && network === "main" && /^(utest1|ztestsapling1|t[mn])/.test(addr)) {

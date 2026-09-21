@@ -30,6 +30,10 @@
  *   - a pasted unified address is accepted and the review arithmetic is right,
  *     including the flat Zenvelope fee on its own output
  *   - the four stages run in order and the sweep is really built and proved
+ *   - **M4**: all four stages are visibly PAINTED, and the elapsed clock keeps ticking
+ *     while the proof runs — the core is in a worker now, so the page has nothing to do
+ *     during a proof but render (M4-VERIFICATION.md; the M3 finding this replaces is in
+ *     M3-VERIFICATION.md §4)
  *   - the new-wallet path generates a wallet and sweeps to it just the same
  *
  * It NEVER broadcasts. The page is loaded with `?dry=1`, which makes SendOn pass
@@ -51,6 +55,13 @@ const DOCS = resolve(HERE, "../docs");
 const FRAGMENT = process.env.ZENV_M1_FRAGMENT;
 const DESTINATION = process.env.ZENV_M3_DEST_ADDRESS;
 const FEE_ADDRESS = process.env.VITE_FEE_ADDRESS;
+
+/**
+ * M4: cap the proving pool, so the same build gives both rows of the timing table.
+ * `ZENV_M4_THREADS=1` sends the core worker down the single-threaded package.
+ */
+const THREADS = process.env.ZENV_M4_THREADS;
+const QUERY = `?dry=1${THREADS ? `&threads=${THREADS}` : ""}`;
 
 /** The M1 envelope: 130,000 zatoshi, one Ironwood note. */
 const ENVELOPE = "0.0013 ZEC";
@@ -121,15 +132,21 @@ function stageDurations(events: StageEvent[], endedAt: number): Array<[string, n
 
 /** Opens the real envelope and waits for the reveal. */
 async function openEnvelope(page: Page): Promise<void> {
-  await page.goto(`/e?dry=1#${FRAGMENT}`);
+  await page.goto(`/e${QUERY}#${FRAGMENT}`);
   // The real core is in this build: a MOCK badge here would mean the wasm is missing
   // and every number below would be invented.
   await expect(page.getByTestId("mock-badge")).toHaveCount(0);
+  // Which wasm package the worker chose, so every timing below is attributable.
+  console.log(`M4 ${await page.getByTestId("proving-note").innerText()}`);
   await page.getByTestId("open-envelope").click();
   await expect(page.getByTestId("amount")).toHaveText(ENVELOPE, { timeout: 180_000 });
   await expect(page.getByTestId("mock-badge")).toHaveCount(0);
-  // warm_proving_key runs in the background from the moment the envelope opens.
+  // warm_proving_key runs in the background from the moment the envelope opens. This is
+  // the wait a recipient actually has before "Send it on" can start proving, so it is
+  // the other half of the M4 timing table.
+  const openedAt = Date.now();
   await expect(page.getByTestId("warm-status")).toHaveText("Keys ready", { timeout: 300_000 });
+  console.log(`M4 proving key warm: ${((Date.now() - openedAt) / 1000).toFixed(1)} s`);
 }
 
 /** Checks the review numbers, then runs the sweep and asserts the dry-run screen. */
@@ -149,27 +166,67 @@ async function sweepAndAssert(page: Page, label: string, screenshot?: string): P
   await expect(page.getByTestId("sending")).toBeVisible();
   await expect(page.getByTestId("stage-row")).toHaveCount(4);
 
+  // --- M4: the page stays alive through the proof --------------------------
+  //
+  // In M3 this was impossible. The prover ran on the page's main thread with no `await`
+  // between "keys", "proving" and the 42 s of halo2 that followed, so no render could be
+  // scheduled: the checklist froze on `witness` and the elapsed clock stopped. The core
+  // now runs in a Web Worker, so the only claim worth making is the recipient's own —
+  // that they can SEE the proving stage, and that the clock is still moving while it runs.
+  const provingRow = page.locator('[data-testid="stage-row"][data-stage="proving"]');
+  await expect(provingRow).toHaveAttribute("data-state", "active", { timeout: 300_000 });
+  await expect(provingRow).toBeVisible();
+  // The two stages before it must already be ticked off on screen, not just reported.
+  await expect(page.locator('[data-testid="stage-row"][data-stage="witness"]')).toHaveAttribute(
+    "data-state",
+    "done",
+  );
+  await expect(page.locator('[data-testid="stage-row"][data-stage="keys"]')).toHaveAttribute(
+    "data-state",
+    "done",
+  );
+
+  // The clock, read twice across a real wall-clock gap, mid-proof. A frozen main thread
+  // cannot fire the 250 ms interval that drives it, so this is the freeze test.
+  const first = await page.getByTestId("elapsed").innerText();
+  await page.waitForTimeout(3_000);
+  const second = await page.getByTestId("elapsed").innerText();
+  // Still proving when the second reading was taken: otherwise this measured nothing.
+  await expect(provingRow).toHaveAttribute("data-state", "active");
+  const seconds = (t: string) => {
+    const [m, s] = t.split(":");
+    return Number(m) * 60 + Number(s);
+  };
+  console.log(`M3 real dry run (${label}): elapsed ${first} -> ${second} while proving`);
+  expect(
+    seconds(second),
+    `the elapsed clock did not advance during proving: ${first} -> ${second}`,
+  ).toBeGreaterThan(seconds(first));
+
   await expect(page.getByTestId("sent-heading")).toBeVisible({ timeout: 600_000 });
   const totalMs = Date.now() - tapped;
   const events = await readStages(page);
 
-  // --- the stages that were painted, in the documented order ---------------
+  // --- every stage was painted, in the documented order --------------------
   //
-  // Only `witness` is ever painted on a real run, and that is a property of the
-  // prover, not a flake. `crates/core/src/sweep.rs` reports "keys", then
-  // "proving", and then calls `build_and_prove`, and there is no `.await`
-  // anywhere between the three: single-threaded wasm proving holds the main
-  // thread for the whole proof, so the browser cannot paint those rows (or tick
-  // the elapsed clock) until the sweep resolves, by which time the done screen
-  // has replaced them. The stage callbacks themselves all fire, in order, and
-  // e2e/m3-core.spec.ts times each one from the callback. Threading the prover
-  // is M4; until then this asserts what a recipient actually sees.
+  // M3 could only assert that `witness` was painted (see the note above). With the core
+  // in a worker, all four have to be: a missing row here means the page went blind
+  // again, which is the regression this milestone exists to prevent.
   const activeOrder = events.filter((e) => e.state === "active").map((e) => e.stage);
+  // The three that do real work must all be painted, in order. `broadcast` is the one
+  // that may not be: on a dry run it is skipped, so the core reports it and `done` back
+  // to back and React coalesces both into the render that shows the done screen. That is
+  // the stage being instant, not the page being frozen, which is what the three above it
+  // and the ticking clock already rule out.
+  expect(activeOrder.slice(0, 3), `stage order: ${activeOrder.join(", ")}`).toEqual([
+    "witness",
+    "keys",
+    "proving",
+  ]);
   const expected = ["witness", "keys", "proving", "broadcast"];
   expect(activeOrder, `stage order: ${activeOrder.join(", ")}`).toEqual(
     expected.filter((s) => activeOrder.includes(s)),
   );
-  expect(activeOrder[0], `stage order: ${activeOrder.join(", ")}`).toBe("witness");
 
   const durations = stageDurations(events, totalMs);
   console.log(
