@@ -720,6 +720,13 @@ progress.scan-bar:indeterminate::-webkit-progress-bar {
   color: var(--text);
 }
 
+/* The swap tracker's fourth state: a stage that will not happen, because the
+   rail refunded or failed. Neither ticked nor still running. */
+.stage-list li[data-state="stopped"] {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
 .stage-mark {
   color: var(--accent);
   min-width: 1rem;

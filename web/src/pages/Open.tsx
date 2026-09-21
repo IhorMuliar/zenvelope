@@ -198,6 +198,7 @@ export function Open() {
         core={core.current}
         secret={secret.current}
         network={link.network}
+        envelopeAddress={link.address}
       />
     );
   }
@@ -240,6 +241,7 @@ function Opened({
   core,
   secret,
   network,
+  envelopeAddress,
 }: {
   notes: FoundNote[];
   tipHeight: number;
@@ -249,6 +251,8 @@ function Opened({
   /** Passed down to the sweep and to nothing else. */
   secret: string;
   network: Network;
+  /** The envelope's own address: the Solana exit's default refund target (D14). */
+  envelopeAddress: string;
 }) {
   const total = sumZat(notes.map((n) => n.amount_zat));
   const memo = notes.find((n) => n.memo && n.memo.trim() !== "")?.memo ?? null;
@@ -324,6 +328,7 @@ function Opened({
         note={biggest}
         noteCount={notes.length}
         tipHeight={tipHeight}
+        envelopeAddress={envelopeAddress}
       />
 
       <p className="fine">

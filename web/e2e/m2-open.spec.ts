@@ -74,11 +74,12 @@ describeOnMock("M2: opening an envelope", () => {
     await expect(page.getByTestId("height")).toHaveText("3,490,472");
     await expect(page.getByTestId("txid")).toHaveText(/^[0-9a-f]{8}…[0-9a-f]{8}$/);
 
-    // The M3 destination cards are live now; only the Solana rail is still a
-    // placeholder. The flow itself is proved in m3-open.spec.ts.
+    // All three destination cards are live from M5. The shielded flows are
+    // proved in m3-open.spec.ts and the Solana exit in m5-solana.spec.ts; here
+    // it is only that the third one still leads with what it costs you.
     await expect(page.getByTestId("dest-address")).toBeEnabled();
     await expect(page.getByTestId("dest-wallet")).toBeEnabled();
-    await expect(page.getByTestId("dest-solana")).toBeDisabled();
+    await expect(page.getByTestId("dest-solana")).toBeEnabled();
     await expect(page.getByTestId("dest-solana")).toContainText("leaves the shielded pool");
 
     // The amount slides in on a delay: wait for the unwrap to settle, so the

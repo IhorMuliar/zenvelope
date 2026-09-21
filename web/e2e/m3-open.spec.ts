@@ -81,10 +81,10 @@ describeOnMock("M3: sending the envelope on", () => {
     await expect(page.getByTestId("warm-status")).toHaveText(/Preparing keys… ~40 s|Keys ready/);
     await expect(page.getByTestId("warm-status")).toHaveText("Keys ready");
 
-    // The Solana card is the only one that is still a placeholder.
-    await expect(page.getByTestId("dest-solana")).toBeDisabled();
+    // The Solana card is live from M5, and it still leads with what it costs
+    // you rather than with the money. e2e/m5-solana.spec.ts drives it in full.
+    await expect(page.getByTestId("dest-solana")).toBeEnabled();
     await expect(page.getByTestId("dest-solana")).toContainText("leaves the shielded pool");
-    await expect(page.getByTestId("dest-solana")).toContainText("Coming in the next milestone");
     await expect(page.getByTestId("to-review")).toBeDisabled();
 
     mkdirSync(DOCS, { recursive: true });
