@@ -27,3 +27,7 @@ spike/package-lock.json
 spike/test-results/
 target-opt/
 test-results/
+
+# M4 threaded proving spike (throwaway): its own cargo target dir
+target-mt/
+package-lock.json

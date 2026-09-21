@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Zenvelope M4 threaded proving spike</title>
+  </head>
+  <body>
+    <pre id="log">loading…</pre>
+    <script type="module">
+      // ?pkg=      which built package to load (default pkg-mt)
+      // ?threads=  how many rayon threads to ask for; 0 means "never call initThreadPool"
+      const q = new URLSearchParams(location.search);
+      const pkg = q.get("pkg") ?? "pkg-mt";
+      const want = Number(q.get("threads") ?? 0);
+
+      window.spikeCOI = self.crossOriginIsolated === true;
+      window.spikeSAB = typeof SharedArrayBuffer !== "undefined";
+      window.spikeHW = navigator.hardwareConcurrency;
+      window.spikeStage = "import";
+      window.spikeError = null;
+      window.spikePoolMs = null;
+      window.spikeThreads = null;
+
+      try {
+        const mod = await import(`./${pkg}/zenvelope_spike_prove_mt.js`);
+        window.spikeStage = "init";
+        await mod.default();
+        window.spikeStage = "pool";
+        if (want > 0) {
+          const t0 = performance.now();
+          await mod.initThreadPool(want);
+          window.spikePoolMs = performance.now() - t0;
+        }
+        window.spikeThreads = mod.thread_count();
+        window.spikeStage = "ready";
+        window.spike = mod;
+      } catch (e) {
+        window.spikeError = String(e && e.stack ? e.stack : e);
+      }
+      window.spikeReady = true;
+      document.getElementById("log").textContent =
+        window.spikeError ??
+        `${pkg} loaded: coi=${window.spikeCOI} threads=${window.spikeThreads}`;
+    </script>
+  </body>
+</html>
