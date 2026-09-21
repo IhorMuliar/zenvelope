@@ -53,6 +53,15 @@ const M1_ACTION_INDEX: usize = 1;
 /// The flat Zenvelope fee this sweep collects.
 const FEE_ZAT: u64 = 30_000;
 
+/// The M1 envelope's one note, as `open_envelope` reports it.
+fn m1_note() -> NoteRef {
+    NoteRef {
+        txid: M1_TXID.to_string(),
+        height: M1_HEIGHT,
+        action_index: M1_ACTION_INDEX,
+    }
+}
+
 /// Reads a required environment variable, explaining where it comes from.
 fn env(name: &str, where_from: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| panic!("{name} is not set; it comes from {where_from}"))
@@ -96,11 +105,9 @@ async fn sweeps_the_m1_note_on_mainnet_without_broadcasting() {
     let request = SweepRequest {
         secret_b64url: secret,
         network: Network::MainNetwork,
-        note: NoteRef {
-            txid: M1_TXID.to_string(),
-            height: M1_HEIGHT,
-            action_index: M1_ACTION_INDEX,
-        },
+        // One note, in the array form every caller now uses. The M1 envelope holds
+        // exactly one; an envelope with more would name them all here.
+        notes: vec![m1_note()],
         destination: destination.clone(),
         fee_address: fee_address.clone(),
         fee_zat: FEE_ZAT,
@@ -114,9 +121,9 @@ async fn sweeps_the_m1_note_on_mainnet_without_broadcasting() {
         .plan_outputs(Network::MainNetwork)
         .expect("both addresses resolve");
     assert_eq!(outputs.len(), 2, "destination plus the flat fee output");
-    assert_eq!(network_fee_zat(&outputs), 10_000, "two Ironwood actions");
+    assert_eq!(network_fee_zat(1, &outputs), 10_000, "two Ironwood actions");
     let expected =
-        plan_amounts(M1_VALUE_ZAT, FEE_ZAT, &outputs).expect("the note covers the sweep");
+        plan_amounts(M1_VALUE_ZAT, FEE_ZAT, 1, &outputs).expect("the note covers the sweep");
     assert_eq!(expected.amount_to_destination_zat, 90_000);
 
     // Stage timings. Each stage's clock stops when the next one starts.
@@ -195,6 +202,12 @@ async fn sweeps_the_m1_note_on_mainnet_without_broadcasting() {
         bundle.actions().len(),
         2,
         "one spend and two outputs share two Ironwood actions"
+    );
+    assert_eq!(
+        raw.len(),
+        9_166,
+        "the one-note sweep is the same 9,166 bytes it was before sweeps could spend \
+         several notes; a change here is a change to the transaction itself"
     );
     assert!(
         parsed.sapling_bundle().is_none(),
@@ -323,4 +336,74 @@ fn mint_m3_destination() {
 fn the_m1_sweep_arithmetic_is_fixed() {
     // 130,000 − 10,000 network − 30,000 flat = 90,000 to the destination.
     assert_eq!(M1_VALUE_ZAT - 10_000 - FEE_ZAT, 90_000);
+}
+
+/// The M1 note cannot stand in for a second note: two spends of one note are two copies
+/// of one nullifier, and no node accepts that.
+///
+/// So the real chain path is proved with the one note in a one-element array (above),
+/// the multi-note bookkeeping is proved against synthetic trees in
+/// `crates/core/src/spend.rs`, and the only thing left to prove here is that naming the
+/// same note twice is refused — before a single byte is fetched, which is why this test
+/// needs neither the network nor the secret.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_same_note_twice_is_refused_before_any_network_work() {
+    // A client pointed at an endpoint that does not exist: if the guard did not fire
+    // first, this test would fail on a connection error instead of on the message below.
+    let channel = Channel::from_static("http://127.0.0.1:1").connect_lazy();
+    let mut client = CompactTxStreamerClient::new(channel);
+
+    let request = SweepRequest {
+        secret_b64url: zenvelope_core::encode_secret(&[7u8; 32]),
+        network: Network::MainNetwork,
+        notes: vec![m1_note(), m1_note()],
+        destination: String::new(),
+        fee_address: String::new(),
+        fee_zat: 0,
+        memo: None,
+        broadcast: false,
+    };
+
+    let err = sweep(&mut client, &request, &mut |_, _| {})
+        .await
+        .expect_err("the same note twice must be refused");
+    assert!(err.contains("same note"), "{err}");
+    assert!(err.contains("cannot spend it twice"), "{err}");
+}
+
+/// An envelope with several notes pays for `max(spends, outputs)` actions.
+///
+/// The live sweep above is a one-note envelope, so this is where the multi-note fee
+/// arithmetic is pinned down against the same helpers the sweep uses.
+#[test]
+fn several_notes_are_charged_by_action_count() {
+    use zenvelope_core::spend::{ironwood_action_count, resolve_output};
+
+    // Two ordinary unified destinations: the envelope's own address stands in for both.
+    let address = zenvelope_core::derive_from_secret(
+        &zenvelope_core::encode_secret(&[3u8; 32]),
+        Network::MainNetwork,
+    )
+    .expect("a derived envelope address")
+    .address;
+    let outputs = vec![
+        resolve_output(&address, Network::MainNetwork).expect("an Ironwood output"),
+        resolve_output(&address, Network::MainNetwork).expect("an Ironwood output"),
+    ];
+
+    // One note and two notes cost the same: the spends ride in the actions the outputs
+    // had already paid for. The third note is the first one to cost anything.
+    assert_eq!(ironwood_action_count(1, &outputs), 2);
+    assert_eq!(network_fee_zat(1, &outputs), 10_000);
+    assert_eq!(network_fee_zat(2, &outputs), 10_000);
+    assert_eq!(network_fee_zat(3, &outputs), 15_000);
+
+    // Three 50,000-zatoshi notes: 150,000 in, 15,000 network, 30,000 flat, 105,000 out.
+    let plan = plan_amounts(150_000, FEE_ZAT, 3, &outputs).expect("the notes cover the sweep");
+    assert_eq!(plan.network_fee_zat, 15_000);
+    assert_eq!(plan.amount_to_destination_zat, 105_000);
+    assert_eq!(
+        plan.amount_to_destination_zat + plan.fee_zat + plan.network_fee_zat,
+        150_000
+    );
 }

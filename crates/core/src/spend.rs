@@ -316,28 +316,45 @@ pub fn resolve_output(address: &str, network: Network) -> Result<SweepOutput, St
 // Fee arithmetic
 // ---------------------------------------------------------------------------
 
-/// The ZIP-317 network fee for a sweep with these outputs, in zatoshi.
+/// How many Ironwood actions a sweep with `spends` notes and these outputs really has.
 ///
-/// A sweep has exactly one Ironwood spend. The Ironwood pool permits cross-address
-/// transfers, so a spend and an output share an action and the requested action count is
-/// `max(spends, outputs)`, padded up to the 2-action minimum. Transparent outputs are
-/// charged by total serialized bytes over ZIP-317's standard P2PKH output size.
-///
-/// The three shapes a sweep actually takes:
-///
-/// | outputs                              | actions            | fee    |
-/// |--------------------------------------|--------------------|--------|
-/// | 1 shielded (no flat fee)             | 2 ironwood         | 10,000 |
-/// | 2 shielded (destination + flat fee)  | 2 ironwood         | 10,000 |
-/// | 1 shielded + 1 transparent           | 2 ironwood + 1 t   | 15,000 |
-pub fn network_fee_zat(outputs: &[SweepOutput]) -> u64 {
+/// The Ironwood pool permits cross-address transfers, so a requested spend and a
+/// requested output share an action and the requested count is `max(spends, outputs)`,
+/// padded up to the 2-action minimum. This is the same arithmetic
+/// `orchard::builder::BundleType::num_actions` does for the bundle the builder emits, so
+/// the fee computed here and the fee the builder demands cannot drift.
+pub fn ironwood_action_count(spends: usize, outputs: &[SweepOutput]) -> usize {
     let ironwood_outputs = outputs
         .iter()
         .filter(|o| matches!(o, SweepOutput::Ironwood(_)))
         .count();
+    max(max(max(spends, 1), ironwood_outputs), MIN_IRONWOOD_ACTIONS)
+}
+
+/// The ZIP-317 network fee for a sweep spending `spends` notes into these outputs.
+///
+/// Ironwood actions are counted by [`ironwood_action_count`]; transparent outputs are
+/// charged separately, by total serialized bytes over ZIP-317's standard P2PKH output
+/// size. The fee is the marginal fee times the larger of the grace allowance and the
+/// logical action count.
+///
+/// The shapes a sweep actually takes:
+///
+/// | spends | outputs                              | actions            | fee    |
+/// |--------|--------------------------------------|--------------------|--------|
+/// | 1      | 1 shielded (no flat fee)             | 2 ironwood         | 10,000 |
+/// | 1      | 2 shielded (destination + flat fee)  | 2 ironwood         | 10,000 |
+/// | 1      | 1 shielded + 1 transparent           | 2 ironwood + 1 t   | 15,000 |
+/// | 2      | 2 shielded                           | 2 ironwood         | 10,000 |
+/// | 3      | 2 shielded                           | 3 ironwood         | 15,000 |
+///
+/// An envelope with several notes therefore costs nothing extra until it has more notes
+/// than the sweep has outputs: the spends ride in actions the outputs had already paid
+/// for. That is the whole economic argument for sweeping all of them at once.
+pub fn network_fee_zat(spends: usize, outputs: &[SweepOutput]) -> u64 {
     let transparent_bytes: usize = outputs.iter().map(SweepOutput::transparent_bytes).sum();
 
-    let ironwood_actions = max(max(1, ironwood_outputs), MIN_IRONWOOD_ACTIONS) as u64;
+    let ironwood_actions = ironwood_action_count(spends, outputs) as u64;
     let transparent_actions = transparent_bytes.div_ceil(P2PKH_STANDARD_OUTPUT_SIZE) as u64;
 
     MARGINAL_FEE_ZAT * max(GRACE_ACTIONS, transparent_actions + ironwood_actions)
@@ -351,14 +368,19 @@ pub struct SweepAmounts {
     pub network_fee_zat: u64,
 }
 
-/// Splits a note's value across the sweep's outputs, refusing to build a sweep that
-/// cannot pay for itself.
+/// Splits the notes' total value across the sweep's outputs, refusing to build a sweep
+/// that cannot pay for itself.
+///
+/// `note_value_zat` is the **sum** of every note being spent, and `spends` is how many
+/// there are: both are needed, because the fee depends on the action count and the
+/// action count depends on the number of spends.
 pub fn plan_amounts(
     note_value_zat: u64,
     fee_zat: u64,
+    spends: usize,
     outputs: &[SweepOutput],
 ) -> Result<SweepAmounts, String> {
-    let network_fee = network_fee_zat(outputs);
+    let network_fee = network_fee_zat(spends, outputs);
     let overhead = network_fee
         .checked_add(fee_zat)
         .ok_or("the network fee plus the flat fee overflows")?;
@@ -368,9 +390,9 @@ pub fn plan_amounts(
         .filter(|a| *a > 0)
         .ok_or_else(|| {
             format!(
-                "this envelope holds {note_value_zat} zatoshi, which does not cover the \
-             {network_fee} zatoshi network fee plus the {fee_zat} zatoshi Zenvelope fee; \
-             there would be nothing left to send"
+                "this envelope holds {note_value_zat} zatoshi across {spends} note(s), \
+             which does not cover the {network_fee} zatoshi network fee plus the \
+             {fee_zat} zatoshi Zenvelope fee; there would be nothing left to send"
             )
         })?;
 
@@ -541,41 +563,73 @@ pub fn node_hex(node: &MerkleHashOrchard) -> String {
     hex::encode(node.to_bytes())
 }
 
-/// Replays Ironwood note commitments into a tree, taking a witness on the way past.
+/// One note to witness while a replay goes past it.
 ///
-/// Start from the frontier `GetTreeState(h − 1).ironwood_tree()` gives, then feed it every
-/// block from `h` onward in order. Inside a block, commitments are appended in (tx index,
-/// action index) order, which is the order the chain itself commits them in. The witness
-/// is taken immediately after the target commitment is appended, so it witnesses that
-/// leaf; every later commitment is then appended to the witness as well as to the tree.
+/// `slot` is which of the scan's witnesses this note owns, and it is the caller's own
+/// index: the Merkle paths [`WitnessScan::finish`] hands back come out in slot order, so
+/// slot `i` is spend `i`.
+#[derive(Clone, Copy, Debug)]
+pub struct WitnessTarget<'a> {
+    /// The funding transaction's id, in the protocol byte order the wire uses.
+    pub txid_protocol: &'a [u8],
+    /// Index into that transaction's `ironwood_actions`.
+    pub action_index: usize,
+    /// Which witness slot this note fills.
+    pub slot: usize,
+}
+
+/// Replays Ironwood note commitments into a tree, taking witnesses on the way past.
+///
+/// Start from the frontier `GetTreeState(h - 1).ironwood_tree()` gives for the
+/// **earliest** note's block, then feed it every block from `h` onward in order. Inside a
+/// block, commitments are appended in (tx index, action index) order, which is the order
+/// the chain itself commits them in. A witness is taken immediately after its target
+/// commitment is appended, so it witnesses that leaf; every later commitment is then
+/// appended to every witness already taken as well as to the tree.
+///
+/// # Several notes
+///
+/// An envelope can hold more than one note, and a sweep spends all of them in one
+/// transaction, so the scan carries a table of witnesses rather than a single one. Notes
+/// in the same block are witnessed in the same pass over that block; notes in later
+/// blocks are witnessed as the replay reaches each of their blocks, and the tree the
+/// replay holds when it arrives there *is* that block's `h - 1` frontier, arrived at by
+/// replaying rather than by fetching it again. Every witness then keeps absorbing later
+/// commitments, so at the end they all root to the same anchor — which
+/// [`WitnessScan::finish`] checks, note by note, against the root the server reports.
 pub struct WitnessScan {
     tree: IronwoodTree,
-    witness: Option<IronwoodWitness>,
+    /// One slot per note being swept; `None` until the replay passes its commitment.
+    witnesses: Vec<Option<IronwoodWitness>>,
     /// How many commitments have been appended since the scan started.
     appended: usize,
 }
 
 impl WitnessScan {
-    /// Starts a replay from a frontier.
-    pub fn new(tree: IronwoodTree) -> Self {
+    /// Starts a replay from a frontier, with room for `slots` witnesses.
+    pub fn new(tree: IronwoodTree, slots: usize) -> Self {
         Self {
             tree,
-            witness: None,
+            witnesses: (0..slots).map(|_| None).collect(),
             appended: 0,
         }
     }
 
+    /// How many witness slots this scan was opened with.
+    pub fn slots(&self) -> usize {
+        self.witnesses.len()
+    }
+
     /// Appends every Ironwood commitment in one block.
     ///
-    /// `target` is `(txid in protocol byte order, index into that tx's ironwood_actions)`;
-    /// pass it for the block holding the note and `None` for every later block.
+    /// `targets` are the notes whose commitments this block contains — an empty slice for
+    /// a block that is only being replayed to roll the witnesses forward.
     pub fn append_block(
         &mut self,
         block: &CompactBlock,
-        target: Option<(&[u8], usize)>,
+        targets: &[WitnessTarget<'_>],
     ) -> Result<(), String> {
         for tx in &block.vtx {
-            let ours = target.filter(|(txid, _)| tx.txid == *txid);
             for (i, action) in tx.ironwood_actions.iter().enumerate() {
                 let leaf = cmx_node(&action.cmx)?;
                 self.tree
@@ -583,21 +637,27 @@ impl WitnessScan {
                     .map_err(|_| "the Ironwood note commitment tree is full".to_string())?;
                 self.appended += 1;
 
-                // Every witness already taken must see this leaf too — except the one
-                // that is about to be created from it.
-                if let Some(w) = self.witness.as_mut() {
+                // Every witness already taken must see this leaf too — except any that
+                // is about to be created from it.
+                for w in self.witnesses.iter_mut().flatten() {
                     w.append(leaf)
                         .map_err(|_| "the Ironwood witness is full".to_string())?;
                 }
 
-                if ours.map(|(_, idx)| idx == i).unwrap_or(false) {
-                    if self.witness.is_some() {
-                        return Err("the note was witnessed twice".to_string());
+                for target in targets
+                    .iter()
+                    .filter(|t| t.txid_protocol == tx.txid.as_slice() && t.action_index == i)
+                {
+                    let witness = IronwoodWitness::from_tree(self.tree.clone())
+                        .ok_or("cannot witness a leaf in an empty tree")?;
+                    let slot = self
+                        .witnesses
+                        .get_mut(target.slot)
+                        .ok_or_else(|| format!("witness slot {} does not exist", target.slot))?;
+                    if slot.is_some() {
+                        return Err(format!("note {} was witnessed twice", target.slot));
                     }
-                    self.witness = Some(
-                        IronwoodWitness::from_tree(self.tree.clone())
-                            .ok_or("cannot witness a leaf in an empty tree")?,
-                    );
+                    *slot = Some(witness);
                 }
             }
         }
@@ -614,30 +674,48 @@ impl WitnessScan {
         self.appended
     }
 
-    /// The position the witnessed note sits at in the tree.
-    pub fn position(&self) -> Option<u64> {
-        self.witness
-            .as_ref()
+    /// The position one witnessed note sits at in the tree.
+    pub fn position(&self, slot: usize) -> Option<u64> {
+        self.witnesses
+            .get(slot)
+            .and_then(|w| w.as_ref())
             .map(|w| u64::from(w.witnessed_position()))
     }
 
-    /// The witness root, as hex. This is the anchor the sweep will use.
-    pub fn witness_root_hex(&self) -> Option<String> {
-        self.witness.as_ref().map(|w| node_hex(&w.root()))
+    /// The positions of every note, in slot order. `None` for a note not seen yet.
+    pub fn positions(&self) -> Vec<Option<u64>> {
+        (0..self.witnesses.len())
+            .map(|i| self.position(i))
+            .collect()
     }
 
-    /// Finishes the replay into the Merkle path and anchor a spend needs.
-    ///
-    /// `server_root_hex` is the root `GetTreeState(anchor height)` reports. A mismatch is
-    /// a hard error: it means the replay saw a different set of commitments than the
-    /// chain did, and any proof built on it would be rejected. There is no fallback,
-    /// because a wrong anchor is not a degraded sweep, it is a lost one.
-    pub fn finish(self, server_root_hex: &str) -> Result<(MerklePath, Anchor), String> {
-        let witness = self
-            .witness
-            .ok_or("the envelope's note commitment was never seen while replaying the chain")?;
+    /// The slots whose commitment the replay has not passed.
+    pub fn missing(&self) -> Vec<usize> {
+        self.witnesses
+            .iter()
+            .enumerate()
+            .filter(|(_, w)| w.is_none())
+            .map(|(i, _)| i)
+            .collect()
+    }
 
-        let root = node_hex(&witness.root());
+    /// One witness root, as hex. At the anchor every slot reports the same one.
+    pub fn witness_root_hex(&self, slot: usize) -> Option<String> {
+        self.witnesses
+            .get(slot)
+            .and_then(|w| w.as_ref())
+            .map(|w| node_hex(&w.root()))
+    }
+
+    /// Finishes the replay into one Merkle path per note, in slot order, and the anchor
+    /// they all root to.
+    ///
+    /// `server_root_hex` is the root `GetTreeState(anchor height)` reports. A mismatch —
+    /// of the tree or of any one witness — is a hard error: it means the replay saw a
+    /// different set of commitments than the chain did, and any proof built on it would
+    /// be rejected. There is no fallback, because a wrong anchor is not a degraded sweep,
+    /// it is a lost one.
+    pub fn finish(self, server_root_hex: &str) -> Result<(Vec<MerklePath>, Anchor), String> {
         let tree_root = node_hex(&self.tree.root());
         if tree_root != server_root_hex {
             return Err(format!(
@@ -646,14 +724,28 @@ impl WitnessScan {
                  does not have"
             ));
         }
-        if root != server_root_hex {
-            return Err(format!(
-                "the witness root {root} does not match the server's {server_root_hex}"
+
+        let mut paths = Vec::with_capacity(self.witnesses.len());
+        let mut anchor: Option<Anchor> = None;
+        for (slot, witness) in self.witnesses.into_iter().enumerate() {
+            let witness = witness.ok_or_else(|| {
+                format!("note {slot}'s commitment was never seen while replaying the chain")
+            })?;
+            let root = node_hex(&witness.root());
+            if root != server_root_hex {
+                return Err(format!(
+                    "note {slot}'s witness root {root} does not match the server's \
+                     {server_root_hex}"
+                ));
+            }
+            anchor.get_or_insert_with(|| Anchor::from(witness.root()));
+            paths.push(MerklePath::from(
+                witness.path().ok_or("the witness has no auth path")?,
             ));
         }
 
-        let path = MerklePath::from(witness.path().ok_or("the witness has no auth path")?);
-        Ok((path, Anchor::from(witness.root())))
+        let anchor = anchor.ok_or("a sweep needs at least one note to witness")?;
+        Ok((paths, anchor))
     }
 }
 
@@ -689,10 +781,12 @@ pub struct SweepPlan {
     pub network: Network,
     /// The height the transaction targets; its expiry is derived from this.
     pub target_height: u32,
+    /// The one anchor every spend is proved against, whatever block its note is in.
     pub anchor: Anchor,
     pub keys: SpendKeys,
-    pub note: Note,
-    pub merkle_path: MerklePath,
+    /// Every note the envelope holds, each with the Merkle path that roots it to
+    /// `anchor`. One `add_ironwood_spend` per entry, in this order.
+    pub notes: Vec<(Note, MerklePath)>,
     /// Destination first, then the flat fee output if there is one.
     pub outputs: Vec<(SweepOutput, u64, MemoBytes)>,
 }
@@ -702,6 +796,12 @@ pub struct SweepPlan {
 /// This is the expensive call: the Orchard/Ironwood proof is created inside
 /// `Builder::build`, using the proving key cached in `zcash_primitives`. Warm that cache
 /// first (see `warm_proving_key`) or this call pays for building it too.
+///
+/// Every note in the plan becomes one Ironwood spend against the single shared anchor.
+/// The builder pads the bundle to `max(spends, outputs)` actions, which is the count
+/// [`network_fee_zat`] charged for, and it refuses to build at all if the value balance
+/// is not exactly zero after fees — so a wrong fee is a build error, never a silent
+/// overpayment.
 pub fn build_and_prove(plan: SweepPlan) -> Result<(Transaction, Vec<u8>), String> {
     let target_height = BlockHeight::from_u32(plan.target_height);
 
@@ -720,9 +820,14 @@ pub fn build_and_prove(plan: SweepPlan) -> Result<(Transaction, Vec<u8>), String
         },
     );
 
-    builder
-        .add_ironwood_spend::<zip317::FeeError>(plan.keys.fvk.clone(), plan.note, plan.merkle_path)
-        .map_err(|e| format!("could not add the envelope's note as a spend: {e}"))?;
+    if plan.notes.is_empty() {
+        return Err("a sweep needs at least one note to spend".to_string());
+    }
+    for (i, (note, merkle_path)) in plan.notes.into_iter().enumerate() {
+        builder
+            .add_ironwood_spend::<zip317::FeeError>(plan.keys.fvk.clone(), note, merkle_path)
+            .map_err(|e| format!("could not add note {i} of the envelope as a spend: {e}"))?;
+    }
 
     for (output, amount_zat, memo) in plan.outputs {
         let value = Zatoshis::from_u64(amount_zat)
@@ -890,33 +995,67 @@ abandon abandon abandon abandon abandon abandon art";
 
     #[test]
     fn two_shielded_outputs_cost_ten_thousand() {
-        assert_eq!(network_fee_zat(&[shielded(), shielded()]), 10_000);
+        assert_eq!(network_fee_zat(1, &[shielded(), shielded()]), 10_000);
     }
 
     #[test]
     fn one_shielded_output_still_costs_ten_thousand() {
         // The bundle is padded up to the 2-action minimum, and ZIP-317's grace is 2
         // actions, so a one-output sweep is not cheaper.
-        assert_eq!(network_fee_zat(&[shielded()]), 10_000);
+        assert_eq!(network_fee_zat(1, &[shielded()]), 10_000);
     }
 
     #[test]
     fn a_transparent_output_costs_five_thousand_more() {
-        assert_eq!(network_fee_zat(&[shielded(), transparent_p2pkh()]), 15_000);
-        assert_eq!(network_fee_zat(&[transparent_p2pkh()]), 15_000);
+        assert_eq!(
+            network_fee_zat(1, &[shielded(), transparent_p2pkh()]),
+            15_000
+        );
+        assert_eq!(network_fee_zat(1, &[transparent_p2pkh()]), 15_000);
     }
 
     #[test]
     fn a_p2sh_output_is_charged_as_one_action() {
         let p2sh = SweepOutput::Transparent(TransparentAddress::ScriptHash([0u8; 20]));
-        assert_eq!(network_fee_zat(&[shielded(), p2sh]), 15_000);
+        assert_eq!(network_fee_zat(1, &[shielded(), p2sh]), 15_000);
+    }
+
+    #[test]
+    fn a_second_note_rides_in_an_action_the_outputs_already_paid_for() {
+        // Ironwood permits cross-address transfers, so actions are max(spends, outputs).
+        // Two notes into two shielded outputs is still two actions, and still 10,000.
+        let two_outputs = [shielded(), shielded()];
+        assert_eq!(ironwood_action_count(2, &two_outputs), 2);
+        assert_eq!(network_fee_zat(2, &two_outputs), 10_000);
+        // And one note into one output is padded up to the same two.
+        assert_eq!(ironwood_action_count(1, &[shielded()]), 2);
+    }
+
+    #[test]
+    fn a_third_note_costs_one_more_action() {
+        let two_outputs = [shielded(), shielded()];
+        assert_eq!(ironwood_action_count(3, &two_outputs), 3);
+        assert_eq!(network_fee_zat(3, &two_outputs), 15_000);
+        assert_eq!(network_fee_zat(4, &two_outputs), 20_000);
+        // A one-output sweep of five notes pays for five actions, not for one.
+        assert_eq!(network_fee_zat(5, &[shielded()]), 25_000);
+    }
+
+    #[test]
+    fn spends_and_transparent_outputs_are_charged_separately() {
+        // Two Ironwood actions (max(2 spends, 1 shielded output)) plus one transparent.
+        let mixed = [shielded(), transparent_p2pkh()];
+        assert_eq!(ironwood_action_count(2, &mixed), 2);
+        assert_eq!(network_fee_zat(2, &mixed), 15_000);
+        // Three notes: three Ironwood actions plus the transparent one.
+        assert_eq!(network_fee_zat(3, &mixed), 20_000);
     }
 
     #[test]
     fn the_m1_note_splits_as_expected() {
         // The real M1 envelope: 130,000 zatoshi, a 30,000 zatoshi flat fee, two shielded
         // outputs. 130,000 − 10,000 − 30,000 = 90,000 to the destination.
-        let plan = plan_amounts(130_000, 30_000, &[shielded(), shielded()]).unwrap();
+        let plan = plan_amounts(130_000, 30_000, 1, &[shielded(), shielded()]).unwrap();
         assert_eq!(
             plan,
             SweepAmounts {
@@ -933,31 +1072,59 @@ abandon abandon abandon abandon abandon abandon art";
 
     #[test]
     fn a_zero_flat_fee_means_one_output() {
-        let plan = plan_amounts(130_000, 0, &[shielded()]).unwrap();
+        let plan = plan_amounts(130_000, 0, 1, &[shielded()]).unwrap();
         assert_eq!(plan.amount_to_destination_zat, 120_000);
         assert_eq!(plan.fee_zat, 0);
         assert_eq!(plan.network_fee_zat, 10_000);
     }
 
     #[test]
+    fn several_notes_are_summed_before_the_fees_come_off() {
+        // Three notes of 50,000 into the destination plus the flat fee: 150,000 in,
+        // three spends against two outputs means three actions and a 15,000 fee.
+        let outputs = [shielded(), shielded()];
+        let plan = plan_amounts(150_000, 30_000, 3, &outputs).unwrap();
+        assert_eq!(
+            plan,
+            SweepAmounts {
+                amount_to_destination_zat: 105_000,
+                fee_zat: 30_000,
+                network_fee_zat: 15_000,
+            }
+        );
+        assert_eq!(
+            plan.amount_to_destination_zat + plan.fee_zat + plan.network_fee_zat,
+            150_000,
+            "every zatoshi of every note is accounted for"
+        );
+        // Two notes of the same total cost one action less, and the destination keeps it.
+        let cheaper = plan_amounts(150_000, 30_000, 2, &outputs).unwrap();
+        assert_eq!(cheaper.network_fee_zat, 10_000);
+        assert_eq!(cheaper.amount_to_destination_zat, 110_000);
+    }
+
+    #[test]
     fn a_note_that_cannot_pay_for_itself_is_refused() {
         // Exactly the overhead leaves nothing to send, which is not a sweep.
-        let err = plan_amounts(40_000, 30_000, &[shielded(), shielded()]).unwrap_err();
+        let err = plan_amounts(40_000, 30_000, 1, &[shielded(), shielded()]).unwrap_err();
         assert!(err.contains("nothing left to send"), "{err}");
-        assert!(plan_amounts(39_999, 30_000, &[shielded(), shielded()]).is_err());
-        assert!(plan_amounts(0, 0, &[shielded()]).is_err());
+        assert!(plan_amounts(39_999, 30_000, 1, &[shielded(), shielded()]).is_err());
+        assert!(plan_amounts(0, 0, 1, &[shielded()]).is_err());
         // One zatoshi over the line is a sweep, just a small one.
         assert_eq!(
-            plan_amounts(40_001, 30_000, &[shielded(), shielded()])
+            plan_amounts(40_001, 30_000, 1, &[shielded(), shielded()])
                 .unwrap()
                 .amount_to_destination_zat,
             1
         );
+        // Dust notes that only pay for their own actions are refused too: three spends
+        // cost 15,000, which is all three 5,000-zatoshi notes are worth.
+        assert!(plan_amounts(15_000, 0, 3, &[shielded()]).is_err());
     }
 
     #[test]
     fn overflowing_fees_are_refused_rather_than_wrapped() {
-        assert!(plan_amounts(u64::MAX, u64::MAX, &[shielded()]).is_err());
+        assert!(plan_amounts(u64::MAX, u64::MAX, 1, &[shielded()]).is_err());
     }
 
     // --- the prover that never proves ------------------------------------------
@@ -1082,78 +1249,242 @@ abandon abandon abandon abandon abandon abandon art";
 
     // --- witness replay --------------------------------------------------------
 
-    #[test]
-    fn a_witness_is_only_taken_at_the_target_action() {
-        use zcash_client_backend::proto::compact_formats::{CompactOrchardAction, CompactTx};
+    use zcash_client_backend::proto::compact_formats::{CompactOrchardAction, CompactTx};
 
-        // Real-looking commitments: the empty-root node bytes are a valid field element.
-        let leaf = MerkleHashOrchard::empty_leaf().to_bytes().to_vec();
-        let action = |cmx: Vec<u8>| CompactOrchardAction {
+    /// A distinct, valid note commitment. A 32-byte little-endian integer below the
+    /// Pallas modulus is a field element, so small numbers are real leaves.
+    fn leaf(n: u8) -> Vec<u8> {
+        let mut bytes = [0u8; 32];
+        bytes[0] = n;
+        assert!(cmx_node(&bytes).is_ok(), "leaf {n} must be a field element");
+        bytes.to_vec()
+    }
+
+    fn action(cmx: Vec<u8>) -> CompactOrchardAction {
+        CompactOrchardAction {
             nullifier: vec![0u8; 32],
             cmx,
             ephemeral_key: vec![1u8; 32],
             ciphertext: vec![7u8; 52],
-        };
-        let block = CompactBlock {
-            height: 3_490_472,
-            vtx: vec![
-                CompactTx {
-                    index: 0,
-                    txid: vec![1u8; 32],
-                    ironwood_actions: vec![action(leaf.clone())],
-                    ..Default::default()
-                },
-                CompactTx {
-                    index: 1,
-                    txid: vec![2u8; 32],
-                    ironwood_actions: vec![action(leaf.clone()), action(leaf.clone())],
-                    ..Default::default()
-                },
-            ],
-            ..Default::default()
-        };
+        }
+    }
 
-        let mut scan = WitnessScan::new(IronwoodTree::empty());
-        scan.append_block(&block, Some((&[2u8; 32], 1))).unwrap();
+    /// A block whose transactions carry the given (txid byte, commitments) pairs.
+    fn block(height: u64, txs: &[(u8, &[u8])]) -> CompactBlock {
+        CompactBlock {
+            height,
+            vtx: txs
+                .iter()
+                .enumerate()
+                .map(|(i, (txid, leaves))| CompactTx {
+                    index: i as u64,
+                    txid: vec![*txid; 32],
+                    ironwood_actions: leaves.iter().map(|n| action(leaf(*n))).collect(),
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    fn target(txid: &[u8], action_index: usize, slot: usize) -> WitnessTarget<'_> {
+        WitnessTarget {
+            txid_protocol: txid,
+            action_index,
+            slot,
+        }
+    }
+
+    #[test]
+    fn a_witness_is_only_taken_at_the_target_action() {
+        let b = block(3_490_472, &[(1, &[10]), (2, &[11, 12])]);
+
+        let mut scan = WitnessScan::new(IronwoodTree::empty(), 1);
+        scan.append_block(&b, &[target(&[2u8; 32], 1, 0)]).unwrap();
         assert_eq!(scan.appended(), 3);
         // Tx 0 contributes leaf 0; tx 1 contributes leaves 1 and 2; ours is the last.
-        assert_eq!(scan.position(), Some(2));
+        assert_eq!(scan.position(0), Some(2));
+        assert!(scan.missing().is_empty());
 
         // An action index that is not in the block leaves no witness.
-        let mut scan = WitnessScan::new(IronwoodTree::empty());
-        scan.append_block(&block, Some((&[2u8; 32], 9))).unwrap();
-        assert_eq!(scan.position(), None);
-        assert!(scan.finish("whatever").is_err());
+        let mut scan = WitnessScan::new(IronwoodTree::empty(), 1);
+        scan.append_block(&b, &[target(&[2u8; 32], 9, 0)]).unwrap();
+        assert_eq!(scan.position(0), None);
+        assert_eq!(scan.missing(), vec![0]);
+        let err = scan.finish("whatever").unwrap_err();
+        assert!(err.contains("does not match the server"), "{err}");
     }
 
     #[test]
     fn a_root_mismatch_is_a_hard_error() {
-        use zcash_client_backend::proto::compact_formats::{CompactOrchardAction, CompactTx};
+        let b = block(1, &[(3, &[7])]);
 
-        let leaf = MerkleHashOrchard::empty_leaf().to_bytes().to_vec();
-        let block = CompactBlock {
-            height: 1,
-            vtx: vec![CompactTx {
-                index: 0,
-                txid: vec![3u8; 32],
-                ironwood_actions: vec![CompactOrchardAction {
-                    nullifier: vec![0u8; 32],
-                    cmx: leaf,
-                    ephemeral_key: vec![1u8; 32],
-                    ciphertext: vec![7u8; 52],
-                }],
-                ..Default::default()
-            }],
-            ..Default::default()
-        };
-
-        let mut scan = WitnessScan::new(IronwoodTree::empty());
-        scan.append_block(&block, Some((&[3u8; 32], 0))).unwrap();
+        let mut scan = WitnessScan::new(IronwoodTree::empty(), 1);
+        scan.append_block(&b, &[target(&[3u8; 32], 0, 0)]).unwrap();
         let real_root = scan.tree_root_hex();
-        assert_eq!(scan.witness_root_hex().as_deref(), Some(real_root.as_str()));
+        assert_eq!(
+            scan.witness_root_hex(0).as_deref(),
+            Some(real_root.as_str())
+        );
 
         let err = scan.finish(&"00".repeat(32)).unwrap_err();
         assert!(err.contains("does not match the server"), "{err}");
+    }
+
+    #[test]
+    fn two_notes_in_one_block_share_a_replay_and_agree_at_the_anchor() {
+        // Both notes are in block 3_490_472: one in the first transaction, one in the
+        // third, with somebody else's commitments interleaved.
+        let note_block = block(3_490_472, &[(1, &[20, 21]), (2, &[22]), (3, &[23, 24])]);
+        let mut scan = WitnessScan::new(IronwoodTree::empty(), 2);
+        scan.append_block(
+            &note_block,
+            &[target(&[1u8; 32], 1, 0), target(&[3u8; 32], 0, 1)],
+        )
+        .unwrap();
+
+        assert_eq!(scan.appended(), 5);
+        // One pass over one block witnessed both, at their own leaves.
+        assert_eq!(scan.positions(), vec![Some(1), Some(3)]);
+        assert!(scan.missing().is_empty());
+
+        // The guard the sweep applies at the note's own block: the replayed root is the
+        // root the chain has, and every witness already agrees with it.
+        let at_note_block = scan.tree_root_hex();
+        assert_eq!(
+            scan.witness_root_hex(0).as_deref(),
+            Some(at_note_block.as_str())
+        );
+        assert_eq!(
+            scan.witness_root_hex(1).as_deref(),
+            Some(at_note_block.as_str())
+        );
+
+        // Roll both forward to a later anchor. They must still agree, with each other
+        // and with the tree.
+        scan.append_block(&block(3_490_473, &[(4, &[25, 26])]), &[])
+            .unwrap();
+        scan.append_block(&block(3_490_474, &[(5, &[27])]), &[])
+            .unwrap();
+
+        let anchor_root = scan.tree_root_hex();
+        assert_ne!(anchor_root, at_note_block, "later blocks moved the root");
+        assert_eq!(scan.witness_root_hex(0), scan.witness_root_hex(1));
+        assert_eq!(
+            scan.witness_root_hex(0).as_deref(),
+            Some(anchor_root.as_str())
+        );
+
+        let (paths, anchor) = scan.finish(&anchor_root).unwrap();
+        assert_eq!(paths.len(), 2, "one Merkle path per note, in slot order");
+        assert_eq!(hex::encode(anchor.to_bytes()), anchor_root);
+    }
+
+    #[test]
+    fn two_notes_in_different_blocks_end_on_the_same_anchor() {
+        // The replay starts at the frontier before the *earliest* note's block, and the
+        // tree it holds when it reaches the second note's block is that block's own
+        // h − 1 frontier, arrived at by replaying.
+        let mut scan = WitnessScan::new(IronwoodTree::empty(), 2);
+
+        scan.append_block(
+            &block(3_490_472, &[(1, &[30]), (2, &[31])]),
+            &[target(&[2u8; 32], 0, 0)],
+        )
+        .unwrap();
+        let after_first = scan.tree_root_hex();
+        assert_eq!(scan.position(0), Some(1));
+        assert_eq!(scan.missing(), vec![1], "the second note is still ahead");
+        assert_eq!(
+            scan.witness_root_hex(0).as_deref(),
+            Some(after_first.as_str())
+        );
+
+        // A block in between with nothing of ours in it.
+        scan.append_block(&block(3_490_473, &[(3, &[32, 33])]), &[])
+            .unwrap();
+        let before_second = scan.tree_root_hex();
+
+        // The second note's block, three blocks later.
+        scan.append_block(
+            &block(3_490_474, &[(4, &[34]), (5, &[35, 36])]),
+            &[target(&[5u8; 32], 1, 1)],
+        )
+        .unwrap();
+        assert_eq!(scan.position(1), Some(6));
+        assert!(scan.missing().is_empty());
+        assert_ne!(before_second, scan.tree_root_hex());
+
+        // The first note's witness has absorbed everything since its own block, so at
+        // this height the two witnesses already root to the same anchor.
+        let at_second_block = scan.tree_root_hex();
+        assert_eq!(
+            scan.witness_root_hex(0),
+            scan.witness_root_hex(1),
+            "witnesses taken in different blocks must agree once they meet"
+        );
+        assert_eq!(
+            scan.witness_root_hex(0).as_deref(),
+            Some(at_second_block.as_str())
+        );
+
+        // And they keep agreeing as the replay rolls on to the anchor height.
+        scan.append_block(&block(3_490_475, &[(6, &[37])]), &[])
+            .unwrap();
+        let anchor_root = scan.tree_root_hex();
+        assert_eq!(scan.witness_root_hex(0), scan.witness_root_hex(1));
+        assert_eq!(
+            scan.witness_root_hex(1).as_deref(),
+            Some(anchor_root.as_str())
+        );
+
+        let positions = scan.positions();
+        let (paths, anchor) = scan.finish(&anchor_root).unwrap();
+        assert_eq!(paths.len(), 2);
+        assert_eq!(
+            positions,
+            vec![Some(1), Some(6)],
+            "different leaves, one anchor"
+        );
+        assert_eq!(hex::encode(anchor.to_bytes()), anchor_root);
+    }
+
+    #[test]
+    fn a_note_the_replay_never_reached_is_named() {
+        let mut scan = WitnessScan::new(IronwoodTree::empty(), 2);
+        let b = block(3_490_472, &[(1, &[40, 41])]);
+        scan.append_block(&b, &[target(&[1u8; 32], 0, 0)]).unwrap();
+        let root = scan.tree_root_hex();
+        assert_eq!(scan.missing(), vec![1]);
+
+        // The tree root matches, so this is not a replay error: it is a missing note,
+        // and the message says which one.
+        let err = scan.finish(&root).unwrap_err();
+        assert!(err.contains("note 1"), "{err}");
+        assert!(err.contains("never seen"), "{err}");
+    }
+
+    #[test]
+    fn the_same_note_cannot_fill_two_slots() {
+        // Two slots pointed at one commitment is a duplicate nullifier waiting to
+        // happen; the replay refuses it rather than witnessing the same leaf twice.
+        let mut scan = WitnessScan::new(IronwoodTree::empty(), 2);
+        let b = block(3_490_472, &[(1, &[50])]);
+        let err = scan
+            .append_block(&b, &[target(&[1u8; 32], 0, 0), target(&[1u8; 32], 0, 0)])
+            .unwrap_err();
+        assert!(err.contains("witnessed twice"), "{err}");
+    }
+
+    #[test]
+    fn a_slot_that_does_not_exist_is_refused() {
+        let mut scan = WitnessScan::new(IronwoodTree::empty(), 1);
+        assert_eq!(scan.slots(), 1);
+        let b = block(3_490_472, &[(1, &[60])]);
+        let err = scan
+            .append_block(&b, &[target(&[1u8; 32], 0, 4)])
+            .unwrap_err();
+        assert!(err.contains("slot 4"), "{err}");
     }
 
     /// Prints the M3 vectors so TEST_VECTORS.md can be regenerated:
@@ -1198,7 +1529,7 @@ abandon abandon abandon abandon abandon abandon art";
                 vec![shielded(), transparent_p2pkh()],
             ),
         ] {
-            println!("fee[{label}]\t{}", network_fee_zat(&outputs));
+            println!("fee[{label}]\t{}", network_fee_zat(1, &outputs));
         }
     }
 

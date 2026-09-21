@@ -55,15 +55,16 @@ interface Props {
   /** Lives here only for the length of the sweep call. */
   secret: string;
   network: Network;
-  /** The note being sent on. */
-  note: FoundNote;
-  /** How many notes the scan found, so a multi-note envelope can say so. */
-  noteCount: number;
+  /**
+   * Every note the scan found. A sweep spends all of them, in one transaction, so
+   * the amount shown and the amount sent are the sum of these.
+   */
+  notes: FoundNote[];
   /** Chain tip at the end of the scan: the birthday a new wallet restores from. */
   tipHeight: number;
 }
 
-export function SendOn({ core, secret, network, note, noteCount, tipHeight }: Props) {
+export function SendOn({ core, secret, network, notes, tipHeight }: Props) {
   const [state, dispatch] = useReducer(sendReducer, initialSendState);
   const [choice, setChoice] = useState<Choice>(null);
   const [dest, setDest] = useState<DestinationState>(emptyDestination);
@@ -106,7 +107,11 @@ export function SendOn({ core, secret, network, note, noteCount, tipHeight }: Pr
     };
   }, [core]);
 
-  const inEnvelopeZat = useMemo(() => BigInt(note.amount_zat), [note.amount_zat]);
+  // Every note in the envelope, added up: one sweep spends the lot.
+  const inEnvelopeZat = useMemo(
+    () => notes.reduce((sum, n) => sum + BigInt(n.amount_zat), 0n),
+    [notes],
+  );
 
   // The generated wallet's own address goes through the same classifier as a pasted
   // one: nothing is trusted just because this page made it.
@@ -126,7 +131,12 @@ export function SendOn({ core, secret, network, note, noteCount, tipHeight }: Pr
 
   const active = choice === "wallet" ? walletDest : choice === "address" ? dest : null;
   const destination = active?.input.trim() ?? "";
-  const amounts = sweepAmounts(inEnvelopeZat, active?.kind ?? "unified_orchard");
+  const amounts = sweepAmounts(
+    inEnvelopeZat,
+    active?.kind ?? "unified_orchard",
+    SWEEP_FEE_ZAT,
+    notes.length,
+  );
 
   const ready =
     active !== null &&
@@ -144,7 +154,11 @@ export function SendOn({ core, secret, network, note, noteCount, tipHeight }: Pr
         secret,
         network,
         LIGHTWALLETD[network],
-        { txid: note.txid, height: note.height, action_index: note.action_index },
+        notes.map((n) => ({
+          txid: n.txid,
+          height: n.height,
+          action_index: n.action_index,
+        })),
         destination,
         FEE_ADDRESS,
         SWEEP_FEE_ZAT.toString(),
@@ -162,7 +176,7 @@ export function SendOn({ core, secret, network, note, noteCount, tipHeight }: Pr
         dispatch({ type: "failed", message: message ? message : SWEEP_FAILED_COPY });
       }
     }
-  }, [core, secret, network, note, destination, dryRun]);
+  }, [core, secret, network, notes, destination, dryRun]);
 
   /* --------------------------------------------- keep the screen and the tab */
 
@@ -400,9 +414,9 @@ export function SendOn({ core, secret, network, note, noteCount, tipHeight }: Pr
             ? "Keys ready"
             : "The keys will be built when you send."}
       </p>
-      {noteCount > 1 ? (
+      {notes.length > 1 ? (
         <p className="hint" data-testid="multi-note">
-          This sends on the payment shown above. Any others stay in the envelope.
+          All {notes.length} payments go in one transaction, added up above.
         </p>
       ) : null}
 

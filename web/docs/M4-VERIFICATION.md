@@ -243,6 +243,14 @@ of them in one transaction is more than the hour the task allowed, and the reaso
 None of it is hard; all of it is load-bearing for real money, and it is a milestone of its
 own rather than a tail-end change to this one.
 
+**Since done.** `sweep_envelope` now takes an array of notes and spends all of them in one
+transaction: `WitnessScan` carries one witness per note and advances them to a shared
+anchor, `network_fee_zat` counts `max(spends, outputs)` actions, and the open screen's
+"Any others stay in the envelope" is gone — the review screen shows the sum. The finding
+above stands as the reason it was a milestone of its own. See
+[crates/core/README.md](../../crates/core/README.md#several-notes-one-anchor); the one-note
+M1 sweep is unchanged at 9,166 bytes, asserted natively and in the browser.
+
 ## 7. Nothing regressed
 
 | | |

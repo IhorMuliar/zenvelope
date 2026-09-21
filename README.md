@@ -213,8 +213,9 @@ The rest of the stack, still to come:
 The web app exists and runs the real core: it creates an envelope on mainnet, shows the
 ZIP-321 URI and QR, re-derives the address from the link alone, and opens a funded
 envelope — scanning and decrypting the Ironwood note in the browser, with the secret
-never leaving the tab. The spend core is in too: `sweep_envelope` witnesses the note,
-builds the transaction, proves it in WASM and can broadcast it. The screens that drive
+never leaving the tab. The spend core is in too: `sweep_envelope` witnesses every
+note the envelope holds, builds one transaction that spends them all, proves it in WASM
+and can broadcast it. The screens that drive
 it are next.
 
 ## License

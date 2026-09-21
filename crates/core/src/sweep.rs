@@ -41,10 +41,12 @@ use zcash_client_backend::proto::service::{
 use zcash_protocol::consensus::Network;
 use zcash_protocol::memo::MemoBytes;
 
+use std::collections::BTreeMap;
+
 use crate::scan::parse_transaction;
 use crate::spend::{
-    build_and_prove, network_fee_zat, plan_amounts, resolve_output, spend_keys_from_secret,
-    SweepOutput, SweepPlan, WitnessScan,
+    build_and_prove, ironwood_action_count, network_fee_zat, plan_amounts, resolve_output,
+    spend_keys_from_secret, SweepOutput, SweepPlan, WitnessScan, WitnessTarget,
 };
 use crate::{memo_bytes, ufvk_from_secret};
 
@@ -74,7 +76,9 @@ pub struct NoteRef {
 pub struct SweepRequest {
     pub secret_b64url: String,
     pub network: Network,
-    pub note: NoteRef,
+    /// Every note the envelope holds. A sweep spends **all** of them, in one
+    /// transaction: one `add_ironwood_spend` each, against one shared anchor.
+    pub notes: Vec<NoteRef>,
     /// Where the recipient wants the money.
     pub destination: String,
     /// Where Zenvelope's flat fee goes. Ignored when `fee_zat` is zero.
@@ -116,9 +120,12 @@ pub fn txid_to_protocol_bytes(display: &str) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-/// Picks the anchor height for an envelope mined at `note_height`, given the chain tip.
+/// Picks the anchor height for an envelope, given the chain tip.
 ///
-/// See the module docs. Returns the height whose Ironwood tree root becomes the anchor.
+/// `note_height` is the **youngest** note's block: with several notes the anchor must be
+/// at or after all of them, and the walk-forward decision is about how old the newest
+/// one is. See the module docs. Returns the height whose Ironwood tree root becomes the
+/// anchor.
 pub fn anchor_height(note_height: u32, tip_height: u32) -> u32 {
     if tip_height <= note_height {
         // A tip at or below the note's block means the note is in the newest block we
@@ -147,12 +154,41 @@ where
     <T::ResponseBody as Body>::Error: Into<StdError> + Send,
 {
     let network = request.network;
-    let note_height = request.note.height;
+
+    if request.notes.is_empty() {
+        return Err("this sweep names no notes to spend".to_string());
+    }
 
     // --- stage: witness ----------------------------------------------------
-    on_stage("witness", "finding the envelope's note");
+    on_stage(
+        "witness",
+        &format!(
+            "finding the envelope's {} note{}",
+            request.notes.len(),
+            if request.notes.len() == 1 { "" } else { "s" }
+        ),
+    );
 
-    let txid_protocol = txid_to_protocol_bytes(&request.note.txid)?;
+    // The same note twice would be the same nullifier twice, which no node accepts.
+    // Catch it here rather than in a build error after the witness work.
+    for (i, note) in request.notes.iter().enumerate() {
+        if let Some(j) = request.notes[..i]
+            .iter()
+            .position(|other| other.txid == note.txid && other.action_index == note.action_index)
+        {
+            return Err(format!(
+                "notes {j} and {i} are the same note ({}, action {}); a transaction \
+                 cannot spend it twice",
+                note.txid, note.action_index
+            ));
+        }
+    }
+
+    let txids: Vec<Vec<u8>> = request
+        .notes
+        .iter()
+        .map(|n| txid_to_protocol_bytes(&n.txid))
+        .collect::<Result<_, _>>()?;
 
     let tip = client
         .get_latest_block(ChainSpec {})
@@ -162,91 +198,137 @@ where
         .height;
     let tip_height = u32::try_from(tip).map_err(|_| format!("chain tip height {tip} is absurd"))?;
 
-    // Re-derive the note from the secret rather than trusting anything the caller says
-    // about it: fetch the funding transaction and decrypt the action ourselves.
-    let raw = client
-        .get_transaction(TxFilter {
-            block: None,
-            index: 0,
-            hash: txid_protocol.clone(),
-        })
-        .await
-        .map_err(|e| format!("GetTransaction failed: {}", e.message()))?
-        .into_inner();
-
-    let funding_tx = parse_transaction(&raw.data, note_height, network)?;
-    let bundle = funding_tx
-        .ironwood_bundle()
-        .ok_or("that transaction has no Ironwood bundle")?;
-
     let ufvk = ufvk_from_secret(&request.secret_b64url, network)?;
     let fvk = ufvk
         .orchard()
         .ok_or("the link's viewing key carries no Orchard key")?;
 
-    let idx = request.note.action_index;
-    let (note, _, _) = [
-        orchard::keys::Scope::External,
-        orchard::keys::Scope::Internal,
-    ]
-    .iter()
-    .find_map(|scope| bundle.decrypt_output_with_key(idx, &fvk.to_ivk(*scope)))
-    .ok_or_else(|| {
-        format!(
-            "Ironwood action {idx} of that transaction does not decrypt with this \
-                 link's viewing key"
-        )
-    })?;
-    let note_value_zat = note.value().inner();
+    // Re-derive every note from the secret rather than trusting anything the caller says
+    // about them: fetch each funding transaction and decrypt the action ourselves. One
+    // transaction can hold more than one of the envelope's notes, so each is fetched once.
+    let mut fetched: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    let mut notes = Vec::with_capacity(request.notes.len());
+    let mut total_value_zat: u64 = 0;
 
-    // Replay the Ironwood tree from the frontier just before the note's block.
+    for (slot, note_ref) in request.notes.iter().enumerate() {
+        let raw = match fetched.get(&note_ref.txid) {
+            Some(bytes) => bytes.clone(),
+            None => {
+                let raw = client
+                    .get_transaction(TxFilter {
+                        block: None,
+                        index: 0,
+                        hash: txids[slot].clone(),
+                    })
+                    .await
+                    .map_err(|e| format!("GetTransaction failed: {}", e.message()))?
+                    .into_inner()
+                    .data;
+                fetched.insert(note_ref.txid.clone(), raw.clone());
+                raw
+            }
+        };
+
+        let funding_tx = parse_transaction(&raw, note_ref.height, network)?;
+        let bundle = funding_tx
+            .ironwood_bundle()
+            .ok_or("that transaction has no Ironwood bundle")?;
+
+        let idx = note_ref.action_index;
+        let (note, _, _) = [
+            orchard::keys::Scope::External,
+            orchard::keys::Scope::Internal,
+        ]
+        .iter()
+        .find_map(|scope| bundle.decrypt_output_with_key(idx, &fvk.to_ivk(*scope)))
+        .ok_or_else(|| {
+            format!(
+                "Ironwood action {idx} of transaction {} does not decrypt with this \
+                 link's viewing key",
+                note_ref.txid
+            )
+        })?;
+
+        total_value_zat = total_value_zat
+            .checked_add(note.value().inner())
+            .ok_or("the envelope's notes sum to more than u64 can hold")?;
+        notes.push(note);
+    }
+
+    // The replay runs from the earliest note's block to the anchor, and every note is
+    // witnessed as the replay passes its own commitment.
+    let first_height = request
+        .notes
+        .iter()
+        .map(|n| n.height)
+        .min()
+        .expect("the request holds at least one note");
+    let last_height = request
+        .notes
+        .iter()
+        .map(|n| n.height)
+        .max()
+        .expect("the request holds at least one note");
+    if first_height == 0 {
+        return Err("a note cannot be in block 0".to_string());
+    }
+
+    // Which notes each block holds, keyed by height so the replay can hand `append_block`
+    // exactly the targets that block contains.
+    let mut targets_by_height: BTreeMap<u32, Vec<WitnessTarget<'_>>> = BTreeMap::new();
+    for (slot, note_ref) in request.notes.iter().enumerate() {
+        targets_by_height
+            .entry(note_ref.height)
+            .or_default()
+            .push(WitnessTarget {
+                txid_protocol: &txids[slot],
+                action_index: note_ref.action_index,
+                slot,
+            });
+    }
+
+    // Replay the Ironwood tree from the frontier just before the earliest note's block.
     let start_tree = client
         .get_tree_state(BlockId {
-            height: u64::from(note_height - 1),
+            height: u64::from(first_height - 1),
             hash: Vec::new(),
         })
         .await
-        .map_err(|e| format!("GetTreeState({}) failed: {}", note_height - 1, e.message()))?
+        .map_err(|e| format!("GetTreeState({}) failed: {}", first_height - 1, e.message()))?
         .into_inner()
         .ironwood_tree()
         .map_err(|e| format!("could not parse the Ironwood frontier: {e}"))?;
 
-    let mut scan = WitnessScan::new(start_tree);
+    let mut scan = WitnessScan::new(start_tree, request.notes.len());
 
-    let note_block = client
+    // The root the replay reports at the end of each block that holds a note. Each one is
+    // checked against the chain's own tree state below: if the replay is wrong it is
+    // wrong at a note's block, and a proof built on it would be rejected.
+    let mut roots_at_note_blocks: Vec<(u32, String)> = Vec::new();
+
+    let first_block = client
         .get_block(BlockId {
-            height: u64::from(note_height),
+            height: u64::from(first_height),
             hash: Vec::new(),
         })
         .await
-        .map_err(|e| format!("GetBlock({note_height}) failed: {}", e.message()))?
+        .map_err(|e| format!("GetBlock({first_height}) failed: {}", e.message()))?
         .into_inner();
-    scan.append_block(&note_block, Some((&txid_protocol, idx)))?;
+    scan.append_block(
+        &first_block,
+        targets_by_height
+            .get(&first_height)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]),
+    )?;
+    roots_at_note_blocks.push((first_height, scan.tree_root_hex()));
 
-    if scan.position().is_none() {
-        return Err(format!(
-            "block {note_height} has no Ironwood action {idx} in transaction {}",
-            request.note.txid
-        ));
-    }
-
-    // The ordering guard, at the note's own block: if the replay is wrong it is wrong
-    // here, before any further blocks have been streamed.
-    let same_block_root = tree_state_root(client, note_height).await?;
-    if scan.tree_root_hex() != same_block_root {
-        return Err(format!(
-            "the replayed Ironwood root at block {note_height} is {} but the server \
-             reports {same_block_root}",
-            scan.tree_root_hex()
-        ));
-    }
-
-    let anchor_at = anchor_height(note_height, tip_height);
-    if anchor_at > note_height {
+    let anchor_at = anchor_height(last_height, tip_height);
+    if anchor_at > first_height {
         let mut stream = client
             .get_block_range(BlockRange {
                 start: Some(BlockId {
-                    height: u64::from(note_height + 1),
+                    height: u64::from(first_height + 1),
                     hash: Vec::new(),
                 }),
                 end: Some(BlockId {
@@ -262,26 +344,63 @@ where
         let mut walked = 0u32;
         while let Some(block) = stream.next().await {
             let block = block.map_err(|e| format!("block stream failed: {}", e.message()))?;
-            scan.append_block(&block, None)?;
+            let height = u32::try_from(block.height)
+                .map_err(|_| format!("block height {} is absurd", block.height))?;
+            let targets = targets_by_height
+                .get(&height)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            scan.append_block(&block, targets)?;
+            if !targets.is_empty() {
+                roots_at_note_blocks.push((height, scan.tree_root_hex()));
+            }
             walked += 1;
             if walked.is_multiple_of(100) {
                 on_stage(
                     "witness",
-                    &format!("rolling the witness forward, {walked} blocks"),
+                    &format!("rolling the witnesses forward, {walked} blocks"),
                 );
             }
         }
     }
 
+    let missing = scan.missing();
+    if !missing.is_empty() {
+        let slot = missing[0];
+        let note_ref = &request.notes[slot];
+        return Err(format!(
+            "block {} has no Ironwood action {} in transaction {}",
+            note_ref.height, note_ref.action_index, note_ref.txid
+        ));
+    }
+
+    // The ordering guard, once per note block: the replay must have seen the same
+    // commitments, in the same order, as the chain did.
+    for (height, replayed) in &roots_at_note_blocks {
+        let server = tree_state_root(client, *height).await?;
+        if *replayed != server {
+            return Err(format!(
+                "the replayed Ironwood root at block {height} is {replayed} but the \
+                 server reports {server}"
+            ));
+        }
+    }
+
     let anchor_root = tree_state_root(client, anchor_at).await?;
-    let position = scan.position().unwrap_or_default();
+    let positions = scan.positions();
     let appended = scan.appended();
-    let (merkle_path, anchor) = scan.finish(&anchor_root)?;
+    let (merkle_paths, anchor) = scan.finish(&anchor_root)?;
+    let positions_note = positions
+        .iter()
+        .map(|p| p.map_or_else(|| "?".to_string(), |p| p.to_string()))
+        .collect::<Vec<_>>()
+        .join(", ");
     on_stage(
         "witness",
         &format!(
-            "note at position {position}, anchor {anchor_root} at height {anchor_at} \
-             ({appended} commitments replayed)"
+            "{} note(s) at position {positions_note}, anchor {anchor_root} at height \
+             {anchor_at} ({appended} commitments replayed)",
+            merkle_paths.len()
         ),
     );
 
@@ -291,7 +410,8 @@ where
 
     // --- stage: proving ----------------------------------------------------
     let outputs = request.plan_outputs(network)?;
-    let amounts = plan_amounts(note_value_zat, request.fee_zat, &outputs)?;
+    let action_count = ironwood_action_count(notes.len(), &outputs);
+    let amounts = plan_amounts(total_value_zat, request.fee_zat, notes.len(), &outputs)?;
 
     let memo = match request.memo.as_deref().filter(|m| !m.is_empty()) {
         Some(text) => memo_bytes(text)?,
@@ -309,7 +429,10 @@ where
     on_stage(
         "proving",
         &format!(
-            "proving a 2-action Ironwood bundle, {} zatoshi to the destination",
+            "proving a {}-action Ironwood bundle spending {} note(s), {} zatoshi to the \
+             destination",
+            action_count,
+            notes.len(),
             amounts.amount_to_destination_zat
         ),
     );
@@ -321,8 +444,7 @@ where
         target_height: tip_height + 1,
         anchor,
         keys,
-        note,
-        merkle_path,
+        notes: notes.into_iter().zip(merkle_paths).collect(),
         outputs: with_amounts,
     })?;
 
@@ -435,8 +557,14 @@ impl SweepRequest {
     }
 
     /// The ZIP-317 network fee this request will pay, without touching the network.
+    ///
+    /// It depends on how many notes are being spent as well as on the outputs: Ironwood
+    /// charges `max(spends, outputs)` actions.
     pub fn network_fee_zat(&self, network: Network) -> Result<u64, String> {
-        Ok(network_fee_zat(&self.plan_outputs(network)?))
+        Ok(network_fee_zat(
+            self.notes.len(),
+            &self.plan_outputs(network)?,
+        ))
     }
 }
 

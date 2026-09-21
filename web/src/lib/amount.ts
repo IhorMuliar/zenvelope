@@ -74,13 +74,26 @@ export function breakdownLines(b: Breakdown): [string, string] {
 
 /* ------------------------------------------------- M3: what the recipient gets */
 
+/** ZIP-317's marginal fee, in zatoshi: one logical action costs this. */
+const MARGINAL_FEE_ZAT = 5000n;
+
 /**
  * The ZIP-317 miner fee for the sweep: 0.0001 ZEC for the two-action shielded
  * case, 0.00015 ZEC when the destination is transparent and costs another
  * logical action.
+ *
+ * `spends` is how many notes the sweep spends. Ironwood permits cross-address
+ * transfers, so its actions are `max(spends, outputs)` padded up to two: a second
+ * note rides in an action the outputs had already paid for, and only the third
+ * costs anything. This is the same arithmetic `network_fee_zat` does in
+ * crates/core/src/spend.rs, and the two must agree or the build refuses the fee.
  */
-export function networkFeeFor(kind: AddressKind): bigint {
-  return kind === "transparent" ? NETWORK_FEE_TRANSPARENT_ZAT : NETWORK_FEE_ZAT;
+export function networkFeeFor(kind: AddressKind, spends = 1): bigint {
+  if (spends <= 2) {
+    return kind === "transparent" ? NETWORK_FEE_TRANSPARENT_ZAT : NETWORK_FEE_ZAT;
+  }
+  const transparentActions = kind === "transparent" ? 1n : 0n;
+  return MARGINAL_FEE_ZAT * (BigInt(spends) + transparentActions);
 }
 
 export interface SweepAmounts {
@@ -101,6 +114,10 @@ export interface SweepAmounts {
 /**
  * envelope - miner fee - flat fee = what the recipient receives.
  *
+ * `inEnvelopeZat` is the **sum** of every note being swept and `spends` is how many
+ * there are, because the miner fee depends on the action count and the action count
+ * depends on the number of spends.
+ *
  * All bigint zatoshi: no float ever touches an amount, and the review screen and
  * the done screen do the same arithmetic on the same numbers.
  */
@@ -108,8 +125,9 @@ export function sweepAmounts(
   inEnvelopeZat: bigint,
   kind: AddressKind,
   serviceFeeZat: bigint = SWEEP_FEE_ZAT,
+  spends = 1,
 ): SweepAmounts {
-  const networkFee = networkFeeFor(kind);
+  const networkFee = networkFeeFor(kind, spends);
   const fee = serviceFeeZat < 0n ? 0n : serviceFeeZat;
   const receive = inEnvelopeZat - networkFee - fee;
   return {

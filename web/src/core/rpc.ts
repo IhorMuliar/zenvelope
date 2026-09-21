@@ -7,7 +7,7 @@
  * proof runs (M3-VERIFICATION §4 is the finding this exists to fix).
  *
  * Everything crossing the boundary is structured-cloneable: plain objects, strings,
- * numbers and BigInt. Functions are not, so the two callbacks the core takes
+ * numbers, arrays (the notes a sweep spends are one) and BigInt. Functions are not, so the two callbacks the core takes
  * (`on_progress` for the scan, `on_stage` for the sweep) are dropped from the argument
  * list on the way out and rebuilt in the worker, which reports them back as `progress`
  * and `stage` messages carrying the id of the call they belong to.

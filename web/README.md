@@ -125,7 +125,9 @@ classify_address(addr, network) -> {
 }
 new_wallet(network, birthday) -> { mnemonic, address, ufvk, birthday }
 sweep_envelope(secret_b64url, network, lightwalletd_url,
-               note: { txid, height, action_index },
+               // every note the envelope holds; all of them are spent in one
+               // transaction. A bare object is accepted for one release.
+               notes: Array<{ txid, height, action_index }>,
                destination, fee_address, fee_zat, memo | null, broadcast,
                on_stage(stage, detail)) -> Promise<{
   txid, raw_tx_hex: string | null, amount_to_destination_zat, fee_zat,
@@ -242,11 +244,13 @@ answered 200, zcashblockexplorer.com did not resolve and blockchair answered
 401), and "The envelope is now empty." A failure shows the core's message, a
 retry button, and the line that the funds are still in the envelope.
 
-One sweep spends one note. The scan can find several, and then the largest is
-sent on and the screen says the rest stay put. Unlike the scan, the sweep does
-not fail over to the second lightwalletd host: retrying a broadcast against a
-different node is not a safe thing to do automatically, so a failure is handed to
-the recipient with a retry button instead.
+One sweep spends **every** note the scan found, in one transaction: the review
+screen shows their sum, and when there is more than one the screen says they all
+go together. Ironwood charges `max(spends, outputs)` actions, so a second note
+costs no more than one. Unlike the scan, the sweep does not fail over to the
+second lightwalletd host: retrying a broadcast against a different node is not a
+safe thing to do automatically, so a failure is handed to the recipient with a
+retry button instead.
 
 ## End-to-end proof
 

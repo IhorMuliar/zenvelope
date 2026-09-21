@@ -127,6 +127,15 @@ export interface NoteRef {
   action_index: number;
 }
 
+/**
+ * The notes a sweep spends.
+ *
+ * An array is the current form, and a sweep spends every note in it in one
+ * transaction. A bare {@link NoteRef} is the M3 form: the core still accepts it and
+ * treats it as a one-element array, for one release.
+ */
+export type NotesToSpend = NoteRef | NoteRef[];
+
 /** What a finished, or failed, sweep hands back. */
 export interface SweepResult {
   txid: string;
@@ -200,9 +209,17 @@ export interface ZenvelopeCore {
   new_wallet(network: Network, birthday: number): NewWallet;
 
   /**
-   * Spends the envelope note to `destination`, with the flat Zenvelope fee as a
-   * second output to `fee_address` (DECISIONS D5). `fee_zat` is a decimal
-   * string, and "0" with an empty `fee_address` means no fee output at all.
+   * Spends **every** note in `notes` to `destination` in one transaction, with the
+   * flat Zenvelope fee as a second output to `fee_address` (DECISIONS D5).
+   * `fee_zat` is a decimal string, and "0" with an empty `fee_address` means no fee
+   * output at all.
+   *
+   * `notes` is an array of {@link NoteRef}, as `open_envelope` reports them; a bare
+   * object is accepted as a one-element array for one release. The same note twice
+   * is refused: two spends of one note are two copies of one nullifier.
+   * `amount_to_destination_zat` is the sum of the notes minus both fees, and the
+   * ZIP-317 miner fee counts `max(spends, outputs)` Ironwood actions, so a second
+   * note usually costs nothing extra.
    *
    * The witness, key and proving work run in this browser; the only outbound
    * traffic is gRPC-web to `lightwalletd_url`. `broadcast: false` builds and
@@ -216,7 +233,7 @@ export interface ZenvelopeCore {
     secret_b64url: string,
     network: Network,
     lightwalletd_url: string,
-    note: NoteRef,
+    notes: NotesToSpend,
     destination: string,
     fee_address: string,
     fee_zat: string,

@@ -30,6 +30,38 @@ describe("the network fee", () => {
   });
 });
 
+describe("several notes in one envelope", () => {
+  it("costs nothing extra for a second note", () => {
+    // Ironwood actions are max(spends, outputs), padded to two: the second note
+    // rides in an action the destination and the fee output had already paid for.
+    expect(networkFeeFor("unified_orchard", 1)).toBe(10000n);
+    expect(networkFeeFor("unified_orchard", 2)).toBe(10000n);
+  });
+
+  it("charges one marginal fee per note beyond the second", () => {
+    expect(networkFeeFor("unified_orchard", 3)).toBe(15000n);
+    expect(networkFeeFor("unified_orchard", 4)).toBe(20000n);
+    expect(networkFeeFor("transparent", 3)).toBe(20000n);
+  });
+
+  it("takes the fees off the summed notes once, not once per note", () => {
+    const a = sweepAmounts(130000n * 2n, "unified_orchard", 0n, 2);
+    expect(a.inEnvelopeZat).toBe(260000n);
+    expect(a.networkFeeZat).toBe(10000n);
+    expect(a.receiveZat).toBe(250000n);
+    expect(a.ok).toBe(true);
+  });
+
+  it("refuses a pile of dust notes that only pay for their own actions", () => {
+    // Three 5,000-zatoshi notes are worth 15,000, which is exactly the fee for
+    // three actions: there would be nothing left to send.
+    const a = sweepAmounts(15000n, "unified_orchard", 0n, 3);
+    expect(a.networkFeeZat).toBe(15000n);
+    expect(a.ok).toBe(false);
+    expect(a.receiveZat).toBe(0n);
+  });
+});
+
 describe("what the recipient receives", () => {
   it("takes the miner fee off the envelope", () => {
     const a = sweepAmounts(130000n, "unified_orchard", 0n);

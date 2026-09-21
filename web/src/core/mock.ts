@@ -13,7 +13,7 @@ import type {
   SyncCore,
   Network,
   NewWallet,
-  NoteRef,
+  NotesToSpend,
   OpenResult,
   ParsedFragment,
   ProgressFn,
@@ -323,15 +323,18 @@ export function newWallet(network: Network, birthday: number): NewWallet {
  * MOCK sweep. One second per stage, then a made-up txid.
  *
  * It touches no network and signs nothing: `lightwalletd_url` and the secret are
- * accepted and ignored so the call shape matches the real core exactly. The
- * amounts come off the fixed MOCK note, so the review screen's arithmetic is the
- * arithmetic the done screen reports.
+ * accepted and ignored so the call shape matches the real core exactly. Every note
+ * handed to it is worth one MOCK note, so the amounts are the review screen's
+ * arithmetic on the number of notes it was given — which is what the done screen
+ * then reports.
  */
 export const MOCK_STAGE_MS = 1000;
 
 /** ZIP-317, two actions. The transparent destination costs one more logical action. */
 export const MOCK_NETWORK_FEE_ZAT = 10000n;
 export const MOCK_NETWORK_FEE_TRANSPARENT_ZAT = 15000n;
+/** ZIP-317's marginal fee: what a third, fourth or fifth note costs. */
+export const MOCK_MARGINAL_FEE_ZAT = 5000n;
 
 const MOCK_STAGES: readonly [Exclude<SweepStage, "done">, string][] = [
   ["witness", "reading the note's position in the commitment tree"],
@@ -360,7 +363,7 @@ export async function sweepEnvelope(
   secret_b64url: string,
   network: Network,
   _lightwalletd_url: string,
-  _note: NoteRef,
+  notes: NotesToSpend,
   destination: string,
   fee_address: string,
   fee_zat: string,
@@ -374,16 +377,33 @@ export async function sweepEnvelope(
   if (kind !== "unified_orchard" && kind !== "transparent") {
     throw new Error("this destination cannot receive the envelope");
   }
+  // A bare note object is the M3 form and still means one note, exactly as it does
+  // in the real core.
+  const spending = Array.isArray(notes) ? notes : [notes];
+  if (spending.length === 0) throw new Error("a sweep needs at least one note");
+  const seen = new Set<string>();
+  for (const n of spending) {
+    const key = `${n.txid}:${n.action_index}`;
+    if (seen.has(key)) throw new Error("a transaction cannot spend the same note twice");
+    seen.add(key);
+  }
 
   for (const [stage, detail] of MOCK_STAGES) {
     on_stage(stage, detail);
     await sleep(MOCK_STAGE_MS);
   }
 
+  // Ironwood charges max(spends, outputs) actions, padded to two, so the first two
+  // notes are free and the third is not: the same rule the real core applies.
   const networkFee =
-    kind === "transparent" ? MOCK_NETWORK_FEE_TRANSPARENT_ZAT : MOCK_NETWORK_FEE_ZAT;
+    spending.length <= 2
+      ? kind === "transparent"
+        ? MOCK_NETWORK_FEE_TRANSPARENT_ZAT
+        : MOCK_NETWORK_FEE_ZAT
+      : MOCK_MARGINAL_FEE_ZAT * (BigInt(spending.length) + (kind === "transparent" ? 1n : 0n));
   const fee = fee_address.trim() === "" ? 0n : BigInt(fee_zat.trim() || "0");
-  const toDestination = BigInt(MOCK_NOTE.amount_zat) - networkFee - fee;
+  const inEnvelope = BigInt(MOCK_NOTE.amount_zat) * BigInt(spending.length);
+  const toDestination = inEnvelope - networkFee - fee;
 
   on_stage("done", "the envelope is empty");
   return {

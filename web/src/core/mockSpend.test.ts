@@ -17,6 +17,17 @@ const NOTE = {
   height: MOCK_NOTE.height,
   action_index: MOCK_NOTE.action_index,
 };
+/** Two more notes of the same envelope, in later blocks: a multi-note envelope. */
+const NOTE_2 = {
+  txid: `${MOCK_NOTE.txid.slice(0, 62)}ab`,
+  height: MOCK_NOTE.height + 2,
+  action_index: 0,
+};
+const NOTE_3 = {
+  txid: `${MOCK_NOTE.txid.slice(0, 62)}cd`,
+  height: MOCK_NOTE.height + 5,
+  action_index: 1,
+};
 
 describe("warm_proving_key", () => {
   it("resolves with a duration and is safe to call twice", async () => {
@@ -140,6 +151,112 @@ describe.concurrent("sweep_envelope", () => {
     expect(result.broadcast).toBe(false);
     expect(result.raw_tx_hex).toMatch(/^[0-9a-f]+$/);
   }, 4 * MOCK_STAGE_MS + 5000);
+
+  it("spends every note it is given, and adds them up", async () => {
+    const result = await mockCore.sweep_envelope(
+      SECRET,
+      "main",
+      "https://example.invalid",
+      [NOTE, NOTE_2],
+      UA,
+      "",
+      "0",
+      null,
+      false,
+      () => {},
+    );
+    // Two notes, two outputs: still two Ironwood actions, so still 10,000 zatoshi.
+    const twice = BigInt(MOCK_NOTE.amount_zat) * 2n;
+    const expected = sweepAmounts(twice, "unified_orchard", 0n, 2);
+    expect(result.network_fee_zat).toBe("10000");
+    expect(result.amount_to_destination_zat).toBe(expected.receiveZat.toString());
+    expect(BigInt(result.amount_to_destination_zat) + BigInt(result.network_fee_zat)).toBe(twice);
+  }, 4 * MOCK_STAGE_MS + 5000);
+
+  it("charges one more action for a third note", async () => {
+    const result = await mockCore.sweep_envelope(
+      SECRET,
+      "main",
+      "https://example.invalid",
+      [NOTE, NOTE_2, NOTE_3],
+      UA,
+      "",
+      "0",
+      null,
+      false,
+      () => {},
+    );
+    const thrice = BigInt(MOCK_NOTE.amount_zat) * 3n;
+    expect(result.network_fee_zat).toBe("15000");
+    expect(result.amount_to_destination_zat).toBe(
+      sweepAmounts(thrice, "unified_orchard", 0n, 3).receiveZat.toString(),
+    );
+  }, 4 * MOCK_STAGE_MS + 5000);
+
+  it("still takes a bare note object, as the M3 signature did", async () => {
+    const [array, bare] = await Promise.all([
+      mockCore.sweep_envelope(
+        SECRET,
+        "main",
+        "https://example.invalid",
+        [NOTE],
+        UA,
+        "",
+        "0",
+        null,
+        false,
+        () => {},
+      ),
+      mockCore.sweep_envelope(
+        SECRET,
+        "main",
+        "https://example.invalid",
+        NOTE,
+        UA,
+        "",
+        "0",
+        null,
+        false,
+        () => {},
+      ),
+    ]);
+    expect(bare.amount_to_destination_zat).toBe(array.amount_to_destination_zat);
+    expect(bare.network_fee_zat).toBe(array.network_fee_zat);
+  }, 4 * MOCK_STAGE_MS + 5000);
+
+  it("refuses the same note twice: one nullifier cannot be spent twice", async () => {
+    await expect(
+      mockCore.sweep_envelope(
+        SECRET,
+        "main",
+        "https://example.invalid",
+        [NOTE, NOTE],
+        UA,
+        "",
+        "0",
+        null,
+        false,
+        () => {},
+      ),
+    ).rejects.toThrow(/same note twice/);
+  });
+
+  it("refuses an empty list of notes", async () => {
+    await expect(
+      mockCore.sweep_envelope(
+        SECRET,
+        "main",
+        "https://example.invalid",
+        [],
+        UA,
+        "",
+        "0",
+        null,
+        false,
+        () => {},
+      ),
+    ).rejects.toThrow();
+  });
 
   it("refuses a destination that cannot receive the note", async () => {
     await expect(

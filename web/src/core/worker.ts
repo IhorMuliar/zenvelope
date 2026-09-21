@@ -44,7 +44,7 @@ import type {
   CoreInfo,
   Derived,
   NewWallet,
-  NoteRef,
+  NotesToSpend,
   Network,
   OpenResult,
   ParsedFragment,
@@ -169,11 +169,12 @@ interface WasmModule {
   warm_proving_key(): Promise<number>;
   classify_address(addr: string, network: Network): AddressClass & Disposable;
   new_wallet(network: Network, birthday: number): NewWallet & Disposable;
+  /** `notes` is an array; a bare object is still accepted, for one release. */
   sweep_envelope(
     secret_b64url: string,
     network: Network,
     lightwalletd_url: string,
-    note: NoteRef,
+    notes: NotesToSpend,
     destination: string,
     fee_address: string,
     fee_zat: string,
@@ -218,7 +219,7 @@ function adopt(core: WasmModule): SyncCore {
       secret,
       network,
       url,
-      note,
+      notes,
       destination,
       feeAddress,
       feeZat,
@@ -231,7 +232,7 @@ function adopt(core: WasmModule): SyncCore {
           secret,
           network,
           url,
-          note,
+          notes,
           destination,
           feeAddress,
           feeZat,

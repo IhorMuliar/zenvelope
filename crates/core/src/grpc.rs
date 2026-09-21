@@ -278,11 +278,17 @@ pub fn warm_proving_key() -> js_sys::Promise {
     })
 }
 
-/// Sweeps an envelope's Ironwood note to a destination, plus the flat Zenvelope fee.
+/// Sweeps every Ironwood note an envelope holds to a destination, plus the flat fee.
 ///
-/// `note` is `{ txid, height, action_index }`, exactly as `open_envelope` reports it. The
-/// note is re-derived from the secret rather than trusted: the funding transaction is
-/// fetched and the action decrypted here.
+/// `notes` is an **array** of `{ txid, height, action_index }`, exactly as
+/// `open_envelope` reports them, and all of them are spent in one transaction. A single
+/// `{ txid, height, action_index }` object is still accepted and treated as a
+/// one-element array; that backward compatibility is for one release only.
+///
+/// The notes are re-derived from the secret rather than trusted: each funding
+/// transaction is fetched and its action decrypted here. Naming the same note twice is
+/// refused before any network work, because two spends of one note are two copies of one
+/// nullifier and no node accepts that.
 ///
 /// `on_stage(stage, detail)` fires with `"witness"`, `"keys"`, `"proving"`, `"broadcast"`
 /// and `"done"`, in that order. When `broadcast` is false the transaction is built and
@@ -293,7 +299,7 @@ pub fn sweep_envelope(
     secret_b64url: String,
     network: String,
     lightwalletd_url: String,
-    note: JsValue,
+    notes: JsValue,
     destination: String,
     fee_address: String,
     fee_zat: String,
@@ -306,7 +312,7 @@ pub fn sweep_envelope(
             secret_b64url,
             &network,
             &lightwalletd_url,
-            &note,
+            &notes,
             destination,
             fee_address,
             &fee_zat,
@@ -327,7 +333,7 @@ async fn sweep_envelope_inner(
     secret_b64url: String,
     network: &str,
     lightwalletd_url: &str,
-    note: &JsValue,
+    notes: &JsValue,
     destination: String,
     fee_address: String,
     fee_zat: &str,
@@ -341,7 +347,7 @@ async fn sweep_envelope_inner(
     let request = SweepRequest {
         secret_b64url,
         network,
-        note: note_ref_from_js(note)?,
+        notes: note_refs_from_js(notes)?,
         destination,
         fee_address,
         fee_zat: parse_zat(fee_zat)?,
@@ -369,31 +375,51 @@ async fn sweep_envelope_inner(
     sweep(&mut client, &request, &mut report).await
 }
 
-/// Reads `{ txid, height, action_index }` off a plain JS object.
-fn note_ref_from_js(note: &JsValue) -> Result<NoteRef, String> {
+/// Reads the notes to spend off the JS boundary.
+///
+/// An array of `{ txid, height, action_index }` is the current form. A bare object is
+/// the M3 form and is accepted for one release as a one-element array, so a page built
+/// against the old signature keeps working against this wasm.
+fn note_refs_from_js(notes: &JsValue) -> Result<Vec<NoteRef>, String> {
+    if !Array::is_array(notes) {
+        return Ok(vec![note_ref_from_js(notes, 0)?]);
+    }
+    let array = Array::from(notes);
+    if array.length() == 0 {
+        return Err("notes is an empty array: a sweep needs at least one note".to_string());
+    }
+    (0..array.length())
+        .map(|i| note_ref_from_js(&array.get(i), i as usize))
+        .collect()
+}
+
+/// Reads `{ txid, height, action_index }` off one plain JS object.
+///
+/// `at` is which note this is, so a malformed entry in an array says which entry.
+fn note_ref_from_js(note: &JsValue, at: usize) -> Result<NoteRef, String> {
     let get = |key: &str| {
         Reflect::get(note, &JsValue::from_str(key))
-            .map_err(|_| format!("note.{key} could not be read"))
+            .map_err(|_| format!("notes[{at}].{key} could not be read"))
     };
 
     let txid = get("txid")?
         .as_string()
-        .ok_or("note.txid must be a hex string")?;
+        .ok_or_else(|| format!("notes[{at}].txid must be a hex string"))?;
 
     let height = get("height")?
         .as_f64()
-        .ok_or("note.height must be a number")?;
+        .ok_or_else(|| format!("notes[{at}].height must be a number"))?;
     if !height.is_finite() || height.fract() != 0.0 || height < 1.0 || height > f64::from(u32::MAX)
     {
-        return Err(format!("note.height {height} is not a block height"));
+        return Err(format!("notes[{at}].height {height} is not a block height"));
     }
 
     let action_index = get("action_index")?
         .as_f64()
-        .ok_or("note.action_index must be a number")?;
+        .ok_or_else(|| format!("notes[{at}].action_index must be a number"))?;
     if !action_index.is_finite() || action_index.fract() != 0.0 || action_index < 0.0 {
         return Err(format!(
-            "note.action_index {action_index} is not an action index"
+            "notes[{at}].action_index {action_index} is not an action index"
         ));
     }
 

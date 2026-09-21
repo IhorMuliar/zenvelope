@@ -228,10 +228,18 @@ and thrown away.
 
 ## Sweeping an envelope (M3)
 
-`sweep_envelope` spends the envelope's Ironwood note in full: one spend in, one output to
-the destination the recipient chose, one flat-fee output to Zenvelope (D5), no change.
-`amount_to_destination = note − ZIP-317 network fee − flat fee`, and a sweep that would
+`sweep_envelope` spends **every** Ironwood note the envelope holds, in full, in **one**
+transaction: one spend per note, one output to the destination the recipient chose, one
+flat-fee output to Zenvelope (D5), no change.
+`amount_to_destination = Σ notes − ZIP-317 network fee − flat fee`, and a sweep that would
 leave nothing to send is refused rather than built.
+
+An envelope usually holds one note, and then this is exactly what M3 did — the proved
+transaction is the same 9,166 bytes it always was. An envelope holds more than one when
+the sender pays it twice, or when a group of senders each pay the same link, and the
+recipient should not have to open the link once per payment to collect them. Naming the
+same note twice is refused before any network work: two spends of one note are two copies
+of one nullifier, which no node accepts.
 
 The whole sequence lives in `src/sweep.rs` and is **generic over the gRPC transport**, so
 the browser (gRPC-web over `fetch`) and the native integration test (plain gRPC over
@@ -254,7 +262,7 @@ Builder::new(
         ironwood_padding: BundlePadding::DEFAULT,
     },
 )
-.add_ironwood_spend(fvk, note, merkle_path)?   // the note MUST be NoteVersion::V3
+.add_ironwood_spend(fvk, note, merkle_path)?   // once per note; each MUST be NoteVersion::V3
 .add_ironwood_output(Some(ovk), addr, value, memo)?   // a UA with an Orchard receiver
 // or .add_transparent_output(&t_addr, value)?        // a t1/t3 address
 .build(
@@ -340,23 +348,42 @@ built transaction has no Sapling bundle at all.
 ### The witness
 
 Ironwood shares Orchard's tree: `MerkleHashOrchard` nodes, depth 32. The recipe, verified
-against mainnet before it was written into this crate:
+against mainnet before it was written into this crate. `h` is the **earliest** note's
+block:
 
-1. `GetTreeState(h − 1).ironwood_tree()` → the frontier just before the note's block.
+1. `GetTreeState(h − 1).ironwood_tree()` → the frontier just before that block.
 2. `GetBlock(h)` → append **every** `ironwood_actions[].cmx` in the block, in (tx index,
    action index) order, which is the order the chain commits them in. Take
-   `IncrementalWitness::from_tree` immediately after our own commitment is appended, then
-   keep appending the rest to the witness as well as to the tree.
+   `IncrementalWitness::from_tree` immediately after each of our own commitments is
+   appended, then keep appending the rest to every witness as well as to the tree.
 3. Compare the replayed root against `GetTreeState(h)`'s. A mismatch is a **hard error**:
    it means the replay saw a different set of commitments than the chain did, and a proof
    built on it would be rejected. There is no fallback, because a wrong anchor is not a
    degraded sweep, it is a lost one.
-4. Optionally keep streaming later blocks into both tree and witness (see the anchor
-   policy), then compare against `GetTreeState(anchor height)` again before using it.
-5. `anchor = witness.root()`, `merkle_path = witness.path()`.
+4. Keep streaming later blocks into the tree and into every witness taken so far (see the
+   anchor policy), taking a new witness as the replay reaches each later note's
+   commitment, and repeating step 3's comparison at **each** block that holds a note.
+   Compare against `GetTreeState(anchor height)` again before using the result.
+5. `anchor = witness.root()`, one `merkle_path = witness.path()` per note.
 
-No `shardtree`, no wallet database, no subtree roots: one envelope is one note, and the
-witness is computed on demand from data the server already serves.
+#### Several notes, one anchor
+
+`WitnessScan` holds a table of witnesses, one slot per note, rather than a single one:
+
+- **Notes in the same block** are witnessed in one pass over that block, at their own
+  leaves. They share the tree replay and cost nothing extra.
+- **Notes in different blocks** are witnessed as the replay reaches each of their blocks.
+  The tree the replay holds when it arrives at a later note's block *is* that block's
+  `h − 1` frontier — arrived at by replaying rather than by fetching it again — which is
+  why one continuous replay from the earliest note's block is both correct and the
+  cheapest thing available: every witness has to see every commitment after its own leaf
+  anyway.
+- Every witness keeps absorbing later commitments, so at the anchor they **all root to
+  the same anchor**. `finish` checks that, note by note, against the root the server
+  reports, and refuses the whole sweep if any one of them disagrees.
+
+No `shardtree`, no wallet database, no subtree roots: the witnesses are computed on
+demand from data the server already serves and thrown away afterwards.
 
 ### Anchor policy
 
@@ -374,23 +401,38 @@ rounding error on the open flow, and fall back to the same-block anchor when it 
 recipient opening a link minutes after it was funded — the normal case — gets the recent
 anchor. The height used comes back as `anchor_height`.
 
+With several notes the policy is unchanged, read off the **youngest** note: the anchor is
+the chain tip when the newest note is within `ANCHOR_WALK_LIMIT` of it, and otherwise the
+newest note's own block, which is the earliest height every witness can share. The replay
+still starts at the **oldest** note's block, because that witness has the furthest to
+travel.
+
 ### ZIP-317 fee
 
-A sweep has exactly one Ironwood spend. The Ironwood pool **permits cross-address
+A sweep has one Ironwood spend per note. The Ironwood pool **permits cross-address
 transfers**, so a requested spend and a requested output share an action and the count is
 `max(spends, outputs)`, padded up to the 2-action minimum. (The Orchard pool under
 NU6.3 mandates the cross-address restriction and would charge `spends + outputs`; Ironwood
 does not.) Transparent outputs are charged by total serialized bytes over ZIP-317's
 standard 34-byte P2PKH output, and the first two logical actions are free of marginal fee.
 
-| Outputs | Logical actions | Network fee |
-| --- | --- | --- |
-| 1 shielded (flat fee of 0) | 2 | 10,000 zat |
-| 2 shielded (destination + flat fee) | 2 | 10,000 zat |
-| 1 shielded + 1 transparent | 3 | 15,000 zat |
+| Notes | Outputs | Logical actions | Network fee |
+| --- | --- | --- | --- |
+| 1 | 1 shielded (flat fee of 0) | 2 | 10,000 zat |
+| 1 | 2 shielded (destination + flat fee) | 2 | 10,000 zat |
+| 1 | 1 shielded + 1 transparent | 3 | 15,000 zat |
+| 2 | 2 shielded | 2 | 10,000 zat |
+| 3 | 2 shielded | 3 | 15,000 zat |
+| 3 | 1 shielded + 1 transparent | 4 | 20,000 zat |
 
-The arithmetic is `network_fee_zat` in `src/spend.rs`, unit-tested against each shape, and
-checked again at build time: `build` refuses a transaction whose value balance is not
+So a **second note costs nothing**: it rides in an action the outputs had already paid
+for. Only the third and beyond add a marginal fee each — which is still far less than
+sweeping them one transaction at a time, where every sweep pays the 10,000 minimum again.
+
+The arithmetic is `ironwood_action_count` and `network_fee_zat` in `src/spend.rs`,
+unit-tested against each shape. It is the same arithmetic
+`orchard::builder::BundleType::num_actions` does for the bundle the builder emits, and it
+is checked again at build time: `build` refuses a transaction whose value balance is not
 exactly zero after fees, so a wrong fee is a build error and never a silent overpayment.
 
 ### Where a sweep can send
@@ -475,6 +517,11 @@ a fresh wallet with a 30,000 zat flat fee. Neither run broadcast anything.
 
 Both produce a V6 transaction with **2 Ironwood actions**, no Sapling bundle, no Orchard
 bundle and no transparent bundle. The wasm is 2.18 MB raw, 1.03 MB gzipped.
+
+The M1 envelope holds one note, so its sweep is a one-element array and the transaction is
+byte for byte what it was before sweeps could spend several notes. Both tests assert the
+**9,166 bytes** rather than only printing it, so a change to the transaction cannot pass
+unnoticed.
 
 ## JS API
 
@@ -570,7 +617,8 @@ core.sweep_envelope(
   secret: string,
   network: "main" | "test",
   lightwalletd_url: string,
-  note: { txid: string; height: number; action_index: number },  // from open_envelope
+  // every note from open_envelope; a bare object is accepted for one release
+  notes: Array<{ txid: string; height: number; action_index: number }>,
   destination: string,
   fee_address: string,
   fee_zat: string,          // decimal zatoshi; "0" means one output and no fee address
@@ -594,11 +642,20 @@ interface SweepResult {
 }
 ```
 
-The stages fire in that order; `witness` may fire more than once while the witness rolls
+The stages fire in that order; `witness` may fire more than once while the witnesses roll
 forward. Anything `on_stage` throws is ignored, for the same reason `on_progress`'s is.
-The note is **re-derived from the secret**, not trusted: `sweep_envelope` fetches the
+
+`notes` is an **array**, and every note in it is spent in the one transaction:
+`amount_to_destination_zat` is their sum minus both fees. A bare
+`{ txid, height, action_index }` object is still accepted and treated as a one-element
+array — backward compatibility for **one release**, so a page built against the M3
+signature keeps working; new callers pass the array. An empty array is refused, and so is
+the same note twice, before any network work.
+
+Every note is **re-derived from the secret**, not trusted: `sweep_envelope` fetches each
 funding transaction and decrypts `ironwood_actions[action_index]` itself, and fails if it
-does not decrypt with this link's viewing key.
+does not decrypt with this link's viewing key. Two notes that arrived in the *same*
+funding transaction cost one fetch, not two.
 
 `fee_zat` crosses as a decimal string, like every other amount. `"0"` builds a single
 output and never looks at `fee_address`, so a caller that is not charging a fee need not
@@ -669,6 +726,16 @@ the anchor policy at every boundary, txid byte-order conversion, and the witness
 that a witness is taken at the target action and nowhere else, and that a root mismatch is
 a hard error.
 
+The multi-note bookkeeping is unit-tested against **synthetic trees**, because it cannot
+be tested against the chain: the funded M1 envelope holds one note, and using it twice
+would be a duplicate nullifier rather than a two-note sweep. Those tests replay hand-built
+compact blocks and assert that two notes in **one** block are witnessed in one pass at
+their own leaves, that two notes in **different** blocks are each witnessed as the replay
+reaches them, that in both cases every witness roots to the **same anchor** once the
+replay reaches it, that a note the replay never passed is named rather than silently
+dropped, and that one commitment cannot fill two slots. The fee arithmetic is tested at
+one, two, three and four spends, shielded and transparent.
+
 The Node smoke test loads the actual `--target web` artifact and checks that `derive()`
 reproduces the Rust vectors byte for byte, plus the M3 exports `classify_address` and
 `new_wallet`.
@@ -695,17 +762,23 @@ cd web && npm run e2e -- e2e/m3-core.spec.ts
 `--release` is not optional for the native one in practice: the halo2 proof takes minutes
 in a debug build and seconds in a release one.
 
-The native test (`crates/core/tests/m3_sweep.rs`) asserts the stages fire in order, that
-every zatoshi of the note is accounted for, and that the raw bytes parse back with
+The native test (`crates/core/tests/m3_sweep.rs`) passes the M1 note as a **one-element
+array**, and asserts the stages fire in order, that every zatoshi of the note is accounted
+for, that the transaction is still **9,166 bytes**, and that the raw bytes parse back with
 `Transaction::read` as **V6 with 2 Ironwood actions**, no Sapling bundle, no Orchard
 bundle and no transparent bundle. It prints per-stage timings and the transaction size.
+Two further tests in that file need neither the network nor the secret: that the same note
+twice is refused before any network work, and that several notes are charged by action
+count.
 It also carries two by-hand tools: `locate_the_m1_note`, which reports which Ironwood
 action of a transaction decrypts, and `mint_m3_destination`, which generated the wallet
 and fee envelope in `M3-DEST.md`.
 
 The browser test (`web/e2e/m3-core.spec.ts`) times `warm_proving_key`, asserts a second
-call is nearly free, runs the same sweep through the wasm with `broadcast: false`, and
-checks the stage order, the amounts and the raw transaction. The M2 browser proof
+call is nearly free, runs the same sweep through the wasm in the **array** form with
+`broadcast: false`, and checks the stage order, the amounts and the raw transaction —
+including that it is still 9,166 bytes. A second, cheap test asserts the wasm refuses an
+empty array and the same note twice, which is the JS boundary's own array handling. The M2 browser proof
 (`web/e2e/m2-core.spec.ts`) is unchanged.
 
 Fixed vectors live in [TEST_VECTORS.md](TEST_VECTORS.md) so the web app can assert

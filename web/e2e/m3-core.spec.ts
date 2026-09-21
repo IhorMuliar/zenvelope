@@ -13,8 +13,11 @@
  * What it proves:
  *   - `warm_proving_key()` builds the Orchard/Ironwood proving key inside the page, so
  *     the cost is paid before the recipient asks for anything
- *   - `sweep_envelope()` re-derives the note from the secret, witnesses it against the
- *     chain's own Ironwood tree, builds a 2-action bundle and PROVES it in wasm
+ *   - `sweep_envelope()` takes an **array** of notes, re-derives each from the secret,
+ *     witnesses them against the chain's own Ironwood tree, builds a 2-action bundle
+ *     and PROVES it in wasm
+ *   - the M1 envelope holds one note, so the array has one element and the transaction
+ *     is byte-for-byte the size it was when the signature took a single note: 9,166
  *   - the stage callbacks fire in the documented order
  *   - the result is a real transaction: a raw hex body and a txid
  *
@@ -44,6 +47,12 @@ const NOTE = {
 const NOTE_VALUE_ZAT = 130_000;
 const FEE_ZAT = 30_000;
 const NETWORK_FEE_ZAT = 10_000;
+/**
+ * The size of the proved one-note sweep, in bytes. Pinned by the native integration
+ * test (crates/core/tests/m3_sweep.rs) and asserted here too: spending an array of
+ * notes must not change the transaction a one-note envelope produces.
+ */
+const RAW_TX_BYTES = 9_166;
 
 interface SweepResult {
   txid: string;
@@ -150,11 +159,13 @@ test.describe("M3: proving a sweep in the browser", () => {
         };
 
         const sweepStarted = Date.now();
+        // The array form: every note the envelope holds, spent in one transaction.
+        // This envelope holds one, so the array has one element.
         const result = await core.sweep_envelope(
           secretArg as string,
           "main",
           lwd as string,
-          JSON.parse(noteJson as string),
+          [JSON.parse(noteJson as string)],
           destination as string,
           feeAddress as string,
           feeZat as string,
@@ -241,6 +252,8 @@ test.describe("M3: proving a sweep in the browser", () => {
     expect(result.raw_tx_hex).not.toBeNull();
     expect(result.raw_tx_hex).toMatch(/^[0-9a-f]+$/);
     expect(rawBytes).toBeGreaterThan(5_000); // a proved Ironwood bundle is not small
+    // The array form did not change the transaction: same 9,166 bytes as M3.
+    expect(rawBytes, "a one-note sweep is the size it has always been").toBe(RAW_TX_BYTES);
     expect(result.txid).toMatch(/^[0-9a-f]{64}$/);
     // A V6 transaction starts with the header 0x800000060 little-endian... in practice
     // the shape is pinned by the native test, which parses the bytes back; here it is
@@ -260,6 +273,45 @@ test.describe("M3: proving a sweep in the browser", () => {
 
     // --- the anchor is a real height at or after the note's block ---------
     expect(result.anchor_height).toBeGreaterThanOrEqual(NOTE.height);
+  });
+
+  test("refuses an empty note array and the same note twice", async ({ page }) => {
+    // Both are refused before any network work, so this costs no proof and no
+    // round trip — and neither could ever be broadcast, because neither is built.
+    await openHarness(page);
+    const out = await page.evaluate(
+      async ([url, lwd, noteJson]) => {
+        const core: any = await import(/* @vite-ignore */ (url as string));
+        await core.default();
+        const secret = core.generate_secret();
+        const note = JSON.parse(noteJson as string);
+        const attempt = async (notes: unknown) => {
+          try {
+            await core.sweep_envelope(
+              secret,
+              "main",
+              lwd as string,
+              notes,
+              "u1invalid",
+              "",
+              "0",
+              null,
+              false, // broadcast: never, from a test
+              () => {},
+            );
+            return "resolved";
+          } catch (e) {
+            return String(e);
+          }
+        };
+        return JSON.stringify({ empty: await attempt([]), twice: await attempt([note, note]) });
+      },
+      [glueUrl(), LIGHTWALLETD, JSON.stringify(NOTE)] as const,
+    );
+    const { empty, twice } = JSON.parse(out) as { empty: string; twice: string };
+    expect(empty).toContain("empty array");
+    expect(twice).toContain("same note");
+    expect(twice).toContain("cannot spend it twice");
   });
 
   test("refuses a Sapling destination before touching the network", async ({ page }) => {

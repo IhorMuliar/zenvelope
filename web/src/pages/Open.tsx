@@ -253,9 +253,6 @@ function Opened({
   const total = sumZat(notes.map((n) => n.amount_zat));
   const memo = notes.find((n) => n.memo && n.memo.trim() !== "")?.memo ?? null;
   const single = notes.length === 1 ? notes[0] : null;
-  // One sweep spends one note. With more than one, the largest goes first and
-  // the screen says so; the rest stay in the envelope and the link still works.
-  const biggest = notes.reduce((a, b) => (BigInt(b.amount_zat) > BigInt(a.amount_zat) ? b : a));
 
   return (
     <section className="stack">
@@ -321,8 +318,7 @@ function Opened({
         core={core}
         secret={secret}
         network={network}
-        note={biggest}
-        noteCount={notes.length}
+        notes={notes}
         tipHeight={tipHeight}
       />
 
