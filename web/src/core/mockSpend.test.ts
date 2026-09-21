@@ -12,7 +12,11 @@ import { sweepAmounts } from "../lib/amount";
 const SECRET = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
 const UA = `u1mock${"q".repeat(54)}`;
 const T_ADDR = "t1KvSHRKp5ZgFcqJe8ZbeBHhpTCVCXjPWKa";
-const NOTE = { txid: MOCK_NOTE.txid, height: MOCK_NOTE.height, action_index: 0 };
+const NOTE = {
+  txid: MOCK_NOTE.txid,
+  height: MOCK_NOTE.height,
+  action_index: MOCK_NOTE.action_index,
+};
 
 describe("warm_proving_key", () => {
   it("resolves with a duration and is safe to call twice", async () => {

@@ -183,7 +183,9 @@ export const MOCK_NOTE = {
   height: 3490472,
   txid: "0b7e2a1c9d4f6835e1a0c72b5d9f4e6183a7c02d5be914f7308cd62a1f4b8e57",
   pool: "ironwood",
-  action_index: 0,
+  // The real M1 note sits at Ironwood action 1: the sending wallet took its change in
+  // action 0 of the same bundle.
+  action_index: 1,
 } as const;
 
 export async function openEnvelope(

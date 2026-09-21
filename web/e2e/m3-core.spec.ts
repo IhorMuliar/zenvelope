@@ -140,9 +140,13 @@ test.describe("M3: proving a sweep in the browser", () => {
         // A second call must be nearly free: the key is cached for the whole page.
         const secondWarmMs: number = await core.warm_proving_key();
 
-        const stages: Array<[string, string]> = [];
+        // Each callback is timestamped, so the per-stage cost is measured at the
+        // source. The UI cannot do this: the prover blocks the main thread from
+        // "keys" onwards, so nothing repaints until the sweep resolves.
+        const stages: Array<[string, string, number]> = [];
+        const stagesStarted = Date.now();
         const onStage = (stage: string, detail: string) => {
-          stages.push([stage, detail]);
+          stages.push([stage, detail, Date.now() - stagesStarted]);
         };
 
         const sweepStarted = Date.now();
@@ -186,7 +190,7 @@ test.describe("M3: proving a sweep in the browser", () => {
       warmMs: number;
       secondWarmMs: number;
       sweepMs: number;
-      stages: Array<[string, string]>;
+      stages: Array<[string, string, number]>;
       result: SweepResult;
     };
 
@@ -200,6 +204,16 @@ test.describe("M3: proving a sweep in the browser", () => {
         `anchor ${result.anchor_height}, txid ${result.txid}`,
     );
     console.log(`M3 stages: ${stages.map(([s]) => s).join(" -> ")}`);
+    // Each stage lasted until the next one was reported; the last runs to the end.
+    console.log(
+      `M3 stage timings: ` +
+        stages
+          .map(([stage, , at], i) => {
+            const until = i + 1 < stages.length ? stages[i + 1][2] : sweepMs;
+            return `${stage} ${((until - at) / 1000).toFixed(1)} s`;
+          })
+          .join(", "),
+    );
 
     // --- the destination is payable ---------------------------------------
     expect(verdict.kind).toBe("unified_orchard");

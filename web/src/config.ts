@@ -32,7 +32,28 @@ export const MAX_MEMO_BYTES = 512;
  * `fee_zat: "0"`, builds no fee output, and shows no fee line. Filling it in is
  * the only change needed to start taking the fee.
  */
-export const FEE_ADDRESS = "";
+const FEE_ADDRESS_DEFAULT = "";
+
+/**
+ * `VITE_FEE_ADDRESS` overrides the constant at build time.
+ *
+ * The verification run needs a real fee envelope on the second output, and that
+ * address lives in a private, gitignored file. An env var keeps it out of the
+ * repository while still letting the whole two-output sweep be proved. Unset, or
+ * set to nothing, and the constant above wins — which is what every ordinary
+ * build sees.
+ */
+function feeAddressFromEnv(): string {
+  try {
+    const value = import.meta.env?.VITE_FEE_ADDRESS;
+    return typeof value === "string" && value.trim() !== "" ? value.trim() : FEE_ADDRESS_DEFAULT;
+  } catch {
+    // No import.meta.env at all (a plain node context): the constant stands.
+    return FEE_ADDRESS_DEFAULT;
+  }
+}
+
+export const FEE_ADDRESS = feeAddressFromEnv();
 
 /** True when a fee is actually charged. Everything fee-shaped keys off this. */
 export const FEE_ENABLED = FEE_ADDRESS.trim() !== "";

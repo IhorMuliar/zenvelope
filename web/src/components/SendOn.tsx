@@ -27,6 +27,7 @@ import {
   emptyDestination,
   type DestinationState,
 } from "../lib/destination";
+import { DRY_RUN_COPY, isDryRun, rawTxBytes } from "../lib/dryRun";
 import { formatCount, formatZecAmount, truncateMiddle } from "../lib/format";
 import {
   FUNDS_SAFE_COPY,
@@ -72,6 +73,12 @@ export function SendOn({ core, secret, network, note, noteCount, tipHeight }: Pr
   const [warm, setWarm] = useState<"warming" | "ready" | "failed">("warming");
   const [elapsed, setElapsed] = useState(0);
   const runId = useRef(0);
+
+  /**
+   * `?dry=1` in the query string: build and prove the sweep, then stop. Read once,
+   * at mount, so nothing can flip it under a sweep that is already running.
+   */
+  const dryRun = useMemo(() => isDryRun(), []);
 
   /**
    * The proving key starts building the moment the envelope is found, before the
@@ -125,7 +132,8 @@ export function SendOn({ core, secret, network, note, noteCount, tipHeight }: Pr
         FEE_ADDRESS,
         SWEEP_FEE_ZAT.toString(),
         null,
-        true,
+        // A dry run proves the transaction and never hands it to lightwalletd.
+        !dryRun,
         (stage, detail) => {
           if (id === runId.current) dispatch({ type: "stage", stage, detail });
         },
@@ -137,7 +145,7 @@ export function SendOn({ core, secret, network, note, noteCount, tipHeight }: Pr
         dispatch({ type: "failed", message: message ? message : SWEEP_FAILED_COPY });
       }
     }
-  }, [core, secret, network, note, destination]);
+  }, [core, secret, network, note, destination, dryRun]);
 
   /* --------------------------------------------- keep the screen and the tab */
 
@@ -214,9 +222,11 @@ export function SendOn({ core, secret, network, note, noteCount, tipHeight }: Pr
 
   if (state.phase === "sent" && state.result) {
     const received = BigInt(state.result.amount_to_destination_zat);
+    // The core is the authority on what happened, not the flag that asked for it.
+    const dry = state.result.broadcast === false;
     return (
       <div className="card stack">
-        <h2 data-testid="sent-heading">Sent.</h2>
+        <h2 data-testid="sent-heading">{dry ? "Dry run complete." : "Sent."}</h2>
         <p className="sent-amount" data-testid="sent-amount">
           {formatZecAmount(received)}
         </p>
@@ -226,20 +236,40 @@ export function SendOn({ core, secret, network, note, noteCount, tipHeight }: Pr
           display={truncateMiddle(state.result.txid, 10)}
           testId="sent-txid"
         />
-        <p>
-          <a
-            href={explorerTxUrl(state.result.txid, network)}
-            rel="noreferrer noopener"
-            target="_blank"
-            data-testid="explorer-link"
-          >
-            See it on {EXPLORER_NAME}
-          </a>
-        </p>
+        {dry ? (
+          <>
+            <p className="warn" data-testid="dry-run-note">
+              {DRY_RUN_COPY}
+            </p>
+            <p className="row">
+              <span className="label">Raw transaction</span>
+              <span data-testid="dry-run-size">
+                {formatCount(rawTxBytes(state.result.raw_tx_hex))} bytes
+              </span>
+            </p>
+          </>
+        ) : (
+          <p>
+            <a
+              href={explorerTxUrl(state.result.txid, network)}
+              rel="noreferrer noopener"
+              target="_blank"
+              data-testid="explorer-link"
+            >
+              See it on {EXPLORER_NAME}
+            </a>
+          </p>
+        )}
         <p className="hint" data-testid="sent-destination">
           To {truncateMiddle(destination, 12)}
         </p>
-        <p data-testid="envelope-empty">The envelope is now empty.</p>
+        {dry ? (
+          <p data-testid="envelope-intact">
+            Nothing was sent. The money is still in the envelope, and this link still works.
+          </p>
+        ) : (
+          <p data-testid="envelope-empty">The envelope is now empty.</p>
+        )}
       </div>
     );
   }

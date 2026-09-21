@@ -57,8 +57,17 @@ M2 (done 2026-09-21) Open a link on mainnet: scan, decrypt, show amount. The
    `message=` never reaches the chain — the M1 note arrived with Memo::Empty — so
    the sender's text now rides in the ZIP-321 `memo=` parameter and is encrypted
    on-chain. Transcript in web/docs/M2-VERIFICATION.md.
-M3 (in progress) Spend from the link to a pasted Zcash address in the browser, on
-   mainnet. In-browser Ironwood proving. End to end. Demo video 1 recorded here.
+M3 (built 2026-09-21, broadcast pending) Spend from the link to a pasted Zcash
+   address in the browser, on mainnet. In-browser Ironwood proving. End to end.
+   Built: the sweep is proved in the browser on mainnet, through the product's own
+   screens. The /e page opens the real M1 envelope, warms the Ironwood proving key
+   in the background, takes a pasted unified address or a wallet generated in the
+   page, shows the fee breakdown (0.0013 in, 0.0001 network fee, 0.0003 Zenvelope
+   fee, 0.0009 out), witnesses the note against the chain's own Ironwood tree and
+   proves a two-action V6 transaction of 9,166 bytes — 48.9 s from the tap to the
+   done screen with the key already warm. Broadcast pending: every run so far used
+   the ?dry=1 path with broadcast: false and nothing has been sent. Transcript in
+   web/docs/M3-VERIFICATION.md. Demo video 1 recorded here.
 M4 Drainer-safe copy, trust-boundary screens, in-browser fresh wallet with seed
    export for recipients who have nothing.
 M5 Solana receive option via 1Click, with the warning screen and a fresh Solana
@@ -74,9 +83,14 @@ M6 first, then M5, then Noir connect. M0 to M4 are the product.
 - Live gRPC-web handshake to https://zjs.zec.rocks/mainnet from a browser.
   **Done at M1**: the browser reads the chain tip over gRPC-web and uses it as the
   link's birthday height.
-- WASM prover size and proving time on a mid-range phone. Still open; the M2 core
-  is derivation plus the scanner, 788,781 bytes (390 KB gzip), and carries no
-  prover. M1's derivation-only core was 435,317 bytes (253 KB gzip).
+- WASM prover size and proving time on a mid-range phone. Half answered at M3:
+  the M3 core carries the Orchard/Ironwood halo2 circuit and is 2,231,657 bytes
+  (1,030 KB gzip), up from 788,781 bytes (390 KB gzip) at M2 and 435,317 bytes
+  (253 KB gzip) at M1. On a desktop in Playwright chromium the proving key costs
+  about 27 s and the proof about 42 s, single-threaded; a phone is still
+  unmeasured, and threading the prover is the M4 spike. Single-threaded proving
+  also holds the browser's main thread, so the progress screen cannot repaint
+  while it runs — see web/docs/M3-VERIFICATION.md.
 - 1Click quote for ZEC in, USDC-on-Solana out, minimum amount and fee. Still open,
   needed at M5.
 
