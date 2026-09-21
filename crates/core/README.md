@@ -429,8 +429,8 @@ a recent one, which gives two valid strategies:
 | **Same-block anchor** — witness in the note's own block and stop | one `GetTreeState` + one `GetBlock`, constant | the note's block, which anyone who already knows the funding transaction knows |
 | **Recent anchor** — roll the witness forward to the chain tip | one streamed block per block of distance | nothing about the note's age; this is what an ordinary wallet does |
 
-The policy takes the middle of the two, bounded by `ANCHOR_WALK_CAP` (**120 blocks**,
-about two and a half hours of mainnet at 75 s per block):
+The policy takes the middle of the two, bounded by `ANCHOR_WALK_CAP` (**24 blocks**,
+about half an hour of mainnet at 75 s per block):
 
 ```
 anchor = min(tip, newest note height + ANCHOR_WALK_CAP)
@@ -438,19 +438,23 @@ anchor = min(tip, newest note height + ANCHOR_WALK_CAP)
 
 A recipient opening a link minutes after it was funded — the normal case — still gets the
 chain tip, because the tip is then the smaller of the two and nothing changes for them. An
-older envelope gets an anchor 120 blocks past its newest note instead of the tip, and the
+older envelope gets an anchor 24 blocks past its newest note instead of the tip, and the
 walk is bounded there rather than growing with the envelope's age. The height used comes
 back as `anchor_height`.
 
 **This is a privacy/latency trade-off, not a correctness one** (DECISIONS.md D18). Any
 finalized tree state's root is a consensus-valid anchor — the M3 spike verified a
-same-block anchor against mainnet, which is the extreme case of the same thing — so the
-cap cannot produce a transaction the chain will not take. What it costs is
-anonymity-set freshness: an observer reading the anchor of an old envelope's sweep learns
-the transaction was built against a tree state no later than `note + 120`, a narrower
-window than "somewhere near the tip". What it buys is a witness stage that does not grow
-without bound: before the cap, a 777-block-old envelope replayed all 777 blocks and a
-month-old one would have replayed about 35,000.
+same-block anchor against mainnet, which is the extreme case of the same thing — so no
+cap, of any size, can produce a transaction the chain will not take. The walk is
+therefore there for one purpose only: so the anchor does not pin the exact funding block.
+Any distance past the note buys that, and each block of it is paid for in Sinsemilla
+hashing on the recipient's device — **24 blocks is about 2 s on a desktop and under 1 s
+on a recent phone, where 120 blocks cost about 10 s** (web/docs/PERF-2026-09-21.md §9 and
+§10). What the cap costs is anonymity-set freshness: an observer reading the anchor of an
+old envelope's sweep learns the transaction was built against a tree state no later than
+`note + 24`, a narrower window than "somewhere near the tip". What it buys is a witness
+stage that does not grow without bound: before the cap, a 777-block-old envelope replayed
+all 777 blocks and a month-old one would have replayed about 35,000.
 
 The correctness checks are untouched by the cap. The replayed root is still compared
 against the server's `GetTreeState` at every note block, and the anchor root is still the
