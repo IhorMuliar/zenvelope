@@ -10,6 +10,7 @@ Regenerate:
 
 ```sh
 cargo test -p zenvelope-core -- --ignored --nocapture print_test_vectors
+cargo test -p zenvelope-core -- --ignored --nocapture print_m3_test_vectors
 ```
 
 ## Secret
@@ -105,3 +106,70 @@ over 512 UTF-8 bytes is rejected.
 
 Rejected: `2100000000000001` zatoshi and above (over `MAX_MONEY`), `0` as a payment
 amount, and any ZEC string with more than 8 decimal places.
+
+## M3: a fresh in-browser wallet
+
+`new_wallet(network, birthday)` generates 24 English BIP-39 words and derives account 0
+from `mnemonic.to_seed("")` — the full 64-byte seed with an **empty passphrase**, which is
+what Zodl (formerly Zashi) and `zcash-devtool` do. That is the whole point of the choice:
+these words can be typed into Zodl and the same account comes back.
+
+The fixed vector is the all-zero-entropy mnemonic, so an import can be checked by hand
+against the address below.
+
+| | |
+| --- | --- |
+| entropy | 32 zero bytes |
+| mnemonic | `abandon` × 23 then `art` |
+| seed | `408b285c123836004f4b8842c89324c1f01382450c0d439af345ba7fc49acf705489c6fc77dbd4e3dc1dd8cc6bc9f043db8ada1e243c4a0eafb290d399480840` |
+| account | 0 |
+| receivers | Orchard **and** Sapling (no transparent) |
+
+`new_wallet("main", …).address`
+
+```
+u1nvgt6yr35mhc9wdf4wckvl38476vqy96dx3cwkfdwy4jet9300l5v8l2yg27ql7w9qwm0lf8kncnj9nus4mgete06j3cu3mhrqvstg6swvdya6xgzwhh6a9xxdhxkavvvmztqeuaurjtqfk3dzetuzgnu0zjvmdpe8ehvj53sy6yhzxj
+```
+
+`new_wallet("main", …).ufvk`
+
+```
+uview1ul22wp00mjcm5zrh3drvv7df95knzlvku6fph4zhppfn7pvhu8mv56x75n0vzdkzm6n37w45med2mkr6g80x3rtws29wdk8sr55mmdw37gac26mjpp3ggt7e788k0qgkscqnqlpxjkepndz4a538zxw8gh2t3thn3kmu72wsnexe2rywaw8navg3xpdkjaxnej758rxjg8j936pjpvq3ywx224z8w6nxwt2sqsly6w05zttvrtntren5e57mtuf49x8sptwrudlnfjuyuqyunf9cfyd59vg9fvn2juypyl35gpzyfqf3lxecw4dmxqk00x7wz45swe9pc8dq42n6dwryqtgyg5pe20wvsgjz3l22h06usz2anx2wylskzgh0m4cvrmckjy0yh
+```
+
+`new_wallet("test", …).address`
+
+```
+utest1dumh7z6x5xf4ay3wnkvc60uru4hu54y55u0t3xm78v2cqs5nk0zhsqspa4dqcpcj82hmtt049f30kx5z58yzxg3d7y3lpy69pg9vsdy7hdh2qfw8jj2u6vd46ztw7tzf88lydf8p3w7nre6zenfqeayq4e4njagajwvrmelywq76akhk
+```
+
+A wallet's `birthday` is carried through untouched; it is the height an import should
+start scanning from, not something the derivation depends on.
+
+## M3: destination matrix
+
+`classify_address(address, network)` returns `{ kind, reason }`. A sweep pays the first
+two and refuses the rest with a sentence the recipient can read.
+
+| Address | `kind` | Swept to |
+| --- | --- | --- |
+| unified with an Orchard receiver (`u1…`) | `unified_orchard` | an Ironwood output |
+| transparent (`t1…`, `t3…`) | `transparent` | a transparent output |
+| unified without an Orchard receiver | `unified_no_orchard` | refused |
+| Sapling (`zs1…`) | `sapling` | refused |
+| anything else, or the wrong network | `invalid` | refused |
+
+## M3: ZIP-317 fee
+
+The sweep has exactly one Ironwood spend. Ironwood permits cross-address transfers, so a
+spend and an output share an action and the count is `max(spends, outputs)`, padded to the
+2-action minimum. ZIP-317's grace is 2 actions, so the first two are free of marginal fee.
+
+| Outputs | Logical actions | Network fee |
+| --- | --- | --- |
+| 1 shielded (no flat fee) | 2 | `10000` |
+| 2 shielded (destination + flat fee) | 2 | `10000` |
+| 1 shielded + 1 transparent | 3 | `15000` |
+
+`amount_to_destination = note − network fee − flat fee`, and a sweep that leaves nothing
+to send is refused rather than built.

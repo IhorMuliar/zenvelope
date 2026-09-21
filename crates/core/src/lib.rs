@@ -13,6 +13,8 @@
 //! secret never leaves the caller's memory.
 
 pub mod scan;
+pub mod spend;
+pub mod sweep;
 
 #[cfg(target_arch = "wasm32")]
 mod grpc;
@@ -476,6 +478,55 @@ pub fn is_orchard_only_js(address: &str) -> Result<bool, JsValue> {
     is_orchard_only(address).map_err(throw)
 }
 
+/// The JS-visible verdict on a pasted destination address.
+///
+/// `kind` is one of `"unified_orchard"`, `"unified_no_orchard"`, `"sapling"`,
+/// `"transparent"` or `"invalid"`. `reason` is `null` when a sweep can pay the address
+/// and a sentence the recipient can read when it cannot.
+#[wasm_bindgen(getter_with_clone)]
+pub struct AddressClassification {
+    pub kind: String,
+    pub reason: Option<String>,
+}
+
+/// Classifies a destination address without touching the network.
+#[wasm_bindgen(js_name = classify_address)]
+pub fn classify_address_js(address: &str, network: &str) -> Result<AddressClassification, JsValue> {
+    let network = network_from_str(network).map_err(throw)?;
+    let verdict = spend::classify_address(address, network);
+    Ok(AddressClassification {
+        kind: verdict.kind.as_str().to_string(),
+        reason: verdict.reason,
+    })
+}
+
+/// The JS-visible result of [`new_wallet`](new_wallet_js).
+#[wasm_bindgen(getter_with_clone)]
+pub struct NewWallet {
+    /// 24 English BIP-39 words. This is the money: it is never sent anywhere.
+    pub mnemonic: String,
+    pub address: String,
+    pub ufvk: String,
+    pub birthday: u32,
+}
+
+/// Generates a fresh 24-word wallet for a recipient who has none.
+///
+/// The seed is `mnemonic.to_seed("")`, the full 64 bytes with an empty passphrase, which
+/// is what Zodl and `zcash-devtool` do — so these words can be imported into either and
+/// the same account 0 comes back.
+#[wasm_bindgen(js_name = new_wallet)]
+pub fn new_wallet_js(network: &str, birthday: u32) -> Result<NewWallet, JsValue> {
+    let network = network_from_str(network).map_err(throw)?;
+    let wallet = spend::new_wallet(network, birthday).map_err(throw)?;
+    Ok(NewWallet {
+        mnemonic: wallet.mnemonic,
+        address: wallet.address,
+        ufvk: wallet.ufvk,
+        birthday: wallet.birthday,
+    })
+}
+
 /// Coerces a BigInt, decimal string, or safe-integer number into a `u64`.
 fn js_to_u64(value: &JsValue) -> Result<u64, String> {
     if let Some(s) = value.as_string() {
@@ -779,7 +830,9 @@ mod tests {
         // base64url without padding, per ZIP-321: no '+', no '/', no '='.
         let param = uri.split("&memo=").nth(1).expect("memo param: {uri}");
         assert!(
-            param.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
+            param
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
             "{param}"
         );
         assert_eq!(uri, format!("zcash:{address}?amount=0.0001&memo={param}"));

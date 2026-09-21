@@ -6,6 +6,9 @@ OUTREACH.md
 M1-FUND.md
 M1-FUND-qr.png
 
+# the M3 sweep destination: a mnemonic and a link secret, both spendable
+M3-DEST.md
+
 node_modules/
 dist/
 .env*

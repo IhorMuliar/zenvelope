@@ -151,4 +151,28 @@ check("zec_string_to_zat returns a BigInt and round-trips", () => {
   assert.throws(() => core.zec_string_to_zat("1.234567891"), (e) => typeof e === "string");
 });
 
+console.log("M3: destinations and wallets");
+check("classify_address names every destination the sweep can and cannot pay", () => {
+  assert.equal(core.classify_address(VECTORS.main.address, "main").kind, "unified_orchard");
+  assert.equal(core.classify_address(VECTORS.main.address, "main").reason ?? null, null);
+  // A testnet address on mainnet is invalid, with a reason a recipient can read.
+  const wrong = core.classify_address(VECTORS.test.address, "main");
+  assert.equal(wrong.kind, "invalid");
+  assert.ok(typeof wrong.reason === "string" && wrong.reason.length > 0);
+  // Nonsense never throws; it comes back classified.
+  assert.equal(core.classify_address("not-an-address", "main").kind, "invalid");
+});
+check("new_wallet makes 24 words and a payable unified address", () => {
+  const a = core.new_wallet("main", 3490472);
+  const b = core.new_wallet("main", 3490472);
+  assert.equal(a.mnemonic.split(" ").length, 24);
+  assert.equal(a.birthday, 3490472);
+  assert.ok(a.address.startsWith("u1"));
+  assert.ok(a.ufvk.startsWith("uview1"));
+  // Fresh every call: two wallets are never the same wallet.
+  assert.notEqual(a.mnemonic, b.mnemonic);
+  assert.notEqual(a.address, b.address);
+  assert.equal(core.classify_address(a.address, "main").kind, "unified_orchard");
+});
+
 console.log(`\n${checks} checks passed.`);

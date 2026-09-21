@@ -1,16 +1,17 @@
 # zenvelope-core
 
 The envelope core. A link secret in, a shielded Zcash address and a ZIP-321 payment URI
-out (M1), and the notes that address received (M2). Compiled to WASM for the browser;
-usable as a plain Rust crate for tests and tooling.
+out (M1), the notes that address received (M2), and the proved Ironwood transaction that
+spends them (M3). Compiled to WASM for the browser; usable as a plain Rust crate for tests
+and tooling.
 
 Nothing here writes to disk, and no key is ever state: the secret is an argument and a
-return value. Key derivation and ZIP-321 stay offline. The one export that reaches the
-network is `open_envelope`, and it talks only to the lightwalletd gateway the caller
-names.
+return value. Key derivation, address classification, ZIP-321 and wallet generation stay
+offline. The two exports that reach the network are `open_envelope` and `sweep_envelope`,
+and they talk only to the lightwalletd gateway the caller names.
 
-**This file is the contract M2 and M3 build on.** If an implementation and this document
-disagree, the disagreement is a bug in one of them, and the fix goes in both.
+**This file is the contract the web app builds on.** If an implementation and this
+document disagree, the disagreement is a bug in one of them, and the fix goes in both.
 
 ## The secret
 
@@ -203,31 +204,234 @@ blocks scanned. A 10,000-block default scan and a 57-block scan cost the same me
 Nothing is persisted, so closing the tab leaves nothing behind — which is the privacy
 property the product wants anyway.
 
-### What M3 will need
+### What M3 needed from M2, and what it reuses
 
-M2 deliberately stops at "what did this envelope receive". Spending needs three things
-this path does not produce:
+M2 deliberately stopped at "what did this envelope receive". Spending needed a position
+in the Ironwood commitment tree and a Merkle path to an anchor, which trial decryption
+alone does not give. M3 gets both without a wallet database — see
+[Sweeping an envelope](#sweeping-an-envelope-m3) below — and reuses the rest of M2
+unchanged: the key derivation (`ufvk_from_secret` gives the Orchard-only UFVK, and the
+spending key comes from the same seed), the gRPC-web transport and its generated client,
+and the full-transaction Ironwood decryption that produces the note itself.
 
-- **Note positions and witnesses.** Trial decryption alone gives no position in the
-  Ironwood commitment tree. M3 has to track commitment tree state, which means
-  `zcash_client_backend::scanning::scan_block` (it returns `ScannedBlock` with positions
-  and takes the `ChainState` from `GetTreeState`) plus a `shardtree` to hold the
-  frontier.
-- **A `WalletRead`/`WalletWrite` store.** The obvious candidate, `zcash_client_memory`,
-  is **not usable**: it was removed from the librustzcash workspace on 2026-06-20 and now
-  lives at <https://github.com/zcash/zcash_client_memory>, pinned to
-  `zcash_client_backend` 0.23 / `orchard` 0.14 with zero Ironwood support (`grep -i
-  ironwood src` finds nothing). It is not published on crates.io either. Bringing it to
-  0.24 means implementing the whole Ironwood half of `WalletRead`/`WalletWrite`,
-  including a second shard tree and the Ironwood subtree roots. Until someone does, the
-  M3 options are: port it, or keep the store minimal and Ironwood-only, which is enough
-  for one account holding one note.
-- **Proving.** Unchanged from D8.
+The one thing M2 now also reports is `notes[].action_index`: which Ironwood action in the
+funding transaction is the envelope's. A sender's wallet takes its own change in the same
+bundle, so a transaction usually has two Ironwood actions and only one is ours. `sweep`
+needs to witness that exact commitment.
 
-What M3 *can* reuse as-is: the key derivation (`ufvk_from_secret` gives the Orchard-only
-UFVK, and the spending key comes from the same seed), the gRPC-web transport and its
-generated client, the compact-block Ironwood decryption, and the full-transaction
-decryption that produces the note itself.
+`zcash_client_memory` was evaluated as a note store and rejected: it was removed from the
+librustzcash workspace on 2026-06-20, now lives at
+<https://github.com/zcash/zcash_client_memory>, is pinned to `zcash_client_backend` 0.23
+/ `orchard` 0.14 with zero Ironwood support, and is not on crates.io. M3 does not need it:
+an envelope holds one note, so the "wallet state" is a single witness computed on demand
+and thrown away.
+
+## Sweeping an envelope (M3)
+
+`sweep_envelope` spends the envelope's Ironwood note in full: one spend in, one output to
+the destination the recipient chose, one flat-fee output to Zenvelope (D5), no change.
+`amount_to_destination = note − ZIP-317 network fee − flat fee`, and a sweep that would
+leave nothing to send is refused rather than built.
+
+The whole sequence lives in `src/sweep.rs` and is **generic over the gRPC transport**, so
+the browser (gRPC-web over `fetch`) and the native integration test (plain gRPC over
+`tonic::transport::Channel`) run the same code against mainnet. That is deliberate: the
+sequence that spends real money is exercised natively before a browser is pointed at it.
+The transport-free half — addresses, fees, witness replay, keys, build and prove — is
+`src/spend.rs` and is unit-tested without a network.
+
+### Building the transaction
+
+```rust
+Builder::new(
+    network,                      // MAIN_NETWORK for a mainnet sweep
+    target_height,                // chain tip + 1
+    BuildConfig::Standard {
+        sapling_anchor:   None,   // never: see NoSaplingProver below
+        orchard_anchor:   None,   // ZIP 258 forbids new value entering the Orchard pool
+        ironwood_anchor:  Some(anchor),
+        orchard_padding:  BundlePadding::DEFAULT,
+        ironwood_padding: BundlePadding::DEFAULT,
+    },
+)
+.add_ironwood_spend(fvk, note, merkle_path)?   // the note MUST be NoteVersion::V3
+.add_ironwood_output(Some(ovk), addr, value, memo)?   // a UA with an Orchard receiver
+// or .add_transparent_output(&t_addr, value)?        // a t1/t3 address
+.build(
+    &TransparentSigningSet::default(),
+    &[],                          // no Sapling extended spending keys
+    &[ask],                       // the Orchard spend authorizing key
+    OsRng,
+    &NoSaplingProver,
+    &NoSaplingProver,
+    &zip317::FeeRule::standard(),
+)
+```
+
+`zcash_primitives` 0.30.1 with features `circuits` + `std`. `circuits` is what makes
+`build` exist at all and what pulls the Orchard/Ironwood halo2 circuit into the wasm;
+`std` is what gives `build` the process-wide proving-key cache described below.
+`multicore` stays **off**: it would pull rayon, and a plain `--target web` build has no
+threads.
+
+The Ironwood spend refuses a note that is not `NoteVersion::V3`. That is the type system
+restating the pool split from M2: an Orchard (V2) note cannot be spent into an Ironwood
+bundle, and the note the envelope received is V3 because `IronwoodDomain` is what
+decrypted it.
+
+### `NoSaplingProver`
+
+`build` is generic over a Sapling spend prover and a Sapling output prover and wants a
+value of each, even when no Sapling bundle is built. A Sapling bundle is built **only**
+when `BuildConfig::Standard` carries a `sapling_anchor`, and ours never does, so the
+provers are never called. `NoSaplingProver` is a zero-sized type whose every method is
+`unreachable!()`: it satisfies the type and aborts loudly if that invariant is ever
+broken.
+
+The alternative is the real `SpendParameters`, which means shipping the 51.5 MB Sapling
+proving parameters to a browser — exactly what [D2](../../docs/DECISIONS.md) rules out,
+and `download.z.cash` does not serve them cross-origin anyway. A unit test asserts both
+provers abort and that the type is zero-sized; the native integration test asserts the
+built transaction has no Sapling bundle at all.
+
+### The witness
+
+Ironwood shares Orchard's tree: `MerkleHashOrchard` nodes, depth 32. The recipe, verified
+against mainnet before it was written into this crate:
+
+1. `GetTreeState(h − 1).ironwood_tree()` → the frontier just before the note's block.
+2. `GetBlock(h)` → append **every** `ironwood_actions[].cmx` in the block, in (tx index,
+   action index) order, which is the order the chain commits them in. Take
+   `IncrementalWitness::from_tree` immediately after our own commitment is appended, then
+   keep appending the rest to the witness as well as to the tree.
+3. Compare the replayed root against `GetTreeState(h)`'s. A mismatch is a **hard error**:
+   it means the replay saw a different set of commitments than the chain did, and a proof
+   built on it would be rejected. There is no fallback, because a wrong anchor is not a
+   degraded sweep, it is a lost one.
+4. Optionally keep streaming later blocks into both tree and witness (see the anchor
+   policy), then compare against `GetTreeState(anchor height)` again before using it.
+5. `anchor = witness.root()`, `merkle_path = witness.path()`.
+
+No `shardtree`, no wallet database, no subtree roots: one envelope is one note, and the
+witness is computed on demand from data the server already serves.
+
+### Anchor policy
+
+Zebra accepts a spend against the root of **any** finalized Ironwood tree state, not just
+a recent one, which gives two valid strategies:
+
+| | Cost | What the anchor reveals |
+| --- | --- | --- |
+| **Same-block anchor** — witness in the note's own block and stop | one `GetTreeState` + one `GetBlock`, constant | the note's block, which anyone who already knows the funding transaction knows |
+| **Recent anchor** — roll the witness forward to the chain tip | one streamed block per block of distance | nothing about the note's age; this is what an ordinary wallet does |
+
+`ANCHOR_WALK_LIMIT` (1,500 blocks, about a day and a half of mainnet at 75 s per block)
+picks between them: walk forward when the envelope is young enough that the walk is a
+rounding error on the open flow, and fall back to the same-block anchor when it is not. A
+recipient opening a link minutes after it was funded — the normal case — gets the recent
+anchor. The height used comes back as `anchor_height`.
+
+### ZIP-317 fee
+
+A sweep has exactly one Ironwood spend. The Ironwood pool **permits cross-address
+transfers**, so a requested spend and a requested output share an action and the count is
+`max(spends, outputs)`, padded up to the 2-action minimum. (The Orchard pool under
+NU6.3 mandates the cross-address restriction and would charge `spends + outputs`; Ironwood
+does not.) Transparent outputs are charged by total serialized bytes over ZIP-317's
+standard 34-byte P2PKH output, and the first two logical actions are free of marginal fee.
+
+| Outputs | Logical actions | Network fee |
+| --- | --- | --- |
+| 1 shielded (flat fee of 0) | 2 | 10,000 zat |
+| 2 shielded (destination + flat fee) | 2 | 10,000 zat |
+| 1 shielded + 1 transparent | 3 | 15,000 zat |
+
+The arithmetic is `network_fee_zat` in `src/spend.rs`, unit-tested against each shape, and
+checked again at build time: `build` refuses a transaction whose value balance is not
+exactly zero after fees, so a wrong fee is a build error and never a silent overpayment.
+
+### Where a sweep can send
+
+| Destination | `classify_address` kind | Swept to |
+| --- | --- | --- |
+| unified with an Orchard receiver, `u1…` | `unified_orchard` | an Ironwood output — **yes** |
+| transparent, `t1…` or `t3…` | `transparent` | a transparent output — **yes**, and the amount becomes public |
+| unified without an Orchard receiver | `unified_no_orchard` | refused |
+| Sapling, `zs1…` | `sapling` | refused — **no** |
+| anything else, or an address for the other network | `invalid` | refused |
+
+`classify_address` never throws: an unparseable string, a testnet address on mainnet and a
+TEX address all come back as a kind plus a `reason` the recipient can read. Sapling is
+refused for the same reason `NoSaplingProver` exists: paying it would need the Sapling
+proving parameters. A recipient with only a `zs1…` address is told so, rather than having
+their money sent somewhere the flow cannot reach.
+
+### Warming the proving key
+
+`zcash_primitives` builds its own Orchard/Ironwood proving key **inside** `build`, caching
+it in a process-wide `OnceLock` keyed by circuit version
+(`transaction::builder::cached_orchard_proving_key`, which that crate exports as a
+`pub fn`). Left alone, the recipient pays for that key build — about 27 s of
+single-threaded wasm — inside the same call that proves, with no way to tell the two apart
+on screen.
+
+`warm_proving_key()` forces it early and returns the milliseconds it took. Three ways to
+do that were considered:
+
+1. **A `[patch.crates-io]` fork of `zcash_primitives`** adding an entry point that touches
+   the `OnceLock`. **Rejected**: it forks a consensus-critical crate to reach something
+   that is already public.
+2. **Building a throwaway bundle** so `build` populates the cache as a side effect.
+   **Rejected**: it costs a whole proof (tens of seconds) on top of the key build, and
+   needs a fabricated note and anchor.
+3. **Calling `cached_orchard_proving_key(OrchardCircuitVersion::PostNu6_3)` directly.**
+   **Taken.** It is `pub`, it is the very `OnceLock` the real build path reads, and it
+   costs the key build and nothing else.
+
+A second call returns in ~0 ms, which the browser test asserts. The circuit version is
+pinned to `PostNu6_3`, the version every Ironwood bundle proves against; a key built for
+another version would produce proofs against the wrong key.
+
+### Broadcasting, and the `error_code` trap
+
+**`SendTransaction` answers a rejected transaction with gRPC status 0, OK.** The rejection
+is in `SendResponse.error_code` (0 means accepted) and `SendResponse.error_message`. A
+client that only checks the gRPC status reports a rejected sweep as a successful one and
+tells the recipient their money has moved when it has not.
+
+`sweep` checks the field: a nonzero `error_code` rejects the promise with the server's own
+`error_message`, and the code and message are also carried out on the result object so a
+caller can show them. With `broadcast: false` nothing is sent at all, `raw_tx_hex` comes
+back for inspection, and `error_code` and `error_message` are `null`.
+
+### A fresh wallet for the recipient
+
+`new_wallet(network, birthday)` is for a recipient who has no Zcash address at all: 24
+English BIP-39 words (`bip0039`), seed = `mnemonic.to_seed("")` — the full 64 bytes with
+an **empty passphrase** — then `UnifiedSpendingKey::from_seed`, account 0, and a unified
+address with Orchard and Sapling receivers (`UnifiedAddressRequest::SHIELDED`).
+
+The empty passphrase and the 64-byte seed are what Zodl (formerly Zashi) and
+`zcash-devtool` do, which is the whole point of the choice: these words can be typed into
+either and the same account comes back. [TEST_VECTORS.md](TEST_VECTORS.md) records the
+address for a fixed mnemonic so an import can be checked by hand.
+
+### Measured
+
+Mainnet, the real M1 envelope (130,000 zat, tx `281e9f7b…341d43`, block 3490472), swept to
+a fresh wallet with a 30,000 zat flat fee. Neither run broadcast anything.
+
+| | Native (release, `zec.rocks:443`) | Browser (Playwright chromium, `zjs.zec.rocks`) |
+| --- | --- | --- |
+| witness | 1.5 s | ~3 s |
+| keys | 0.02 s | < 0.1 s |
+| proving key | included in proving | **27.4 s** (`warm_proving_key`, second call 0 ms) |
+| proving | 23.7 s (key build included) | 42 s |
+| raw transaction | **9,166 bytes** | 9,166 bytes |
+| total | 25.2 s | 72.7 s including the key build |
+
+Both produce a V6 transaction with **2 Ironwood actions**, no Sapling bundle, no Orchard
+bundle and no transparent bundle. The wasm is 2.18 MB raw, 1.03 MB gzipped.
 
 ## JS API
 
@@ -263,6 +467,10 @@ const uri = core.payment_uri(address, 10_000n + 100_000n, "Coffee");
 | `zec_string_to_zat` | `(zec: string) => bigint` |
 | `is_orchard_only` | `(address: string) => boolean` — decodes the address and confirms one receiver, Orchard |
 | `open_envelope` | `(secret: string, birthday: number \| undefined, network: "main" \| "test", lightwalletd_url: string, on_progress?: (scanned: number, total: number) => void) => Promise<Opened>` |
+| `classify_address` | `(address: string, network: "main" \| "test") => { kind: Kind, reason: string \| null }` — never throws on a bad address |
+| `new_wallet` | `(network: "main" \| "test", birthday: number) => { mnemonic: string, address: string, ufvk: string, birthday: number }` |
+| `warm_proving_key` | `() => Promise<number>` — builds the Ironwood proving key now; resolves with the milliseconds it took |
+| `sweep_envelope` | see below |
 
 The `Opened` object below is the field-for-field contract `web/src/core/types.ts`
 declares, including `birthday`, `birthday_defaulted` and `scanned_blocks`.
@@ -276,6 +484,7 @@ interface Opened {
     height: number;
     txid: string;            // big-endian, as block explorers print it
     pool: "ironwood" | "orchard" | "sapling";
+    action_index: number;    // which action in that pool's list is ours; M3 needs it
   }>;
   total_zat: string;
   tip_height: number;
@@ -289,13 +498,70 @@ interface Opened {
 optional and anything it throws is ignored: a scan must not die because a progress bar
 did.
 
-`amount_zat` accepts a `BigInt`, a decimal string, or a number. A number above
-`Number.MAX_SAFE_INTEGER` is rejected rather than silently rounded; pass a `BigInt` or a
-string for large amounts. `zec_string_to_zat` returns a `BigInt`, and rejects anything
-finer than one zatoshi rather than rounding it away.
+### `classify_address` and `new_wallet`
 
-`derive` returns `DerivedAddress`, a wasm-bindgen object. Read its fields, then `free()`
-it (or use `using` / `Symbol.dispose`) if you are deriving in a loop.
+```js
+const { kind, reason } = core.classify_address(pasted, "main");
+// kind: "unified_orchard" | "unified_no_orchard" | "sapling" | "transparent" | "invalid"
+// reason: null when the sweep can pay it, otherwise a sentence to show the recipient
+
+const wallet = core.new_wallet("main", tipHeight);
+// { mnemonic: "24 words…", address: "u1…", ufvk: "uview1…", birthday: tipHeight }
+```
+
+`classify_address` does not throw: see [Where a sweep can send](#where-a-sweep-can-send).
+`new_wallet`'s `mnemonic` is the money — it exists only in the page, and showing it is the
+caller's decision.
+
+### `sweep_envelope`
+
+```ts
+core.sweep_envelope(
+  secret: string,
+  network: "main" | "test",
+  lightwalletd_url: string,
+  note: { txid: string; height: number; action_index: number },  // from open_envelope
+  destination: string,
+  fee_address: string,
+  fee_zat: string,          // decimal zatoshi; "0" means one output and no fee address
+  memo: string | null,      // goes on the destination output
+  broadcast: boolean,       // false builds and proves without sending
+  on_stage: (stage: Stage, detail: string) => void,
+): Promise<SweepResult>
+
+type Stage = "witness" | "keys" | "proving" | "broadcast" | "done";
+
+interface SweepResult {
+  txid: string;
+  raw_tx_hex: string | null;          // always present when broadcast was false
+  amount_to_destination_zat: string;  // zatoshi, decimal string
+  fee_zat: string;
+  network_fee_zat: string;
+  anchor_height: number;
+  broadcast: boolean;
+  error_code: number | null;          // SendResponse.error_code; 0 means accepted
+  error_message: string | null;
+}
+```
+
+The stages fire in that order; `witness` may fire more than once while the witness rolls
+forward. Anything `on_stage` throws is ignored, for the same reason `on_progress`'s is.
+The note is **re-derived from the secret**, not trusted: `sweep_envelope` fetches the
+funding transaction and decrypts `ironwood_actions[action_index]` itself, and fails if it
+does not decrypt with this link's viewing key.
+
+`fee_zat` crosses as a decimal string, like every other amount. `"0"` builds a single
+output and never looks at `fee_address`, so a caller that is not charging a fee need not
+supply one.
+
+`amount_zat` on `payment_uri` accepts a `BigInt`, a decimal string, or a number. A number
+above `Number.MAX_SAFE_INTEGER` is rejected rather than silently rounded; pass a `BigInt`
+or a string for large amounts. `zec_string_to_zat` returns a `BigInt`, and rejects
+anything finer than one zatoshi rather than rounding it away.
+
+`derive`, `classify_address` and `new_wallet` return wasm-bindgen objects. Read their
+fields, then `free()` them (or use `using` / `Symbol.dispose`) if you are calling them in
+a loop.
 
 ## Building
 
@@ -308,13 +574,24 @@ then prints the raw and gzipped size. Requires the `wasm32-unknown-unknown` targ
 `wasm-pack`, and `clang` (the transparent dependency chain pulls in `secp256k1-sys`,
 which builds C even though this crate never calls it).
 
+The M3 wasm is **2.18 MB raw, 1.03 MB gzipped**, up from a few hundred KB at M2. The
+Orchard/Ironwood halo2 circuit is most of it; `circuits` also switches on `sapling/circuit`
+(bellman and groth16) because `zcash_primitives` has no feature that selects one without
+the other. Sapling proving *parameters* are a separate matter and are never downloaded —
+see [`NoSaplingProver`](#nosaplingprover).
+
 `tonic-web-wasm-client` and `wasm-bindgen-futures` are scoped to the wasm target, and
 `src/grpc.rs` is `cfg`-gated to match, so a native `cargo test` builds and runs the scan
-logic without any browser-only dependency.
+and sweep logic without any browser-only dependency. The native gRPC transport is the
+mirror image: it is a **dev** dependency, so it is in the integration test and not in the
+shipped wasm.
 
 `.cargo/config.toml` sets `--cfg getrandom_backend="wasm_js"` for the wasm target;
-`getrandom` 0.3 will not compile for `wasm32-unknown-unknown` without it. The
-`[package.metadata.wasm-pack.profile.release]` block names the post-MVP wasm features
+`getrandom` 0.3 will not compile for `wasm32-unknown-unknown` without it. There is a
+*second* `getrandom` in the tree — 0.2, reached through `rand` 0.8 by the Orchard circuit
+— which takes its backend from a feature instead, so `crates/core/Cargo.toml` also names
+`getrandom = { version = "0.2", features = ["js"] }` for wasm. Neither covers the other.
+The `[package.metadata.wasm-pack.profile.release]` block names the post-MVP wasm features
 rustc emits, which the bundled `wasm-opt` otherwise rejects.
 
 ## Testing
@@ -324,27 +601,67 @@ cargo test -p zenvelope-core        # unit tests
 node scripts/smoke-core.mjs         # loads the built wasm and asserts the vectors
 ```
 
-The browser proof for M2 is `web/e2e/m2-core.spec.ts`. It loads the built wasm on a
-cross-origin-isolated page and opens the real funded mainnet envelope, asserting the note
-against what the zcash-devtool oracle reports. It needs the link secret, which is never
-committed, so it reads `ZENV_M1_FRAGMENT` at run time and skips cleanly without it:
-
-```sh
-cd web && ZENV_M1_FRAGMENT='<secret>.<birthday>' npm run e2e
-```
-
 The unit tests cover derivation determinism, the one-Orchard-receiver invariant on both
 networks, fragment round-trips, ZIP-321 amount formatting and parsing edge cases, amount
 overflow, and for M2 the scan range rules (birthday given, defaulted, clamped past the
-tip), memo rendering, the ZIP-321 memo round trip (base64url in, the sender's text back out)
-and its 512-byte limit, pool naming, total overflow, endpoint normalisation, the
-Orchard-only shape of the scan keys, and that a compact block of actions that are not
-ours decrypts to nothing. The Node smoke test loads the actual `--target web` artifact and checks
-that `derive()` reproduces the Rust vectors byte for byte.
+tip), memo rendering, the ZIP-321 memo round trip (base64url in, the sender's text back
+out) and its 512-byte limit, pool naming, total overflow, endpoint normalisation, the
+Orchard-only shape of the scan keys, and that a compact block of actions that are not ours
+decrypts to nothing.
+
+For M3 they cover the whole destination matrix (including a wrong-network address and
+nonsense that must classify rather than throw), each fee shape, the note-splitting
+arithmetic and its refusal to build a sweep that cannot pay for itself, that both halves
+of `NoSaplingProver` abort and that it is zero-sized, mnemonic → unified address
+determinism against a fixed vector recorded in [TEST_VECTORS.md](TEST_VECTORS.md), the
+BIP-39 seed for that vector, that the spending key matches the viewing key the scan uses,
+the anchor policy at every boundary, txid byte-order conversion, and the witness replay:
+that a witness is taken at the target action and nowhere else, and that a root mismatch is
+a hard error.
+
+The Node smoke test loads the actual `--target web` artifact and checks that `derive()`
+reproduces the Rust vectors byte for byte, plus the M3 exports `classify_address` and
+`new_wallet`.
+
+### Against mainnet
+
+Two live proofs, both of which **build and prove a real sweep and never broadcast it**.
+Both need the funded link secret, which is never committed, so both read it from the
+environment and skip cleanly without it. The destination and fee addresses come from the
+private, gitignored `M3-DEST.md`.
+
+```sh
+export ZENV_M1_FRAGMENT='<secret>.<birthday>'
+export ZENV_M3_DEST_ADDRESS='u1…'
+export ZENV_M3_FEE_ADDRESS='u1…'
+
+# native: the same sweep() over plain gRPC to zec.rocks:443
+cargo test -p zenvelope-core --release --test m3_sweep -- --ignored --nocapture
+
+# browser: the built wasm on a cross-origin-isolated page
+cd web && npm run e2e -- e2e/m3-core.spec.ts
+```
+
+`--release` is not optional for the native one in practice: the halo2 proof takes minutes
+in a debug build and seconds in a release one.
+
+The native test (`crates/core/tests/m3_sweep.rs`) asserts the stages fire in order, that
+every zatoshi of the note is accounted for, and that the raw bytes parse back with
+`Transaction::read` as **V6 with 2 Ironwood actions**, no Sapling bundle, no Orchard
+bundle and no transparent bundle. It prints per-stage timings and the transaction size.
+It also carries two by-hand tools: `locate_the_m1_note`, which reports which Ironwood
+action of a transaction decrypts, and `mint_m3_destination`, which generated the wallet
+and fee envelope in `M3-DEST.md`.
+
+The browser test (`web/e2e/m3-core.spec.ts`) times `warm_proving_key`, asserts a second
+call is nearly free, runs the same sweep through the wasm with `broadcast: false`, and
+checks the stage order, the amounts and the raw transaction. The M2 browser proof
+(`web/e2e/m2-core.spec.ts`) is unchanged.
 
 Fixed vectors live in [TEST_VECTORS.md](TEST_VECTORS.md) so the web app can assert
 against them. Regenerate with:
 
 ```sh
 cargo test -p zenvelope-core -- --ignored --nocapture print_test_vectors
+cargo test -p zenvelope-core -- --ignored --nocapture print_m3_test_vectors
 ```

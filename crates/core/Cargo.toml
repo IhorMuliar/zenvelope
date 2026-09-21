@@ -29,9 +29,28 @@ js-sys = "0.3"
 # `lightwalletd-tonic` brings in the generated `CompactTxStreamer` client without the
 # native `tonic` transport (a browser has no sockets; the transport is gRPC-web).
 zcash_client_backend = { version = "0.24.0", default-features = false, features = ["orchard", "lightwalletd-tonic"] }
-zcash_primitives = { version = "0.30.1", default-features = false }
+# M3: building, proving and broadcasting the sweep.
+#
+# `circuits` is what makes `Builder::build` exist at all, and it is also what pulls the
+# Orchard/Ironwood halo2 circuit into the wasm. `std` is what gives that build path the
+# process-wide `cached_orchard_proving_key` OnceLock that `warm_proving_key` primes.
+# `multicore` stays OFF: it would pull rayon, and a plain `--target web` build has no
+# threads. `circuits` also turns on `sapling/circuit`, which is why `sapling-crypto` is a
+# direct dependency below: the `SpendProver`/`OutputProver` traits live there and `build`
+# demands a prover for each, even when no Sapling bundle is ever constructed.
+zcash_primitives = { version = "0.30.1", default-features = false, features = ["circuits", "std"] }
 zcash_note_encryption = "0.4.1"
-orchard = { version = "0.15.5", default-features = false }
+orchard = { version = "0.15.5", default-features = false, features = ["circuit"] }
+sapling-crypto = { version = "0.7", default-features = false, features = ["circuit"] }
+# Named only to spell out `NoSaplingProver`'s signatures; no arithmetic happens here.
+jubjub = { version = "0.10", default-features = false }
+bls12_381 = { version = "0.8", default-features = false }
+rand_core = { version = "0.6", default-features = false }
+transparent = { package = "zcash_transparent", version = "0.10.0", default-features = false }
+incrementalmerkletree = "0.8.2"
+rand = { version = "0.8", default-features = false, features = ["std", "std_rng", "getrandom"] }
+bip0039 = { version = "0.14", default-features = false, features = ["std"] }
+hex = "0.4"
 tonic = { version = "0.14", default-features = false, features = ["codegen"] }
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 
@@ -41,10 +60,31 @@ futures-util = { version = "0.3", default-features = false, features = ["alloc"]
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.3", features = ["wasm_js"] }
 
+# The *other* getrandom. The Orchard circuit tree reaches randomness through rand 0.8,
+# which is on getrandom 0.2, and getrandom 0.2 refuses to build for
+# wasm32-unknown-unknown unless the `js` backend is named as a feature. The 0.3 above
+# takes its backend from the cfg in .cargo/config.toml; this one takes it from here.
+# Both are in the tree and neither covers the other.
+getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
+
 # gRPC-web over `fetch`. Browser-only by construction: it builds on web-sys, so it is
 # scoped to the wasm target and the module that uses it is `cfg`-gated to match.
 tonic-web-wasm-client = "0.9"
 wasm-bindgen-futures = "0.4"
+
+# The native M3 integration test (tests/m3_sweep.rs, `#[ignore]`d) talks plain gRPC to a
+# mainnet lightwalletd, which a browser cannot do and the shipped wasm must not carry.
+# Dev dependencies are not part of a `wasm-pack build`, so the native transport and its
+# TLS stack stay out of the browser bundle.
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tonic = { version = "0.14", default-features = false, features = ["transport", "tls-webpki-roots", "tls-ring", "codegen"] }
+zcash_client_backend = { version = "0.24.0", default-features = false, features = [
+    "orchard",
+    "lightwalletd-tonic",
+    "lightwalletd-tonic-transport",
+    "lightwalletd-tonic-tls-webpki-roots",
+] }
 
 # rustc emits post-MVP wasm (bulk memory, sign extension, and friends) by default, and
 # the wasm-opt build wasm-pack ships with rejects those unless each one is named.
