@@ -185,6 +185,20 @@ async function openEnvelope(page: Page): Promise<void> {
   // Which wasm package the worker chose, so every timing below is attributable.
   console.log(`M4 ${await page.getByTestId("proving-note").innerText()}`);
   await page.getByTestId("open-envelope").click();
+  // How much chain this run actually read. The progress line says "block N of M", and M
+  // is the span from the envelope's birthday to today's tip — which grows every 75 s, so
+  // a timing table without it is not comparable between runs. Best effort: a scan short
+  // enough to finish before the line paints is a scan whose span nobody needs.
+  try {
+    await expect
+      .poll(() => page.getByTestId("scan-progress").innerText().catch(() => ""), {
+        timeout: 60_000,
+      })
+      .toMatch(/of [\d,]+/);
+    console.log(`PERF scan span: ${await page.getByTestId("scan-progress").innerText()}`);
+  } catch {
+    console.log("PERF scan span: not observed");
+  }
   await expect(page.getByTestId("amount")).toHaveText(ENVELOPE, { timeout: 180_000 });
   await expect(page.getByTestId("mock-badge")).toHaveCount(0);
   // warm_proving_key runs in the background from the moment the envelope opens. This is

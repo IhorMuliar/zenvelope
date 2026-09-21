@@ -179,7 +179,9 @@ M3 stage timings: witness 6.2 s, witness 0.7 s, witness 0.0 s, keys 0.1 s,
 | total sweep | **49.0 s** | with the key already warm |
 
 Anchor height 3,490,587 — the chain tip at the time, not the note's own block, because
-the envelope was well inside `ANCHOR_WALK_LIMIT`.
+the envelope was 115 blocks old. (The constant was then `ANCHOR_WALK_LIMIT`, 1,500 blocks.
+It is now `ANCHOR_WALK_CAP`, 120 blocks, and the anchor is `min(tip, newest note + cap)`;
+this run was inside the cap too, so the same height comes out. See DECISIONS.md D18.)
 
 ### A finding: single-threaded proving freezes the progress screen
 

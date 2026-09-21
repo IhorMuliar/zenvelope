@@ -26,6 +26,10 @@ use orchard::note_encryption::{CompactAction, IronwoodDomain, OrchardDomain};
 
 use zcash_client_backend::decrypt_transaction;
 use zcash_client_backend::proto::compact_formats::{CompactBlock, CompactTx};
+// The threaded package only. `par_iter` needs a pool to run on, and a plain `--target
+// web` build has none; without this feature the sequential path below is what compiles.
+#[cfg(feature = "multicore")]
+use rayon::prelude::*;
 use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_note_encryption::batch;
 use zcash_primitives::transaction::Transaction;
@@ -143,6 +147,29 @@ pub fn scan_range(birthday: Option<u32>, tip_height: u32) -> (u32, bool, u32) {
     }
 }
 
+/// How many blocks the threaded scan hands rayon at a time.
+///
+/// One block per fork/join is the wrong grain: a mainnet block holds a handful of
+/// shielded transactions, so the scheduling would cost more than the arithmetic inside
+/// it. A chunk of 64 gives every thread hundreds of trial decryptions to chew on, and at
+/// roughly 7 KB a compact block it is under half a megabyte held at once.
+pub const SCAN_CHUNK_BLOCKS: usize = 64;
+
+/// True when this compact block holds no Orchard-family action at all.
+///
+/// Answering that by looking at two lengths costs nothing, and it is the difference
+/// between skipping the block outright and allocating two vectors and running two batch
+/// passes for every transaction in it. Sapling outputs are never looked at, here or
+/// anywhere below: an envelope address carries one Orchard receiver, so no envelope can
+/// ever be paid in Sapling and trial-decrypting that pool would be work for a note that
+/// cannot exist.
+fn has_no_shielded_actions(block: &CompactBlock) -> bool {
+    block
+        .vtx
+        .iter()
+        .all(|tx| tx.actions.is_empty() && tx.ironwood_actions.is_empty())
+}
+
 /// Trial-decrypts one compact block and returns the txids that decrypted.
 ///
 /// Compact blocks carry only the first 52 bytes of each note ciphertext, which is enough
@@ -150,10 +177,10 @@ pub fn scan_range(birthday: Option<u32>, tip_height: u32) -> (u32, bool, u32) {
 /// transactions are mine", and [`notes_from_transaction`] answers "what is in them" from
 /// the full transaction fetched afterwards.
 pub fn scan_compact_block(block: &CompactBlock, keys: &ViewKeys) -> Vec<TxId> {
-    let mut hits = Vec::new();
-    if keys.ivks.is_empty() {
-        return hits;
+    if keys.ivks.is_empty() || has_no_shielded_actions(block) {
+        return Vec::new();
     }
+    let mut hits = Vec::new();
     for tx in &block.vtx {
         if compact_tx_is_ours(tx, &keys.ivks) {
             hits.push(tx.txid());
@@ -162,23 +189,87 @@ pub fn scan_compact_block(block: &CompactBlock, keys: &ViewKeys) -> Vec<TxId> {
     hits
 }
 
+/// Trial-decrypts a run of compact blocks and returns every hit as `(height, txid)`.
+///
+/// This is the shape the scan wants and the one that parallelises: a block decrypts
+/// independently of every other block, so in the `multicore` build the run goes through
+/// rayon's `par_iter` and in the single-threaded build it is the same loop it always was.
+///
+/// **The output is chain order in both builds.** Rayon's `collect` into a `Vec` keeps the
+/// order of the source iterator whatever order the work finished in, and within a block
+/// the hits are pushed in `vtx` order, so the threaded build produces the same list as
+/// the sequential one — same transactions, same order, and therefore the same notes with
+/// the same `action_index` once they are fetched in full. That is not tidiness: the
+/// frontier replay downstream is built by appending commitments in chain order, and a
+/// scan that reordered its answers would be a different scan.
+///
+/// A height that does not fit in a `u32` is a malformed answer from the server and is
+/// reported rather than silently skipped.
+pub fn scan_compact_blocks(
+    blocks: &[CompactBlock],
+    keys: &ViewKeys,
+) -> Result<Vec<(u32, TxId)>, String> {
+    if keys.ivks.is_empty() {
+        // The heights are still checked, so a key-less scan fails on a malformed block
+        // exactly where a real one would.
+        for block in blocks {
+            check_height(block)?;
+        }
+        return Ok(Vec::new());
+    }
+
+    #[cfg(feature = "multicore")]
+    let per_block: Vec<Result<Vec<(u32, TxId)>, String>> =
+        blocks.par_iter().map(|b| scan_one(b, keys)).collect();
+    #[cfg(not(feature = "multicore"))]
+    let per_block: Vec<Result<Vec<(u32, TxId)>, String>> =
+        blocks.iter().map(|b| scan_one(b, keys)).collect();
+
+    let mut hits = Vec::new();
+    for block in per_block {
+        hits.extend(block?);
+    }
+    Ok(hits)
+}
+
+/// One block's hits, tagged with its height. The unit of parallel work.
+fn scan_one(block: &CompactBlock, keys: &ViewKeys) -> Result<Vec<(u32, TxId)>, String> {
+    let height = check_height(block)?;
+    Ok(scan_compact_block(block, keys)
+        .into_iter()
+        .map(|txid| (height, txid))
+        .collect())
+}
+
+fn check_height(block: &CompactBlock) -> Result<u32, String> {
+    u32::try_from(block.height).map_err(|_| format!("block height {} is absurd", block.height))
+}
+
 /// True if any Orchard-family action in this compact transaction decrypts to us.
+///
+/// Each pool is skipped outright when the transaction carries no actions in it, so a
+/// transparent or Sapling-only transaction costs two length checks and no allocation.
 fn compact_tx_is_ours(tx: &CompactTx, ivks: &[PreparedIncomingViewingKey]) -> bool {
-    let orchard: Vec<(OrchardDomain, CompactAction)> = tx
-        .actions
-        .iter()
-        .filter_map(|a| CompactAction::try_from(a).ok())
-        .map(|a| (OrchardDomain::for_compact_action(&a), a))
-        .collect();
-    if batch::try_compact_note_decryption(ivks, &orchard)
-        .iter()
-        .any(Option::is_some)
-    {
-        return true;
+    if !tx.actions.is_empty() {
+        let orchard: Vec<(OrchardDomain, CompactAction)> = tx
+            .actions
+            .iter()
+            .filter_map(|a| CompactAction::try_from(a).ok())
+            .map(|a| (OrchardDomain::for_compact_action(&a), a))
+            .collect();
+        if batch::try_compact_note_decryption(ivks, &orchard)
+            .iter()
+            .any(Option::is_some)
+        {
+            return true;
+        }
     }
 
     // The Ironwood pass. Same actions shape, same keys, different domain: an Ironwood
     // note is a version 3 plaintext and only `IronwoodDomain` will read it.
+    if tx.ironwood_actions.is_empty() {
+        return false;
+    }
     let ironwood: Vec<(IronwoodDomain, CompactAction)> = tx
         .ironwood_actions
         .iter()
@@ -498,6 +589,61 @@ mod tests {
             ..Default::default()
         };
         assert!(scan_compact_block(&block, &keys).is_empty());
+    }
+
+    #[test]
+    fn a_block_with_no_orchard_family_action_is_skipped() {
+        use zcash_client_backend::proto::compact_formats::{CompactSaplingOutput, CompactTx};
+
+        // Sapling-only activity: nothing an envelope can ever be paid in, so the scan
+        // must not look at it.
+        let block = CompactBlock {
+            height: 3_490_472,
+            vtx: vec![CompactTx {
+                txid: vec![9u8; 32],
+                outputs: vec![CompactSaplingOutput {
+                    cmu: vec![0u8; 32],
+                    ephemeral_key: vec![1u8; 32],
+                    ciphertext: vec![7u8; 52],
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        assert!(has_no_shielded_actions(&block));
+
+        let secret = "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA";
+        let keys = ViewKeys::from_secret(secret, Network::MainNetwork).unwrap();
+        assert!(scan_compact_block(&block, &keys).is_empty());
+    }
+
+    #[test]
+    fn a_run_of_blocks_comes_back_in_chain_order() {
+        let secret = "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA";
+        let keys = ViewKeys::from_secret(secret, Network::MainNetwork).unwrap();
+
+        // A long enough run that the threaded build really does split it across
+        // threads. None of these blocks is ours, so the answer is the empty list either
+        // way; what is asserted is that both builds agree and that nothing panics when
+        // rayon is driving.
+        let blocks: Vec<CompactBlock> = (0..(SCAN_CHUNK_BLOCKS * 3))
+            .map(|i| CompactBlock {
+                height: 3_490_472 + i as u64,
+                ..Default::default()
+            })
+            .collect();
+        assert_eq!(scan_compact_blocks(&blocks, &keys), Ok(Vec::new()));
+    }
+
+    #[test]
+    fn a_run_of_blocks_reports_an_absurd_height() {
+        let secret = "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA";
+        let keys = ViewKeys::from_secret(secret, Network::MainNetwork).unwrap();
+        let blocks = vec![CompactBlock {
+            height: u64::from(u32::MAX) + 1,
+            ..Default::default()
+        }];
+        assert!(scan_compact_blocks(&blocks, &keys).is_err());
     }
 
     #[test]

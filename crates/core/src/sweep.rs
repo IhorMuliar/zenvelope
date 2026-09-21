@@ -19,10 +19,12 @@
 //!   an ordinary wallet does, and it hides the note's age from anyone reading the anchor.
 //!   It costs one streamed block per block of distance.
 //!
-//! [`ANCHOR_WALK_LIMIT`] picks between them: walk forward when the envelope is young
-//! enough that the walk is cheap, and fall back to the same-block anchor when it is not.
-//! A recipient opening a link minutes after it was funded — the normal case — gets the
-//! recent anchor.
+//! [`ANCHOR_WALK_CAP`] takes the middle: the anchor is `min(tip, newest note + cap)`, so
+//! the walk is bounded however old the envelope is. A recipient opening a link minutes
+//! after it was funded — the normal case — still gets the chain tip, because the tip is
+//! the smaller of the two. An older envelope gets an anchor `cap` blocks past its newest
+//! note instead of the tip, which is the privacy/latency trade-off written down in
+//! DECISIONS.md D18 and in crates/core/README.md.
 //!
 //! # The `SendTransaction` trap
 //!
@@ -50,12 +52,22 @@ use crate::spend::{
 };
 use crate::{memo_bytes, ufvk_from_secret};
 
-/// How far back an envelope can be and still get a chain-tip anchor.
+/// The most blocks the witness replay ever walks past the newest note.
 ///
-/// About 1,500 blocks is a day and a half of mainnet at 75 s per block. Beyond that the
-/// forward walk stops being a rounding error on the open flow and the same-block anchor
-/// is used instead.
-pub const ANCHOR_WALK_LIMIT: u32 = 1_500;
+/// 120 blocks is about two and a half hours of mainnet at 75 s per block. The anchor is
+/// `min(tip, newest note height + this)`, so the walk is bounded no matter how old the
+/// envelope is, and the block stream the replay consumes is bounded with it.
+///
+/// **This is a privacy/latency trade-off, not a correctness one.** Zebra accepts a spend
+/// against the root of any finalized Ironwood tree state, so an anchor 120 blocks past
+/// the note is as consensus-valid as the tip — the M3 spike verified a same-block anchor
+/// against mainnet, which is the extreme case of the same thing. What the cap costs is
+/// anonymity-set freshness: an observer reading the anchor learns the transaction was
+/// built against a tree state no later than `note + 120`, which for an old envelope is a
+/// narrower window than "somewhere at the tip". What it buys is a sweep whose witness
+/// stage does not grow without bound as an envelope ages: before the cap, a 777-block-old
+/// envelope replayed all 777 blocks, and a month-old one would replay 35,000.
+pub const ANCHOR_WALK_CAP: u32 = 120;
 
 /// The stages a sweep reports, in the order they fire.
 pub const STAGES: [&str; 5] = ["witness", "keys", "proving", "broadcast", "done"];
@@ -126,19 +138,17 @@ pub fn txid_to_protocol_bytes(display: &str) -> Result<Vec<u8>, String> {
 /// Picks the anchor height for an envelope, given the chain tip.
 ///
 /// `note_height` is the **youngest** note's block: with several notes the anchor must be
-/// at or after all of them, and the walk-forward decision is about how old the newest
-/// one is. See the module docs. Returns the height whose Ironwood tree root becomes the
-/// anchor.
+/// at or after all of them, so the cap is measured from the newest one. See the module
+/// docs. Returns the height whose Ironwood tree root becomes the anchor.
+///
+/// The rule is `min(tip, note_height + ANCHOR_WALK_CAP)`, with one floor: a tip at or
+/// below the note's block means the note is in the newest block we know of, and its own
+/// block is then the only anchor available. The walk never runs backwards.
 pub fn anchor_height(note_height: u32, tip_height: u32) -> u32 {
     if tip_height <= note_height {
-        // A tip at or below the note's block means the note is in the newest block we
-        // know of; its own block is the only anchor available.
-        note_height
-    } else if tip_height - note_height <= ANCHOR_WALK_LIMIT {
-        tip_height
-    } else {
-        note_height
+        return note_height;
     }
+    tip_height.min(note_height.saturating_add(ANCHOR_WALK_CAP))
 }
 
 /// Runs a whole sweep: fetch the note, witness it, build and prove, and optionally send.
@@ -368,6 +378,13 @@ where
     )?;
     roots_at_note_blocks.push((first_height, scan.tree_root_hex()));
 
+    // The replay is sequential by nature and stays that way: an Ironwood frontier is
+    // built by appending commitments in chain order, and every witness already taken
+    // absorbs each later leaf, so there is no independent unit of work to hand a thread.
+    // What is bounded instead is how much of it there is — [`ANCHOR_WALK_CAP`] — and how
+    // the blocks arrive: one `GetBlockRange` stream for the whole range, consumed block
+    // by block and handed to `append_block` by reference. Nothing here clones a block or
+    // buffers the range.
     let anchor_at = anchor_height(last_height, tip_height);
     if anchor_at > first_height {
         let mut stream = client
@@ -660,18 +677,35 @@ mod tests {
     fn a_young_envelope_gets_a_tip_anchor() {
         assert_eq!(anchor_height(3_490_472, 3_490_500), 3_490_500);
         assert_eq!(
-            anchor_height(3_490_472, 3_490_472 + ANCHOR_WALK_LIMIT),
-            3_490_472 + ANCHOR_WALK_LIMIT
+            anchor_height(3_490_472, 3_490_472 + ANCHOR_WALK_CAP),
+            3_490_472 + ANCHOR_WALK_CAP
         );
     }
 
     #[test]
-    fn an_old_envelope_falls_back_to_its_own_block() {
+    fn an_old_envelope_walks_no_further_than_the_cap() {
+        // One block past the cap: the anchor stops at the cap, not at the tip and not
+        // back at the note's own block.
         assert_eq!(
-            anchor_height(3_490_472, 3_490_472 + ANCHOR_WALK_LIMIT + 1),
-            3_490_472
+            anchor_height(3_490_472, 3_490_472 + ANCHOR_WALK_CAP + 1),
+            3_490_472 + ANCHOR_WALK_CAP
         );
-        assert_eq!(anchor_height(3_000_000, 3_490_472), 3_000_000);
+        // A very old envelope: still exactly `cap` blocks of walk.
+        assert_eq!(
+            anchor_height(3_000_000, 3_490_472),
+            3_000_000 + ANCHOR_WALK_CAP
+        );
+    }
+
+    #[test]
+    fn the_cap_is_the_documented_one() {
+        // 120 blocks, about 2.5 hours of mainnet. D18.
+        assert_eq!(ANCHOR_WALK_CAP, 120);
+    }
+
+    #[test]
+    fn the_anchor_never_overflows_near_the_end_of_the_range() {
+        assert_eq!(anchor_height(u32::MAX - 1, u32::MAX), u32::MAX);
     }
 
     #[test]

@@ -158,8 +158,42 @@ Two passes, and a deliberate refusal to keep a wallet database.
 The transport is gRPC-web over `fetch` (`tonic-web-wasm-client`) driving the generated
 `CompactTxStreamer` client from `zcash_client_backend`. A browser cannot speak gRPC, so
 the endpoint must be a gRPC-web gateway: `https://zjs.zec.rocks/mainnet`, failing over to
-`https://zcash-mainnet.chainsafe.dev` (D3). Progress is reported every 100 blocks and
-once at each end of the range.
+`https://zcash-mainnet.chainsafe.dev` (D3). Progress is reported once per decrypted chunk
+(`SCAN_CHUNK_BLOCKS`, 64 blocks) and once at each end of the range.
+
+#### What the compact pass does not do
+
+Trial decryption is the whole cost of an open (about 96% of it; see
+[web/docs/PERF-2026-09-21.md](../../web/docs/PERF-2026-09-21.md) §4), so the cheapest work
+is the work skipped:
+
+- **Sapling outputs are never trial-decrypted.** An envelope address carries one Orchard
+  receiver, so no envelope can be paid in Sapling and there is no note there to find. Only
+  `ironwood_actions` and `actions` are touched, with the account's Orchard IVKs.
+- **A block with no Orchard-family action is skipped without allocating.** Two length
+  checks per transaction answer it, against two vectors and two batch passes if it were
+  not asked.
+- **Each pool is skipped per transaction** when that transaction has no actions in it.
+
+#### Threads
+
+In the `multicore` package the compact pass is parallel. Blocks are buffered in chunks of
+`SCAN_CHUNK_BLOCKS` (64) as they come off the single `GetBlockRange` stream, and each
+chunk goes through rayon's `par_iter` — one block per unit of work, which is coarse enough
+that scheduling is not the workload and fine enough to keep every thread busy. The
+single-threaded package compiles the same loop with `iter()`; the parallel path is behind
+`#[cfg(feature = "multicore")]` and the stable build is unchanged.
+
+**The answers are identical either way.** Rayon's `collect` into a `Vec` preserves source
+order however the work finished, and within a block the hits are pushed in `vtx` order, so
+both builds produce the same `(height, txid)` list in the same order — and therefore the
+same notes, with the same `action_index`, out of the full pass. That is not cosmetic:
+everything downstream, the frontier replay above all, reads the chain in order.
+
+The witness replay is **not** parallel and will not be: an Ironwood frontier is built by
+appending commitments in chain order and every witness already taken absorbs each later
+leaf, so there is no independent unit of work in it. What is bounded there instead is how
+much of it runs, which is the anchor cap below.
 
 Scanning starts at the birthday in the link fragment. Without one it starts at
 `tip - 10000` (about eight days of mainnet) and says so in the result, via
@@ -395,17 +429,36 @@ a recent one, which gives two valid strategies:
 | **Same-block anchor** — witness in the note's own block and stop | one `GetTreeState` + one `GetBlock`, constant | the note's block, which anyone who already knows the funding transaction knows |
 | **Recent anchor** — roll the witness forward to the chain tip | one streamed block per block of distance | nothing about the note's age; this is what an ordinary wallet does |
 
-`ANCHOR_WALK_LIMIT` (1,500 blocks, about a day and a half of mainnet at 75 s per block)
-picks between them: walk forward when the envelope is young enough that the walk is a
-rounding error on the open flow, and fall back to the same-block anchor when it is not. A
-recipient opening a link minutes after it was funded — the normal case — gets the recent
-anchor. The height used comes back as `anchor_height`.
+The policy takes the middle of the two, bounded by `ANCHOR_WALK_CAP` (**120 blocks**,
+about two and a half hours of mainnet at 75 s per block):
 
-With several notes the policy is unchanged, read off the **youngest** note: the anchor is
-the chain tip when the newest note is within `ANCHOR_WALK_LIMIT` of it, and otherwise the
-newest note's own block, which is the earliest height every witness can share. The replay
-still starts at the **oldest** note's block, because that witness has the furthest to
-travel.
+```
+anchor = min(tip, newest note height + ANCHOR_WALK_CAP)
+```
+
+A recipient opening a link minutes after it was funded — the normal case — still gets the
+chain tip, because the tip is then the smaller of the two and nothing changes for them. An
+older envelope gets an anchor 120 blocks past its newest note instead of the tip, and the
+walk is bounded there rather than growing with the envelope's age. The height used comes
+back as `anchor_height`.
+
+**This is a privacy/latency trade-off, not a correctness one** (DECISIONS.md D18). Any
+finalized tree state's root is a consensus-valid anchor — the M3 spike verified a
+same-block anchor against mainnet, which is the extreme case of the same thing — so the
+cap cannot produce a transaction the chain will not take. What it costs is
+anonymity-set freshness: an observer reading the anchor of an old envelope's sweep learns
+the transaction was built against a tree state no later than `note + 120`, a narrower
+window than "somewhere near the tip". What it buys is a witness stage that does not grow
+without bound: before the cap, a 777-block-old envelope replayed all 777 blocks and a
+month-old one would have replayed about 35,000.
+
+The correctness checks are untouched by the cap. The replayed root is still compared
+against the server's `GetTreeState` at every note block, and the anchor root is still the
+server's own, taken at whatever height the rule above picked.
+
+With several notes the rule reads off the **youngest** note, since the anchor must be at
+or after all of them. The replay still starts at the **oldest** note's block, because that
+witness has the furthest to travel.
 
 ### ZIP-317 fee
 

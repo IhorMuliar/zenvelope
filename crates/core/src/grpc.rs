@@ -17,6 +17,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::future_to_promise;
 
 use orchard::circuit::OrchardCircuitVersion;
+use zcash_client_backend::proto::compact_formats::CompactBlock;
 use zcash_client_backend::proto::service::{
     compact_tx_streamer_client::CompactTxStreamerClient, BlockId, BlockRange, TxFilter,
 };
@@ -27,16 +28,15 @@ use zcash_protocol::TxId;
 use crate::gateway;
 use crate::network_from_str;
 use crate::scan::{
-    normalize_endpoints, notes_from_transaction, parse_transaction, scan_compact_block, scan_range,
-    total_zat, OpenResult, ReceivedNote, ViewKeys,
+    normalize_endpoints, notes_from_transaction, parse_transaction, scan_compact_blocks,
+    scan_range, total_zat, OpenResult, ReceivedNote, ViewKeys, SCAN_CHUNK_BLOCKS,
 };
 use crate::sweep::{sweep, NoteRef, SweepOutcome, SweepRequest};
 
-/// How often the progress callback fires, in blocks.
-///
-/// Every block would be one JS call per 75 s of chain history and would dominate a long
-/// scan; 100 keeps a progress bar smooth without the callback becoming the workload.
-const PROGRESS_EVERY: u32 = 100;
+// The progress callback fires once per decrypted chunk of `SCAN_CHUNK_BLOCKS` blocks,
+// which is also the unit of parallel work. Calling it per block would be one JS call per
+// 75 s of chain history and would start to be the workload; a chunk keeps a progress bar
+// smooth without that.
 
 /// Opens an envelope: derive, sync, trial-decrypt, and report the notes received.
 ///
@@ -105,23 +105,29 @@ async fn open_envelope_inner(
         .map_err(|e| format!("GetBlockRange failed: {}", e.message()))?
         .into_inner();
 
+    // Blocks arrive one at a time and are decrypted a chunk at a time. The chunk is what
+    // gives the threaded build something worth handing rayon (see
+    // [`SCAN_CHUNK_BLOCKS`]); in the single-threaded build it is the same loop as before,
+    // run over a buffer instead of over one block. Either way the chunks are consumed in
+    // the order the stream produced them and `scan_compact_blocks` keeps chain order
+    // inside each one, so the hits come out in exactly the order they used to.
     let mut hits: BTreeSet<(u32, TxId)> = BTreeSet::new();
     let mut scanned: u32 = 0;
+    let mut chunk: Vec<CompactBlock> = Vec::with_capacity(SCAN_CHUNK_BLOCKS);
     report(on_progress, 0, scanned_blocks);
 
     while let Some(block) = stream.next().await {
-        let block = block.map_err(|e| format!("block stream failed: {}", e.message()))?;
-        let height = u32::try_from(block.height)
-            .map_err(|_| format!("block height {} is absurd", block.height))?;
-
-        for txid in scan_compact_block(&block, &keys) {
-            hits.insert((height, txid));
-        }
-
-        scanned += 1;
-        if scanned % PROGRESS_EVERY == 0 {
+        chunk.push(block.map_err(|e| format!("block stream failed: {}", e.message()))?);
+        if chunk.len() == SCAN_CHUNK_BLOCKS {
+            hits.extend(scan_compact_blocks(&chunk, &keys)?);
+            scanned += chunk.len() as u32;
+            chunk.clear();
             report(on_progress, scanned, scanned_blocks);
         }
+    }
+    if !chunk.is_empty() {
+        hits.extend(scan_compact_blocks(&chunk, &keys)?);
+        scanned += chunk.len() as u32;
     }
     report(on_progress, scanned, scanned_blocks);
 

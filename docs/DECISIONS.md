@@ -5,6 +5,38 @@ the evidence it rests on. If something here contradicts another doc, this file w
 
 ## 2026-09-21
 
+### D18 The witness walk is capped at 120 blocks
+
+**Decision.** The sweep's anchor is `min(tip, newest note height + ANCHOR_WALK_CAP)` with
+`ANCHOR_WALK_CAP = 120` blocks — about two and a half hours of mainnet at 75 s per block.
+The old rule walked all the way to the tip whenever the envelope was within ~1,500 blocks
+of it, and fell back to the note's own block beyond that. Also: in the threaded wasm
+package, the open scan's trial decryption now runs on the rayon pool M4 built for proving
+(PERF-2026-09-21.md §7, first bullet).
+
+**Why.** The witness stage replays one block per block of distance, and the envelope ages.
+A 777-block-old envelope replayed 777 blocks and cost 28-32 s; a month-old one would
+replay about 35,000. The cap makes that cost constant instead of a function of how long
+the link sat unopened. The recipient who opens a link minutes after it was funded — the
+normal case — is unaffected, because the tip is then the smaller of the two terms.
+
+**This is a privacy/latency trade-off, not a correctness one.** Zebra accepts a spend
+against the root of **any** finalized Ironwood tree state, so an anchor 120 blocks past
+the note is as consensus-valid as the tip. The M3 spike verified a same-block anchor
+against mainnet, which is the extreme case of the same rule. What the cap costs is
+anonymity-set freshness: an observer reading an old envelope's anchor learns the
+transaction was built against a tree state no later than `note + 120`, a narrower window
+than "somewhere near the tip". Anyone reading the anchor already knows the funding
+transaction, and that is the same information the rejected same-block anchor would have
+leaked in full.
+
+Every correctness check is untouched. The replayed Ironwood root is still compared against
+the server's `GetTreeState` at every note block, the anchor root is still the server's own,
+and `WitnessScan::finish` still refuses a sweep whose replay disagrees with the chain.
+
+**Evidence.** Measured 2026-09-21 on the fee envelope from the private M3-DEST.md, dry run,
+nothing broadcast: [../web/docs/PERF-2026-09-21.md](../web/docs/PERF-2026-09-21.md) §8.
+
 ### D17 Phone performance measured
 
 **Decision.** Publish the phone figure as measured rather than estimated, and stop
