@@ -42,6 +42,12 @@ export interface FoundNote {
   height: number;
   txid: string;
   pool: Pool;
+  /**
+   * Index of this note's action within its pool's list in the transaction. M3 needs it
+   * to witness the exact note it spends: one transaction can carry several Ironwood
+   * actions and only one of them is the envelope's.
+   */
+  action_index: number;
 }
 
 /**

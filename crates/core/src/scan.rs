@@ -57,6 +57,10 @@ pub struct ReceivedNote {
     pub txid: String,
     /// `"ironwood"`, `"orchard"` or `"sapling"`.
     pub pool: &'static str,
+    /// Index of the action (or Sapling output) this note arrived in, within its pool's
+    /// list in the transaction. M3 needs it to witness the exact note it is spending:
+    /// one transaction can carry several Ironwood actions and only one of them is ours.
+    pub action_index: usize,
 }
 
 /// Everything an envelope scan found.
@@ -184,11 +188,7 @@ fn compact_tx_is_ours(tx: &CompactTx, ivks: &[PreparedIncomingViewingKey]) -> bo
 }
 
 /// Parses a raw transaction as served by lightwalletd.
-pub fn parse_transaction(
-    raw: &[u8],
-    height: u32,
-    network: Network,
-) -> Result<Transaction, String> {
+pub fn parse_transaction(raw: &[u8], height: u32, network: Network) -> Result<Transaction, String> {
     let branch = BranchId::for_height(&network, BlockHeight::from_u32(height));
     Transaction::read(raw, branch).map_err(|e| format!("could not parse transaction: {e}"))
 }
@@ -222,6 +222,7 @@ pub fn notes_from_transaction(
                 height,
                 txid: txid.clone(),
                 pool: pool_name(out.value_pool()),
+                action_index: out.index(),
             });
         }
     }
@@ -239,6 +240,7 @@ pub fn notes_from_transaction(
                 height,
                 txid: txid.clone(),
                 pool: pool_name(out.value_pool()),
+                action_index: out.index(),
             });
         }
     }
@@ -302,10 +304,12 @@ pub fn normalize_endpoint(url: &str) -> Result<String, String> {
 mod tests {
     use super::*;
 
-
     #[test]
     fn scan_range_uses_the_birthday_when_given() {
-        assert_eq!(scan_range(Some(3_490_437), 3_490_472), (3_490_437, false, 36));
+        assert_eq!(
+            scan_range(Some(3_490_437), 3_490_472),
+            (3_490_437, false, 36)
+        );
     }
 
     #[test]
@@ -318,7 +322,10 @@ mod tests {
 
     #[test]
     fn scan_range_clamps_a_birthday_past_the_tip() {
-        assert_eq!(scan_range(Some(5_000_000), 3_490_472), (3_490_472, false, 1));
+        assert_eq!(
+            scan_range(Some(5_000_000), 3_490_472),
+            (3_490_472, false, 1)
+        );
     }
 
     #[test]
@@ -361,6 +368,7 @@ mod tests {
             height: 1,
             txid: String::new(),
             pool: "ironwood",
+            action_index: 0,
         };
         assert_eq!(total_zat(&[]), Ok(0));
         assert_eq!(total_zat(&[note(130_000), note(70_000)]), Ok(200_000));

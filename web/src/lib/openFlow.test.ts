@@ -23,7 +23,16 @@ function run(events: OpenEvent[], from: OpenState = initialOpenState): OpenState
 
 const FOUND: OpenResult = {
   found: true,
-  notes: [{ amount_zat: "130000", memo: "Zenvelope M1", height: 3490472, txid: "ab", pool: "ironwood" }],
+  notes: [
+    {
+      amount_zat: "130000",
+      memo: "Zenvelope M1",
+      height: 3490472,
+      txid: "ab",
+      pool: "ironwood",
+      action_index: 1,
+    },
+  ],
   total_zat: "130000",
   tip_height: 3490500,
   birthday: 3490437,
