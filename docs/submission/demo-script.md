@@ -1,6 +1,6 @@
 # Demo video script — 3 minutes
 
-One run against `<DEMO_URL>`, COOP/COEP on, footer `proving: 4 threads`. Only waiting is
+One run against `https://zenvelope.netlify.app`, COOP/COEP on, footer `proving: 4 threads`. Only waiting is
 sped up, clock visible. The Solana leg is a **dry quote**; narration reads the captions.
 
 | Time | On screen |
@@ -15,7 +15,7 @@ sped up, clock visible. The Solana leg is a **dry quote**; narration reads the c
 | 1:40–2:05 | **Sent**, with the txid; the explorer link clicked — `mainnet.zcashexplorer.app/transactions/ba0f91cfe7ca33dd269b692bf80027df2681a321215e90ab28c2a56260fa2aad`, confirmed, shielded outputs. |
 | 2:05–2:18 | A second envelope → the Solana card. Trust boundary: four points, button disabled. Tick **I understand this leaves the shielded pool**. |
 | 2:18–2:35 | **USDC** → **Generate a keypair here**; the base58 secret shows once, tick "I saved this key". The dry quote: what arrives, both dollar figures, the spread, "about 8 minutes", "Includes a 0.25% service fee to the swap provider". **Do not** click Get deposit address. |
-| 2:35–3:00 | New tab: `0.001`, **Number of envelopes** `25`, **Create envelopes**; the table of 25 links, then **Download CSV** opened on `index,link,address,envelope_zec,send_zec,memo,payment_uri`. End card: `<DEMO_URL>`. |
+| 2:35–3:00 | New tab: `0.001`, **Number of envelopes** `25`, **Create envelopes**; the table of 25 links, then **Download CSV** opened on `index,link,address,envelope_zec,send_zec,memo,payment_uri`. End card: `https://zenvelope.netlify.app`. |
 
 Say **open**, **receive**, **send it on**: the drainer-lure word starting "cl-" is banned
 on every screen and in every take. A re-take after broadcast needs a second funded

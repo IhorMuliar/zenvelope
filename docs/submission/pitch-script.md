@@ -64,7 +64,7 @@ inside the browser.
 **Roadmap and ask — 2:40–3:00**
 
 > Next: group envelopes funded from one wallet, a measured phone proving time, and a
-> hosted build anyone can open at `<DEMO_URL>`. We are asking the Zcash track to back the
+> hosted build anyone can open at `https://zenvelope.netlify.app`. We are asking the Zcash track to back the
 > case where a shielded payment reaches somebody who has nothing yet. The code is MIT
 > today.
 
@@ -74,9 +74,9 @@ inside the browser.
 | --- | --- |
 | 0:00 | The diagram, animated arrow by arrow |
 | 0:20 | A phone chat, "what's your address?", then an abandoned install |
-| 0:40 | `<DEMO_URL>`: **Create envelope**, the link, QR, breakdown |
+| 0:40 | `https://zenvelope.netlify.app`: **Create envelope**, the link, QR, breakdown |
 | 1:00 | URL bar, the secret after `#` highlighted, network panel carrying none of it; then `/e` on mainnet — scan bar, reveal, footer `proving: 4 threads` |
 | 1:25 | Three stills: zip-0324, zplash.vercel.app, the Vizor v0.0.55 note |
 | 1:55 | The explorer on 281e9f7b…341d43, then `ba0f91cfe7ca33dd269b692bf80027df2681a321215e90ab28c2a56260fa2aad`; tests green |
 | 2:20 | The review screen's fee lines, then README "What we are not" |
-| 2:40 | The group table and CSV, then the `<DEMO_URL>` end card |
+| 2:40 | The group table and CSV, then the `https://zenvelope.netlify.app` end card |

@@ -12,7 +12,7 @@ opens the link in a browser, sees the amount for the first time, and moves it to
 address, a wallet the page makes for them, or — with the privacy cost spelled out first —
 USDC or SOL on Solana. The amount is not in the link, so forwarding it through a chat app
 discloses nothing, and nobody holds the funds. Mainnet, MIT.
-Repo `https://github.com/IhorMuliar/zenvelope` · Demo `<DEMO_URL>` · Video `<DEMO_VIDEO_URL>`
+Repo `https://github.com/IhorMuliar/zenvelope` · Demo `https://zenvelope.netlify.app` · Video `<DEMO_VIDEO_URL>`
 
 ## RPC Fast
 
@@ -23,7 +23,7 @@ compact-block streaming plus one send. We stream from `zjs.zec.rocks/mainnet` wi
 ChainSafe as failover — a 64-block scan to the tip took 2.0 s, and a sweep's witness
 stage costs 8–9 s of round trips, the largest non-proving cost in the flow. CORS-correct
 gRPC-web with headroom moves that number, and we would publish the before and after.
-Repo `https://github.com/IhorMuliar/zenvelope` · Demo `<DEMO_URL>`
+Repo `https://github.com/IhorMuliar/zenvelope` · Demo `https://zenvelope.netlify.app`
 
 ## Pitch bounty
 
@@ -42,4 +42,4 @@ Pitch `<PITCH_URL>` · Repo `https://github.com/IhorMuliar/zenvelope`
 > address, and the amount is not in the link until it is opened.
 > It is live on mainnet — create, pay by QR from a phone, open in a browser, the spend
 > proved in that browser in about 24 seconds; 5 minutes is plenty.
-> Repo `https://github.com/IhorMuliar/zenvelope`, demo `<DEMO_URL>`. Thank you — `<NAME>`
+> Repo `https://github.com/IhorMuliar/zenvelope`, demo `https://zenvelope.netlify.app`. Thank you — `<NAME>`

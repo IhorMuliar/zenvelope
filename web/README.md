@@ -494,6 +494,61 @@ repository can assert the live response headers; the check is to run
 `curl -sI https://<host>/e` after a deploy and compare it with
 `public/_headers`.
 
+## Deploy
+
+Live at <https://zenvelope.netlify.app>, on Netlify, by **direct upload**: the
+build happens here and the finished `dist/` is pushed. The host never builds,
+never sees the repository and never needs a token of its own. DECISIONS D16 has
+the reasoning and what the free tier costs us.
+
+The token lives outside the repository, in
+`/root/.config/zenvelope/cloudflare.env`-style fashion at
+`/root/.config/zenvelope/netlify.env` (`chmod 600`), and is a Netlify personal
+access token from **User settings → Applications → Personal access tokens**.
+Nothing about it belongs in git.
+
+```sh
+# 1. Build both WASM packages and the app. Do NOT set VITE_FEE_ADDRESS:
+#    the flat fee stays off until a real fee address exists (D13).
+./scripts/build-core.sh
+cd web && npm ci && npm run build && cd ..
+
+# 2. dist/ must contain both packages and the header files.
+ls web/dist/assets/*.wasm web/dist/wasm/core-mt/*.wasm web/dist/_headers web/dist/_redirects
+
+# 3. Push it.
+set -a; . /root/.config/zenvelope/netlify.env; set +a
+npx --yes netlify-cli deploy --dir=web/dist --prod --no-build \
+  --site "$NETLIFY_SITE_ID"
+
+# 4. Verify what the host actually sends, on the page, the route and the wasm.
+for p in / /e /wasm/core-mt/zenvelope_core_bg.wasm; do
+  curl -sI "https://zenvelope.netlify.app$p" |
+    grep -iE '^HTTP|^cross-origin|^content-security|^strict-transport|^x-content-type|^content-type'
+done
+```
+
+Expect COOP `same-origin`, COEP `require-corp`, CORP `same-origin`, the full
+CSP, HSTS, `nosniff`, and `content-type: application/wasm` on the two `.wasm`
+files. In the page, the footer must read `proving: 4 threads` and
+`window.crossOriginIsolated` must be `true`; a single-thread footer means the
+isolation headers did not arrive.
+
+**The first deploy is invisible.** On Netlify's credit-based plans a new project
+is private by default and answers `401` behind a team-login redirect, even
+though the CLI prints "Deploy is live!". Press **Make public** in the project
+overview once, then re-run the `curl` check.
+
+**Budget.** The free plan is a hard 300 credits a month: 20 credits per GB of
+bandwidth and **15 credits per production deploy**. Iterate on Deploy Previews,
+which are free, and promote rarely. If the credits run out, every project on the
+team is paused until the next cycle.
+
+**Moving to Cloudflare Pages** is a re-upload: `public/_headers` and
+`public/_redirects` are the whole configuration there, and
+`npx wrangler pages deploy web/dist --project-name zenvelope` with
+`CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` in the environment does it.
+
 ## Status
 
 M1: create a link. **M2 is done**: `/e` opens it — sealed envelope, in-browser

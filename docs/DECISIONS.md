@@ -5,6 +5,74 @@ the evidence it rests on. If something here contradicts another doc, this file w
 
 ## 2026-09-21
 
+### D16 Host: Netlify, by direct upload
+
+**Decision.** Ship on **Netlify**, deployed by `netlify deploy --prod --dir=web/dist`
+from a build made on the droplet — no CI build on the host, no Git integration. Live at
+<https://zenvelope.netlify.app>. Cloudflare Pages is the better free tier on the numbers
+and stays the documented migration target; `public/_headers` is the file both hosts read,
+so moving is a re-upload and nothing else. This closes what D9 left open.
+
+**Why Netlify, given that.** It is the account that exists. The droplet's browser profile
+is signed into Netlify and not into Cloudflare, and the account rule on this project
+forbids creating accounts or signing in. A live demo on the second-best tier beats a
+better tier nobody can deploy to.
+
+**Why Cloudflare Pages is better on the numbers**, and what we accept by not using it:
+
+1. **Bandwidth.** Cloudflare Pages: *"On both free and paid plans, requests to static
+   assets are free and unlimited."* Netlify's free plan is a **hard 300 credits per
+   month**, not purchasable on Free, and bandwidth costs **20 credits per GB** — a
+   ceiling of **15 GB/month**. Our cold load is ~1.2 MB over the wire (the 2.2 MB WASM
+   gzips to 1.04 MB), so that is roughly **12,000 cold loads a month**. Ample for
+   judging; not ample for a front page.
+2. **Cost of deploying.** Netlify charges **15 credits per production deploy** — twenty
+   deploys consume the entire monthly allotment before a single visitor arrives. Deploy
+   Previews and branch deploys are free, so iterate there and promote rarely.
+   Cloudflare's equivalent limit is 500 *builds* per month and direct upload uses none.
+3. **What happens at zero.** When the credits run out, **every project on the team is
+   paused** and serves a `Site not available` page until the next cycle. That is the one
+   failure mode that would cost us the demo, so **watch Usage & billing** during judging.
+   The account currently also holds a 400-credit promotional balance.
+
+**What both hosts do equally well.** Headers were never the deciding factor. Netlify
+reads `_headers` from the publish directory *and* `netlify.toml`, which
+`src/lib/headers.test.ts` keeps byte-equivalent; Cloudflare Pages reads `_headers` only.
+Verified live on 2026-09-21 with `curl -sI`: COOP `same-origin`, COEP `require-corp`,
+CORP `same-origin`, the full CSP, HSTS (Netlify adds `preload` of its own),
+`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` — on `/`, on `/e`, and on both
+`.wasm` files, which are served as `application/wasm`. `/e` returns 200 through the
+`_redirects` SPA rule. The page reports `crossOriginIsolated === true` and
+`proving: 4 threads`.
+
+**Commercial use.** Neither free tier forbids it. Cloudflare's Service-Specific Terms
+restrict *the CDN* from serving "video or a disproportionate percentage of pictures,
+audio files, or other large files" without a paid service, and name the Developer
+Platform — which is what Pages is — as the product for exactly that; the clause does not
+reach Pages. Netlify's constraint is the credit ceiling, not the purpose. Neither asks
+for a credit card to start.
+
+**One surprise worth writing down.** On Netlify's credit-based plans a new project is
+**private by default** and answers `401` behind a team-login redirect until someone
+presses **Make public** in the project overview. A deploy that reports "Deploy is live!"
+can still be invisible to the world. Check with `curl -sI` after every first deploy.
+
+**Custom domain.** Both allow one on the free plan, so the domain deferred in D9 can be
+attached later without changing hosts.
+
+**Evidence.** Fetched 2026-09-21:
+- <https://developers.cloudflare.com/pages/functions/pricing/> — static asset requests
+  free and unlimited on both plans.
+- <https://developers.cloudflare.com/pages/platform/limits/> — 25 MiB per asset, 20,000
+  files, 500 builds/month, 100 header rules at 2,000 characters.
+- <https://www.netlify.com/pricing/> and
+  <https://docs.netlify.com/manage/accounts-and-billing/billing/billing-for-credit-based-plans/how-credits-work/>
+  — 300 credits/month hard limit, 20 credits/GB, 15 credits per production deploy, all
+  projects paused at zero.
+- <https://www.cloudflare.com/service-specific-terms-application-services/> — the CDN
+  large-file clause and the Developer Platform carve-out.
+- Live verification of the deployed site, 2026-09-21.
+
 ### D15 The link secret is stripped from the URL once it has been read
 
 **Decision.** `/e` reads `location.hash` once at mount, hands the fragment to the core,

@@ -4,6 +4,8 @@
 
 Built for the [Colosseum Crypto World's Fair 2026](https://colosseum.com), Zcash track.
 
+**Live demo: <https://zenvelope.netlify.app>** — open it in any browser, no wallet needed.
+
 ## What it is
 
 Zenvelope takes the idea behind [ZIP-324](https://zips.z.cash/zip-0324), Zcash's 2019
