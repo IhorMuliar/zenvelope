@@ -527,6 +527,43 @@ pub fn new_wallet_js(network: &str, birthday: u32) -> Result<NewWallet, JsValue>
     })
 }
 
+/* ----------------------------------------------------- M4: threaded proving */
+
+/// wasm-bindgen-rayon's `initThreadPool(n) -> Promise`, present only in the `multicore`
+/// build. Re-exporting it is what puts it in the generated JS. The caller awaits it on
+/// the thread that instantiated the module, after `init()` and before any proving; it
+/// rejects with a `DataCloneError` on a page that is not cross-origin isolated.
+#[cfg(all(feature = "multicore", target_arch = "wasm32"))]
+pub use wasm_bindgen_rayon::init_thread_pool;
+
+/// Whether this package was built with `--features multicore`.
+///
+/// The loader uses it as a build stamp: it asks the module what it is rather than
+/// inferring it from which file it happened to fetch, so a mis-copied package is a
+/// caught error and not a silently single-threaded sweep.
+#[wasm_bindgen]
+pub fn is_threaded() -> bool {
+    cfg!(feature = "multicore")
+}
+
+/// How many threads the proving pool actually has.
+///
+/// 1 on the single-threaded package, and 1 on the threaded one until `initThreadPool`
+/// has resolved. This is the number the UI footer reports, read *after* the pool is up,
+/// so it is measured rather than hoped for.
+#[cfg(feature = "multicore")]
+#[wasm_bindgen]
+pub fn thread_count() -> usize {
+    rayon::current_num_threads()
+}
+
+/// See the `multicore` twin above. Without rayon there is exactly one thread.
+#[cfg(not(feature = "multicore"))]
+#[wasm_bindgen]
+pub fn thread_count() -> usize {
+    1
+}
+
 /// Coerces a BigInt, decimal string, or safe-integer number into a `u64`.
 fn js_to_u64(value: &JsValue) -> Result<u64, String> {
     if let Some(s) = value.as_string() {

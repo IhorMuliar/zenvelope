@@ -271,8 +271,51 @@ Builder::new(
 `zcash_primitives` 0.30.1 with features `circuits` + `std`. `circuits` is what makes
 `build` exist at all and what pulls the Orchard/Ironwood halo2 circuit into the wasm;
 `std` is what gives `build` the process-wide proving-key cache described below.
-`multicore` stays **off**: it would pull rayon, and a plain `--target web` build has no
-threads.
+
+`zcash_primitives`' own `multicore` stays **off**; this crate turns on
+`orchard/multicore` directly, through its own `multicore` feature, which is the M4
+threaded build. See **Two wasm packages** below.
+
+**`circuits` cannot be narrowed.** It is defined as `["orchard/circuit",
+"sapling/circuit"]`, and `Builder::build` — the only entry point that can produce a
+transaction — is `#[cfg(feature = "circuits")]`. Cargo features are additive, so there is
+no way to ask for the Orchard half without the Sapling half: taking `circuits` takes
+bellman and groth16 with it, even though [`NoSaplingProver`](#nosaplingprover) means no
+Groth16 proof is ever created. Splitting the feature upstream would need a
+`[patch.crates-io]` fork of `zcash_primitives`, which this crate does not do (same reason
+as in **Warming the proving key** below: it forks a consensus-critical crate). The cost
+of not doing it is small and was measured: the shipped wasm contains no `bellman` or
+`groth16` symbols at all, because nothing reachable from `build::<_, NoSaplingProver,
+NoSaplingProver, _>` calls them and LTO plus `wasm-ld` drop the lot.
+
+### Two wasm packages
+
+`scripts/build-core.sh` builds this crate **twice**:
+
+| | `web/src/wasm/core` | `web/src/wasm/core-mt` |
+| --- | --- | --- |
+| features | default | `multicore` |
+| toolchain | the default stable one | nightly, `-Z build-std=std,panic_abort` |
+| memory | its own, exported | **imported and shared**, max 2 GB |
+| needs | nothing | a cross-origin-isolated page |
+| proving | one thread | a `wasm-bindgen-rayon` pool |
+
+`multicore` turns on `orchard/multicore`, which is what puts rayon inside halo2's MSM and
+FFT, and links `wasm-bindgen-rayon` so the browser can give that rayon real threads. The
+threaded module imports a *shared* memory, so it only instantiates where
+`SharedArrayBuffer` exists; that is why both packages ship and `web/src/core/worker.ts`
+feature-detects between them, falling back to the single-threaded one on any failure.
+
+Two extra exports exist for that loader, in both packages:
+
+| Export | |
+| --- | --- |
+| `is_threaded()` | `() => boolean` — the build stamp: true only in the `multicore` package |
+| `thread_count()` | `() => number` — `rayon::current_num_threads()`, or 1. Meaningful only after `initThreadPool` has resolved |
+
+and the `multicore` package additionally exports `wasm-bindgen-rayon`'s
+`initThreadPool(n) -> Promise`, which must be awaited on the thread that instantiated the
+module, after `init()` and before anything proves.
 
 The Ironwood spend refuses a note that is not `NoteVersion::V3`. That is the type system
 restating the pool split from M2: an Orchard (V2) note cannot be spent into an Ironwood
@@ -470,7 +513,14 @@ const uri = core.payment_uri(address, 10_000n + 100_000n, "Coffee");
 | `classify_address` | `(address: string, network: "main" \| "test") => { kind: Kind, reason: string \| null }` — never throws on a bad address |
 | `new_wallet` | `(network: "main" \| "test", birthday: number) => { mnemonic: string, address: string, ufvk: string, birthday: number }` |
 | `warm_proving_key` | `() => Promise<number>` — builds the Ironwood proving key now; resolves with the milliseconds it took |
+| `is_threaded` | `() => boolean` — true only in the `multicore` package |
+| `thread_count` | `() => number` — threads in the proving pool; 1 until `initThreadPool` resolves |
+| `initThreadPool` | `(n: number) => Promise<void>` — **`multicore` package only** |
 | `sweep_envelope` | see below |
+
+From M4 the web app never calls these on its main thread: they are reached over a
+message protocol from `web/src/core/worker.ts`, and every one of them is a promise on the
+page's side. The signatures above are the wasm's own, which is what the worker sees.
 
 The `Opened` object below is the field-for-field contract `web/src/core/types.ts`
 declares, including `birthday`, `birthday_defaulted` and `scanned_blocks`.

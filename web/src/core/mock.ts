@@ -10,7 +10,7 @@
 import type {
   AddressClass,
   Derived,
-  LoadedCore,
+  SyncCore,
   Network,
   NewWallet,
   NoteRef,
@@ -399,7 +399,7 @@ export async function sweepEnvelope(
   };
 }
 
-export const mockCore: LoadedCore = {
+export const mockCore: SyncCore = {
   isMock: true,
   derive,
   generate_secret: generateSecret,

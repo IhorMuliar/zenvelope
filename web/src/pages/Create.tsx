@@ -80,14 +80,16 @@ export function Create() {
       if (!core) setCore(c);
 
       // The secret lives in this closure and in the rendered link. Nowhere else.
-      const secret = c.generate_secret();
+      // Every one of these is a round trip to the core worker: the wasm lives there
+      // and only there, so the secret is posted to it and kept nowhere on this side.
+      const secret = await c.generate_secret();
 
       const chain = await fetchChainHeight(LIGHTWALLETD[network], LIGHTWALLETD_FALLBACK[network]);
-      const derived = c.derive(secret, network);
-      const fragment = c.build_fragment(secret, chain?.height);
+      const derived = await c.derive(secret, network);
+      const fragment = await c.build_fragment(secret, chain?.height);
       const breakdown = feeBreakdown(v.zat, FLAT_FEE_ZAT);
       const trimmed = message.trim();
-      const uri = c.payment_uri(
+      const uri = await c.payment_uri(
         derived.address,
         breakdown.totalZat,
         trimmed === "" ? undefined : trimmed,

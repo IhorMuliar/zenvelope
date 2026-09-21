@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { LIGHTWALLETD, LIGHTWALLETD_FALLBACK } from "../config";
-import { loadCore } from "../core";
+import { loadCore, provingNote } from "../core";
 import type { FoundNote, LoadedCore, Network } from "../core/types";
 import {
   BAD_FRAGMENT_COPY,
@@ -26,6 +26,8 @@ export function Open() {
   const [state, dispatch] = useReducer(openReducer, initialOpenState);
   const [link, setLink] = useState<Link | null>(null);
   const [isMock, setIsMock] = useState(false);
+  /** "proving: 4 threads" / "proving: 1 thread": which wasm package the worker loaded. */
+  const [proving, setProving] = useState<string | null>(null);
 
   /**
    * The secret lives in this ref and in the URL fragment, nowhere else: not in
@@ -50,11 +52,15 @@ export function Open() {
     }
 
     loadCore()
-      .then((c) => {
+      .then(async (c) => {
         if (!alive) return;
-        const parsed = c.parse_fragment(frag);
-        const derived = c.derive(parsed.secret, network);
+        // Both of these are now round trips to the core worker, which is the only
+        // thread that ever holds the wasm. The secret goes there and nowhere else.
+        const parsed = await c.parse_fragment(frag);
+        const derived = await c.derive(parsed.secret, network);
+        if (!alive) return;
         core.current = c;
+        setProving(provingNote(c));
         secret.current = parsed.secret;
         setIsMock(c.isMock);
         setLink({ address: derived.address, birthday: parsed.birthday, network });
@@ -105,6 +111,7 @@ export function Open() {
   };
 
   const badge = isMock ? <MockBadge /> : null;
+  const provingFooter = proving ? <ProvingNote note={proving} /> : null;
 
   if (state.phase === "invalid") {
     return (
@@ -141,6 +148,7 @@ export function Open() {
         <p className="fine" data-testid="open-fineprint">
           Opening scans the Zcash chain from your browser. Nothing leaves this page.
         </p>
+        {provingFooter}
         <details className="sealed-details">
           <summary data-testid="open-address-toggle">Check the envelope address</summary>
           <code className="value mono" data-testid="open-address">
@@ -186,6 +194,7 @@ export function Open() {
         notes={state.result.notes}
         tipHeight={state.result.tip_height}
         badge={badge}
+        provingFooter={provingFooter}
         core={core.current}
         secret={secret.current}
         network={link.network}
@@ -218,6 +227,7 @@ export function Open() {
       <p className="fine">
         The secret in this link stayed in your browser. Nothing about it was sent anywhere.
       </p>
+      {provingFooter}
     </section>
   );
 }
@@ -226,6 +236,7 @@ function Opened({
   notes,
   tipHeight,
   badge,
+  provingFooter,
   core,
   secret,
   network,
@@ -233,6 +244,7 @@ function Opened({
   notes: FoundNote[];
   tipHeight: number;
   badge: React.ReactNode;
+  provingFooter: React.ReactNode;
   core: LoadedCore;
   /** Passed down to the sweep and to nothing else. */
   secret: string;
@@ -318,6 +330,7 @@ function Opened({
         The secret in this link stayed in your browser. Nothing about this envelope was sent
         anywhere.
       </p>
+      {provingFooter}
     </section>
   );
 }
@@ -345,6 +358,19 @@ function FiatReveal({ amount }: { amount: string }) {
     <p className="hint" data-testid="fiat-answer">
       {amount}, and that is all we will tell you. Asking a price server for a rate would tell
       it that you just opened an envelope, so this milestone shows ZEC only.
+    </p>
+  );
+}
+
+/**
+ * The footer note. Tiny on purpose: it is not product copy, it is a statement of which
+ * of the two wasm packages is doing the proving, so a slow sweep can be explained
+ * without opening the console.
+ */
+function ProvingNote({ note }: { note: string }) {
+  return (
+    <p className="fine proving-note" data-testid="proving-note">
+      {note}
     </p>
   );
 }

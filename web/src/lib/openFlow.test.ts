@@ -172,11 +172,13 @@ describe("runOpen", () => {
           _secret: string,
           _birthday: number | undefined,
           _network: "main" | "test",
+          // Optional, exactly as the contract has it: `runOpen` always passes one,
+          // but the type the core worker's client satisfies does not require it.
           url: string,
-          onProgress: ProgressFn,
+          onProgress?: ProgressFn,
         ) => {
           calls.push(url);
-          return impl(url, onProgress);
+          return impl(url, onProgress ?? (() => {}));
         },
       },
     };
