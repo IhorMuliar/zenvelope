@@ -36,14 +36,18 @@ import { effectiveCost, formatAssetAmount, formatUsd } from "../lib/oneclick";
 import {
   FUNDS_SAFE_COPY,
   SWEEP_FAILED_COPY,
+  deviceLine,
   elapsedLabel,
   initialSendState,
   needsUnloadWarning,
   sendReducer,
   showSwapUi,
   stageChecklist,
+  timingRows,
+  timingText,
 } from "../lib/sweepFlow";
 import { checkSwapPlan } from "../lib/solanaFlow";
+import { CopyButton } from "./CopyButton";
 import { CopyField } from "./CopyField";
 import { SolanaExit, type SwapPlan } from "./SolanaExit";
 import { SwapTracker } from "./SwapTracker";
@@ -84,6 +88,12 @@ interface Props {
    * this envelope and this same link opens it again (DECISIONS D14).
    */
   envelopeAddress: string;
+  /**
+   * How long the scan that opened this envelope took, in milliseconds. It is
+   * measured by the open page — the only place that knows when the tap on "Open
+   * envelope" happened — and shown in the Timing block at the end.
+   */
+  openMs?: number | null;
 }
 
 export function SendOn({
@@ -93,6 +103,7 @@ export function SendOn({
   notes,
   tipHeight,
   envelopeAddress,
+  openMs = null,
 }: Props) {
   const [state, dispatch] = useReducer(sendReducer, initialSendState);
   const [choice, setChoice] = useState<Choice>(null);
@@ -123,6 +134,8 @@ export function SendOn({
   const [transparentAck, setTransparentAck] = useState(false);
   const [atTransparentGate, setAtTransparentGate] = useState(false);
   const [warm, setWarm] = useState<"warming" | "ready" | "failed">("warming");
+  /** Wall clock of the background warm-up, for the Timing block. */
+  const [warmMs, setWarmMs] = useState<number | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const runId = useRef(0);
   /**
@@ -143,10 +156,15 @@ export function SendOn({
    */
   useEffect(() => {
     let alive = true;
+    const startedAt = Date.now();
     core
       .warm_proving_key()
       .then(() => {
-        if (alive) setWarm("ready");
+        if (!alive) return;
+        // Measured here rather than taken from the core's own answer: this is
+        // what the recipient waited, worker round trip and all.
+        setWarmMs(Date.now() - startedAt);
+        setWarm("ready");
       })
       .catch(() => {
         // A failed warm-up is not fatal: the sweep builds the key itself.
@@ -283,10 +301,10 @@ export function SendOn({
         // A dry run proves the transaction and never hands it to lightwalletd.
         !dryRun,
         (stage, detail) => {
-          if (id === runId.current) dispatch({ type: "stage", stage, detail });
+          if (id === runId.current) dispatch({ type: "stage", stage, detail, at: Date.now() });
         },
       );
-      if (id === runId.current) dispatch({ type: "result", result });
+      if (id === runId.current) dispatch({ type: "result", result, at: Date.now() });
     } catch (err) {
       const message = (err as Error)?.message?.trim();
       if (id === runId.current) {
@@ -391,6 +409,15 @@ export function SendOn({
     const received = BigInt(state.result.amount_to_destination_zat);
     // The core is the authority on what happened, not the flag that asked for it.
     const dry = state.result.broadcast === false;
+    // Both endings get the same block: a dry run is measured for exactly the
+    // reason a real one is, and it is the run we can repeat.
+    const rows = timingRows({ state, openMs, warmMs });
+    const device = deviceLine({
+      threads: core.threads,
+      hardwareConcurrency: navigator.hardwareConcurrency ?? 0,
+      userAgent: navigator.userAgent,
+      brave: hasBrave(navigator),
+    });
     return (
       <>
         <div className="card stack">
@@ -451,6 +478,24 @@ export function SendOn({
           ) : (
             <p data-testid="envelope-empty">The envelope is now empty.</p>
           )}
+          <div className="timing stack" data-testid="timing">
+            <h3 className="timing-heading">Timing</h3>
+            {rows.map((row) => (
+              <p className="row" key={row.key}>
+                <span className="label">{row.label}</span>
+                <span data-testid={`timing-${row.key}`}>{row.value}</span>
+              </p>
+            ))}
+            <p className="fine" data-testid="timing-device">
+              {device}
+            </p>
+            <CopyButton
+              value={timingText(rows, device)}
+              label="Copy the timings"
+              face="Copy timing"
+              testId="copy-timing"
+            />
+          </div>
         </div>
         {/*
           Only a real broadcast has anything for the rail to watch for — and only
@@ -854,4 +899,14 @@ function SwapReview({ plan }: { plan: SwapPlan }) {
       </p>
     </>
   );
+}
+
+/**
+ * Brave reports itself as Chrome in every user agent it sends, on purpose. The
+ * one thing that tells them apart is `navigator.brave`, which is a promise-based
+ * API; this reads only the marker's presence, which is synchronous and enough
+ * for a line of timing prose.
+ */
+function hasBrave(nav: Navigator): boolean {
+  return typeof (nav as Navigator & { brave?: unknown }).brave === "object";
 }

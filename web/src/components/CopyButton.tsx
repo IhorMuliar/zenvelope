@@ -4,6 +4,8 @@ interface Props {
   value: string;
   /** For a screen reader: "Copy link for envelope 3", not twelve identical "Copy"s. */
   label: string;
+  /** What the button says before it is pressed. "Copy" unless a caller says otherwise. */
+  face?: string;
   testId?: string;
 }
 
@@ -14,7 +16,7 @@ interface Props {
  * The clipboard is the only place the value goes. Nothing is logged, nothing is
  * stored, and the fallback path removes its textarea before it returns.
  */
-export function CopyButton({ value, label, testId }: Props) {
+export function CopyButton({ value, label, face = "Copy", testId }: Props) {
   const [copied, setCopied] = useState(false);
   const timer = useRef<number | undefined>(undefined);
 
@@ -38,7 +40,7 @@ export function CopyButton({ value, label, testId }: Props) {
 
   return (
     <button type="button" className="ghost copy-btn" aria-label={label} data-testid={testId} onClick={copy}>
-      {copied ? "Copied" : "Copy"}
+      {copied ? "Copied" : face}
     </button>
   );
 }

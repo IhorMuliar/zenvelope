@@ -244,6 +244,16 @@ answered 200, zcashblockexplorer.com did not resolve and blockchair answered
 401), and "The envelope is now empty." A failure shows the core's message, a
 retry button, and the line that the funds are still in the envelope.
 
+**What it cost.** Both endings — "Sent." and the `?dry=1` "Dry run complete." —
+carry a **Timing** block: open/scan, keys (warm), witness, proving, send and
+total tap-to-done, each to one decimal, over a device line reading `proving: 4
+threads · hardwareConcurrency 8 · Chrome on macOS`. The stamps are taken by the
+reducer in `src/lib/sweepFlow.ts` (`stageAt`, one per stage transition, first
+report wins), the scan is timed by `/e` and the warm-up by the card itself, and
+`timingRows`/`deviceLine`/`timingText` turn them into the block and into what
+"Copy timing" puts on the clipboard. Nothing is sent anywhere: it is on screen
+so a real device on a real envelope can be quoted.
+
 One sweep spends **every** note the scan found, in one transaction: the review
 screen shows their sum, and when there is more than one the screen says they all
 go together. Ironwood charges `max(spends, outputs)` actions, so a second note
@@ -346,15 +356,18 @@ into "Keys ready", a pasted `zs1` refused and the fixed unified address from
 `crates/core/TEST_VECTORS.md` accepted, the transparent warning and its higher
 fee, the new-wallet path with its 24 words and its checkbox gate, the review
 arithmetic, the four stages in order with a clock, and the done screen with the
-txid, the copy button and the explorer link. It also asserts that nothing was
-written to localStorage or sessionStorage, that no link or request carries the
-secret, and that the word "claim" is nowhere on any screen. Screenshots:
-[docs/m3-choose.png](docs/m3-choose.png),
+txid, the copy button, the explorer link and the Timing block — six
+measurements to one decimal, a device line, and a "Copy timing" button. It also
+asserts that nothing was written to localStorage or sessionStorage, that no link
+or request carries the secret, and that the word "claim" is nowhere on any
+screen. Screenshots: [docs/m3-choose.png](docs/m3-choose.png),
 [docs/m3-progress.png](docs/m3-progress.png),
-[docs/m3-done.png](docs/m3-done.png). The MOCK spends 3 s warming and 1 s per
-stage, so the timing under test is real even though the chain is not. Like the
-M2 MOCK group it skips itself when a wasm build is present: a real sweep is
-somebody's money and does not belong in an unattended test run.
+[docs/m3-done.png](docs/m3-done.png). The MOCK spends 3 s warming and four
+stages of different lengths adding up to 4 s (`MOCK_STAGE_TIMES`), so the timing
+under test is real even though the chain is not — and a stage row that measured
+its neighbour would show it. Like the M2 MOCK group it skips itself when a wasm
+build is present: a real sweep is somebody's money and does not belong in an
+unattended test run.
 
 `e2e/m5-solana.spec.ts` is the M5 proof, on the MOCK core, with 1Click answered by
 `page.route` from bodies recorded verbatim off the live API: the checkbox gate

@@ -320,7 +320,7 @@ export function newWallet(network: Network, birthday: number): NewWallet {
 }
 
 /**
- * MOCK sweep. One second per stage, then a made-up txid.
+ * MOCK sweep. Four stages of its own length, then a made-up txid.
  *
  * It touches no network and signs nothing: `lightwalletd_url` and the secret are
  * accepted and ignored so the call shape matches the real core exactly. Every note
@@ -328,7 +328,24 @@ export function newWallet(network: Network, birthday: number): NewWallet {
  * arithmetic on the number of notes it was given — which is what the done screen
  * then reports.
  */
-export const MOCK_STAGE_MS = 1000;
+/**
+ * What each stage costs, in milliseconds.
+ *
+ * They used to be a flat second each. They are deliberately different now: the
+ * done screen reports a duration per stage, and a block of four identical
+ * numbers cannot tell a right mapping from a wrong one. They still add up to the
+ * four seconds the flow has always taken, and none is short enough for a test to
+ * miss the stage while it is on screen.
+ */
+export const MOCK_STAGE_TIMES: Record<Exclude<SweepStage, "done">, number> = {
+  witness: 800,
+  keys: 700,
+  proving: 1300,
+  broadcast: 1200,
+};
+
+/** The whole mock sweep, tap to done. */
+export const MOCK_SWEEP_MS = Object.values(MOCK_STAGE_TIMES).reduce((a, b) => a + b, 0);
 
 /** ZIP-317, two actions. The transparent destination costs one more logical action. */
 export const MOCK_NETWORK_FEE_ZAT = 10000n;
@@ -390,7 +407,7 @@ export async function sweepEnvelope(
 
   for (const [stage, detail] of MOCK_STAGES) {
     on_stage(stage, detail);
-    await sleep(MOCK_STAGE_MS);
+    await sleep(MOCK_STAGE_TIMES[stage]);
   }
 
   // Ironwood charges max(spends, outputs) actions, padded to two, so the first two

@@ -547,6 +547,31 @@ progress.scan-bar:indeterminate::-webkit-progress-bar {
   margin: 0;
 }
 
+/* The Timing block on the done screen: a quiet, monospaced receipt of what this
+   device actually spent, under the money and above nothing. */
+.timing {
+  gap: 0.35rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--line);
+}
+
+.timing-heading {
+  margin: 0;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+}
+
+.timing .row {
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.timing .copy-btn {
+  align-self: flex-start;
+}
+
 .memo {
   margin: 0;
   font-size: 1.05rem;

@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { MOCK_NOTE, MOCK_STAGE_MS, MOCK_TIP_HEIGHT, mockCore } from "./mock";
+import { MOCK_NOTE, MOCK_SWEEP_MS, MOCK_TIP_HEIGHT, mockCore } from "./mock";
 import type { SweepStage } from "./types";
 import { sweepAmounts } from "../lib/amount";
 
@@ -81,7 +81,7 @@ describe.concurrent("sweep_envelope", () => {
     expect(result.broadcast).toBe(true);
     expect(result.raw_tx_hex).toBeNull();
     expect(result.anchor_height).toBe(MOCK_TIP_HEIGHT);
-  }, 4 * MOCK_STAGE_MS + 5000);
+  }, MOCK_SWEEP_MS + 5000);
 
   it("hands back the amounts the review screen worked out", async () => {
     const result = await mockCore.sweep_envelope(
@@ -100,7 +100,7 @@ describe.concurrent("sweep_envelope", () => {
     expect(result.network_fee_zat).toBe(expected.networkFeeZat.toString());
     expect(result.fee_zat).toBe("0");
     expect(result.amount_to_destination_zat).toBe(expected.receiveZat.toString());
-  }, 4 * MOCK_STAGE_MS + 5000);
+  }, MOCK_SWEEP_MS + 5000);
 
   it("charges the higher miner fee for a transparent destination", async () => {
     const result = await mockCore.sweep_envelope(
@@ -116,7 +116,7 @@ describe.concurrent("sweep_envelope", () => {
       () => {},
     );
     expect(result.network_fee_zat).toBe("15000");
-  }, 4 * MOCK_STAGE_MS + 5000);
+  }, MOCK_SWEEP_MS + 5000);
 
   it("takes the flat fee only when there is a fee address", async () => {
     const result = await mockCore.sweep_envelope(
@@ -133,7 +133,7 @@ describe.concurrent("sweep_envelope", () => {
     );
     expect(result.fee_zat).toBe("30000");
     expect(result.amount_to_destination_zat).toBe("90000");
-  }, 4 * MOCK_STAGE_MS + 5000);
+  }, MOCK_SWEEP_MS + 5000);
 
   it("keeps the signed transaction instead of sending when asked not to broadcast", async () => {
     const result = await mockCore.sweep_envelope(
@@ -150,7 +150,7 @@ describe.concurrent("sweep_envelope", () => {
     );
     expect(result.broadcast).toBe(false);
     expect(result.raw_tx_hex).toMatch(/^[0-9a-f]+$/);
-  }, 4 * MOCK_STAGE_MS + 5000);
+  }, MOCK_SWEEP_MS + 5000);
 
   it("spends every note it is given, and adds them up", async () => {
     const result = await mockCore.sweep_envelope(
@@ -171,7 +171,7 @@ describe.concurrent("sweep_envelope", () => {
     expect(result.network_fee_zat).toBe("10000");
     expect(result.amount_to_destination_zat).toBe(expected.receiveZat.toString());
     expect(BigInt(result.amount_to_destination_zat) + BigInt(result.network_fee_zat)).toBe(twice);
-  }, 4 * MOCK_STAGE_MS + 5000);
+  }, MOCK_SWEEP_MS + 5000);
 
   it("charges one more action for a third note", async () => {
     const result = await mockCore.sweep_envelope(
@@ -191,7 +191,7 @@ describe.concurrent("sweep_envelope", () => {
     expect(result.amount_to_destination_zat).toBe(
       sweepAmounts(thrice, "unified_orchard", 0n, 3).receiveZat.toString(),
     );
-  }, 4 * MOCK_STAGE_MS + 5000);
+  }, MOCK_SWEEP_MS + 5000);
 
   it("still takes a bare note object, as the M3 signature did", async () => {
     const [array, bare] = await Promise.all([
@@ -222,7 +222,7 @@ describe.concurrent("sweep_envelope", () => {
     ]);
     expect(bare.amount_to_destination_zat).toBe(array.amount_to_destination_zat);
     expect(bare.network_fee_zat).toBe(array.network_fee_zat);
-  }, 4 * MOCK_STAGE_MS + 5000);
+  }, MOCK_SWEEP_MS + 5000);
 
   it("refuses the same note twice: one nullifier cannot be spent twice", async () => {
     await expect(

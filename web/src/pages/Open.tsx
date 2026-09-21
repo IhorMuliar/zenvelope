@@ -30,6 +30,12 @@ export function Open() {
   const [isMock, setIsMock] = useState(false);
   /** "proving: 4 threads" / "proving: 1 thread": which wasm package the worker loaded. */
   const [proving, setProving] = useState<string | null>(null);
+  /**
+   * How long the scan took, tap to result. Only this page knows when the tap
+   * happened, so it measures and the send-on card shows it in its Timing block.
+   */
+  const [openMs, setOpenMs] = useState<number | null>(null);
+  const scanStartedAt = useRef<number | null>(null);
 
   /**
    * The secret lives in this ref and nowhere else: not in storage, not in a query
@@ -91,6 +97,7 @@ export function Open() {
     const s = secret.current;
     if (!c || !s || !link) return;
     const id = ++runId.current;
+    scanStartedAt.current = Date.now();
     try {
       const result = await runOpen({
         core: c,
@@ -105,7 +112,11 @@ export function Open() {
           if (id === runId.current) dispatch({ type: "attempt", attempt });
         },
       });
-      if (id === runId.current) dispatch({ type: "result", result });
+      if (id === runId.current) {
+        const started = scanStartedAt.current;
+        setOpenMs(started === null ? null : Date.now() - started);
+        dispatch({ type: "result", result });
+      }
     } catch (err) {
       if (id === runId.current) dispatch({ type: "failed", message: (err as Error).message });
     }
@@ -220,6 +231,7 @@ export function Open() {
         getSecret={getSecret}
         network={link.network}
         envelopeAddress={link.address}
+        openMs={openMs}
       />
     );
   }
@@ -266,6 +278,7 @@ function Opened({
   getSecret,
   network,
   envelopeAddress,
+  openMs,
 }: {
   notes: FoundNote[];
   tipHeight: number;
@@ -277,6 +290,8 @@ function Opened({
   network: Network;
   /** The envelope's own address: the Solana exit's default refund target (D14). */
   envelopeAddress: string;
+  /** Wall clock of the scan that got here, for the Timing block on the done screen. */
+  openMs: number | null;
 }) {
   const total = sumZat(notes.map((n) => n.amount_zat));
   const memo = notes.find((n) => n.memo && n.memo.trim() !== "")?.memo ?? null;
@@ -349,6 +364,7 @@ function Opened({
         notes={notes}
         tipHeight={tipHeight}
         envelopeAddress={envelopeAddress}
+        openMs={openMs}
       />
 
       <p className="fine">

@@ -399,6 +399,10 @@ describeOnMock("M5: the Solana exit", () => {
     );
     await expect(page.getByTestId("dry-run-deposit-address")).toHaveText(DEPOSIT_T1);
     await expect(page.getByTestId("dry-run-swap-note")).toContainText("still in the envelope");
+    // A dry run is measured like any other: the same Timing block, same lines.
+    await expect(page.getByTestId("timing-total")).toHaveText(/^\d+\.\d s$/);
+    await expect(page.getByTestId("timing-proving")).toHaveText(/^\d+\.\d s$/);
+    await expect(page.getByTestId("timing-device")).toContainText("hardwareConcurrency");
     await expect(page.getByTestId("envelope-intact")).toContainText("Nothing was sent");
     await expect(page.getByTestId("explorer-link")).toHaveCount(0);
     // Nothing was broadcast, so there is nothing for the rail to watch.

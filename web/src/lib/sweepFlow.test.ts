@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   FUNDS_SAFE_COPY,
+  browserFamily,
+  deviceLine,
+  formatSeconds,
+  platformName,
+  stageSpan,
+  timingRows,
+  timingText,
   SEND_STAGES,
   STAGE_LABEL,
   SWEEP_FAILED_COPY,
@@ -47,7 +54,7 @@ describe("the phases", () => {
   });
 
   it("goes choose -> review -> sending -> sent", () => {
-    const state = run([...TO_SENDING, { type: "result", result: OK }]);
+    const state = run([...TO_SENDING, { type: "result", result: OK, at: 7000 }]);
     expect(state.phase).toBe("sent");
     expect(state.result).toBe(OK);
     expect(state.message).toBeNull();
@@ -77,9 +84,9 @@ describe("the stages", () => {
   it("marks earlier stages done as each one starts", () => {
     const state = run([
       ...TO_SENDING,
-      { type: "stage", stage: "witness", detail: "tree" },
-      { type: "stage", stage: "keys", detail: "key" },
-      { type: "stage", stage: "proving", detail: "proof" },
+      { type: "stage", stage: "witness", detail: "tree", at: 2000 },
+      { type: "stage", stage: "keys", detail: "key", at: 3000 },
+      { type: "stage", stage: "proving", detail: "proof", at: 4000 },
     ]);
     expect(state.stage).toBe("proving");
     expect(state.done).toEqual(["witness", "keys"]);
@@ -89,14 +96,19 @@ describe("the stages", () => {
   it("never walks backwards when a late stage report arrives", () => {
     const ahead = run([
       ...TO_SENDING,
-      { type: "stage", stage: "proving", detail: "proof" },
+      { type: "stage", stage: "proving", detail: "proof", at: 4000 },
     ]);
-    const after = sendReducer(ahead, { type: "stage", stage: "witness", detail: "late" });
+    const after = sendReducer(ahead, {
+      type: "stage",
+      stage: "witness",
+      detail: "late",
+      at: 5000,
+    });
     expect(after).toBe(ahead);
   });
 
   it("finishes every stage on done", () => {
-    const state = run([...TO_SENDING, { type: "stage", stage: "done", detail: "" }]);
+    const state = run([...TO_SENDING, { type: "stage", stage: "done", detail: "", at: 6000 }]);
     expect(state.done).toEqual([...SEND_STAGES]);
   });
 
@@ -105,6 +117,7 @@ describe("the stages", () => {
       type: "stage",
       stage: "proving",
       detail: "x",
+      at: 2000,
     });
     expect(state).toBe(initialSendState);
   });
@@ -112,8 +125,8 @@ describe("the stages", () => {
   it("builds the checklist: done, active, waiting", () => {
     const state = run([
       ...TO_SENDING,
-      { type: "stage", stage: "witness", detail: "a" },
-      { type: "stage", stage: "keys", detail: "b" },
+      { type: "stage", stage: "witness", detail: "a", at: 2000 },
+      { type: "stage", stage: "keys", detail: "b", at: 3000 },
     ]);
     expect(stageChecklist(state).map((r) => r.state)).toEqual([
       "done",
@@ -124,7 +137,7 @@ describe("the stages", () => {
   });
 
   it("shows every line done once the result is in", () => {
-    const state = run([...TO_SENDING, { type: "result", result: OK }]);
+    const state = run([...TO_SENDING, { type: "result", result: OK, at: 7000 }]);
     expect(stageChecklist(state).every((r) => r.state === "done")).toBe(true);
   });
 
@@ -142,7 +155,7 @@ describe("the stages", () => {
 describe("failure", () => {
   it("reads a non-zero error_code as a failure, with the core's message", () => {
     expect(sweepFailure(BROKEN)).toBe("the light node rejected the transaction");
-    const state = run([...TO_SENDING, { type: "result", result: BROKEN }]);
+    const state = run([...TO_SENDING, { type: "result", result: BROKEN, at: 7000 }]);
     expect(state.phase).toBe("failed");
     expect(state.message).toBe("the light node rejected the transaction");
   });
@@ -180,7 +193,7 @@ describe("failure", () => {
 describe("leaving the page", () => {
   it("warns only while proving and broadcasting", () => {
     const at = (stage: "witness" | "keys" | "proving" | "broadcast") =>
-      needsUnloadWarning(run([...TO_SENDING, { type: "stage", stage, detail: "" }]));
+      needsUnloadWarning(run([...TO_SENDING, { type: "stage", stage, detail: "", at: 2000 }]));
     expect(at("witness")).toBe(false);
     expect(at("keys")).toBe(false);
     expect(at("proving")).toBe(true);
@@ -190,9 +203,9 @@ describe("leaving the page", () => {
   it("never warns before the send or after it lands", () => {
     expect(needsUnloadWarning(initialSendState)).toBe(false);
     expect(needsUnloadWarning(run([{ type: "review" }]))).toBe(false);
-    expect(needsUnloadWarning(run([...TO_SENDING, { type: "result", result: OK }]))).toBe(false);
+    expect(needsUnloadWarning(run([...TO_SENDING, { type: "result", result: OK, at: 7000 }]))).toBe(false);
     expect(
-      needsUnloadWarning(run([...TO_SENDING, { type: "result", result: BROKEN }])),
+      needsUnloadWarning(run([...TO_SENDING, { type: "result", result: BROKEN, at: 7000 }])),
     ).toBe(false);
   });
 });
@@ -208,5 +221,150 @@ describe("elapsed", () => {
 
   it("never shows a negative clock", () => {
     expect(elapsedLabel(-5000)).toBe("0:00");
+  });
+});
+
+/**
+ * The timings behind the done screen's Timing block. Every number is wall clock
+ * handed to the reducer, never read off a clock in here, so a test can say what
+ * time it is and a slow machine cannot make this flaky.
+ */
+describe("timings", () => {
+  const RUN: SendEvent[] = [
+    { type: "review" },
+    { type: "send", at: 1_000 },
+    { type: "stage", stage: "witness", detail: "tree", at: 1_200 },
+    { type: "stage", stage: "keys", detail: "key", at: 3_700 },
+    { type: "stage", stage: "proving", detail: "proof", at: 4_000 },
+    { type: "stage", stage: "broadcast", detail: "sending", at: 46_100 },
+    { type: "stage", stage: "done", detail: "empty", at: 48_100 },
+    { type: "result", result: OK, at: 48_400 },
+  ];
+
+  it("stamps every stage transition, done included", () => {
+    expect(run(RUN).stageAt).toEqual({
+      witness: 1_200,
+      keys: 3_700,
+      proving: 4_000,
+      broadcast: 46_100,
+      done: 48_100,
+    });
+  });
+
+  it("keeps the first stamp when a stage is reported twice", () => {
+    const state = run([
+      ...RUN.slice(0, 3),
+      { type: "stage", stage: "witness", detail: "again", at: 2_500 },
+    ]);
+    expect(state.stageAt.witness).toBe(1_200);
+  });
+
+  it("finishes on the result when the core never says done", () => {
+    const state = run([...RUN.slice(0, 6), { type: "result", result: OK, at: 47_000 }]);
+    expect(state.stageAt.done).toBe(47_000);
+  });
+
+  it("does not let the result move a done the core already reported", () => {
+    expect(run(RUN).stageAt.done).toBe(48_100);
+  });
+
+  it("starts a fresh set of stamps when a failed run is tried again", () => {
+    const failed = run([...RUN.slice(0, 5), { type: "failed", message: "boom" }]);
+    expect(failed.stageAt.proving).toBe(4_000);
+    const again = sendReducer(failed, { type: "send", at: 60_000 });
+    expect(again.stageAt).toEqual({});
+    expect(again.startedAt).toBe(60_000);
+  });
+
+  it("measures the span between two stages, and nothing when one is missing", () => {
+    const t = run(RUN).stageAt;
+    expect(stageSpan(t, "proving", "broadcast")).toBe(42_100);
+    expect(stageSpan({ witness: 5 }, "witness", "keys")).toBeNull();
+    // A clock that went backwards is not a negative duration, it is no duration.
+    expect(stageSpan({ witness: 10, keys: 5 }, "witness", "keys")).toBeNull();
+  });
+
+  it("lays the block out in the order it happened, one decimal each", () => {
+    const rows = timingRows({ state: run(RUN), openMs: 4_120, warmMs: 30_500 });
+    expect(rows.map((r) => [r.label, r.value])).toEqual([
+      ["open/scan", "4.1 s"],
+      ["keys (warm)", "30.5 s"],
+      ["witness", "2.5 s"],
+      ["proving", "42.1 s"],
+      ["send", "2.0 s"],
+      ["total tap-to-done", "47.1 s"],
+    ]);
+  });
+
+  it("says nothing it does not know", () => {
+    const rows = timingRows({
+      state: run(RUN.slice(0, 3)),
+      openMs: null,
+      warmMs: null,
+    });
+    expect(rows.map((r) => r.value)).toEqual(["—", "—", "—", "—", "—", "—"]);
+    expect(rows.every((r) => r.ms === null)).toBe(true);
+  });
+
+  it("formats seconds to one decimal, and a dash for a non-measurement", () => {
+    expect(formatSeconds(0)).toBe("0.0 s");
+    expect(formatSeconds(1_940)).toBe("1.9 s");
+    expect(formatSeconds(1_960)).toBe("2.0 s");
+    expect(formatSeconds(125_000)).toBe("125.0 s");
+    expect(formatSeconds(null)).toBe("—");
+    expect(formatSeconds(-1)).toBe("—");
+    expect(formatSeconds(Number.NaN)).toBe("—");
+  });
+
+  it("names the browser family, Brave included", () => {
+    const safariIos =
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
+    const chrome =
+      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
+    const firefox = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:130.0) Gecko/20100101 Firefox/130.0";
+    expect(browserFamily(safariIos)).toBe("Safari");
+    expect(browserFamily(chrome)).toBe("Chrome");
+    expect(browserFamily(firefox)).toBe("Firefox");
+    // Brave sends Chrome's user agent to the letter; only the flag tells them apart.
+    expect(browserFamily(chrome, true)).toBe("Brave");
+    // Playwright's own browser, which is what a measurement run reports.
+    const headless =
+      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/141.0.0.0 Safari/537.36";
+    expect(browserFamily(headless)).toBe("Chrome");
+    expect(browserFamily("something else")).toBe("unknown");
+  });
+
+  it("names the platform", () => {
+    expect(platformName("… (iPhone; CPU iPhone OS 17_5 like Mac OS X) …")).toBe("iOS");
+    expect(platformName("… (Linux; Android 14; Pixel 8) …")).toBe("Android");
+    expect(platformName("… (Macintosh; Intel Mac OS X 10_15_7) …")).toBe("macOS");
+    expect(platformName("… (Windows NT 10.0; Win64; x64) …")).toBe("Windows");
+    expect(platformName("… (X11; Linux x86_64) …")).toBe("Linux");
+    expect(platformName("nothing recognisable")).toBe("unknown");
+  });
+
+  it("writes the device line, with a thread that is not plural", () => {
+    const ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/17.5 Safari/605.1.15";
+    expect(deviceLine({ threads: 4, hardwareConcurrency: 8, userAgent: ua })).toBe(
+      "proving: 4 threads · hardwareConcurrency 8 · Safari on macOS",
+    );
+    expect(deviceLine({ threads: 1, hardwareConcurrency: 1, userAgent: ua })).toBe(
+      "proving: 1 thread · hardwareConcurrency 1 · Safari on macOS",
+    );
+  });
+
+  it("copies as plain text, one measurement per line", () => {
+    const rows = timingRows({ state: run(RUN), openMs: 4_120, warmMs: 30_500 });
+    expect(timingText(rows, "proving: 4 threads · hardwareConcurrency 8 · Chrome on Linux")).toBe(
+      [
+        "open/scan 4.1 s",
+        "keys (warm) 30.5 s",
+        "witness 2.5 s",
+        "proving 42.1 s",
+        "send 2.0 s",
+        "total tap-to-done 47.1 s",
+        "proving: 4 threads · hardwareConcurrency 8 · Chrome on Linux",
+      ].join("\n"),
+    );
   });
 });

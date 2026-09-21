@@ -21,6 +21,8 @@
  *     exit does, and the tick is the only way past it (M7)
  *   - the done screen has the txid, a copy button, an explorer link, and says
  *     the envelope is now empty
+ *   - the done screen's Timing block measures the scan, the warm-up and each
+ *     stage, and copies as plain text
  *   - the secret never reaches a link or a request, and the word "claim" never
  *     appears anywhere on any screen
  *
@@ -172,6 +174,33 @@ describeOnMock("M3: sending the envelope on", () => {
     await expect(page.getByTestId("envelope-empty")).toHaveText("The envelope is now empty.");
     // The progress checklist is gone: this screen is the end of the road.
     await expect(page.getByTestId("stage-row")).toHaveCount(0);
+
+    // 6b. The Timing block: every line a measurement, to one decimal, and the
+    // three stage rows telling the mock's three different stage lengths apart.
+    const seconds = /^\d+\.\d s$/;
+    for (const row of ["open", "keys", "witness", "proving", "send", "total"]) {
+      await expect(page.getByTestId(`timing-${row}`)).toHaveText(seconds);
+    }
+    const asNumber = async (row: string) =>
+      Number((await page.getByTestId(`timing-${row}`).innerText()).replace(" s", ""));
+    // MOCK_STAGE_TIMES: 0.8 s of witness, 1.3 s of proving, 1.2 s of broadcast.
+    expect(await asNumber("witness")).toBeGreaterThanOrEqual(0.7);
+    expect(await asNumber("witness")).toBeLessThan(1.2);
+    expect(await asNumber("proving")).toBeGreaterThanOrEqual(1.2);
+    expect(await asNumber("proving")).toBeLessThan(1.9);
+    expect(await asNumber("send")).toBeGreaterThanOrEqual(1.1);
+    // The scan is 4 s in the mock and the key warm-up 3 s; the whole sweep is 4 s.
+    expect(await asNumber("open")).toBeGreaterThanOrEqual(3.9);
+    expect(await asNumber("keys")).toBeGreaterThanOrEqual(2.9);
+    expect(await asNumber("total")).toBeGreaterThanOrEqual(3.9);
+    await expect(page.getByTestId("timing-device")).toHaveText(
+      /^proving: \d+ threads? \u00b7 hardwareConcurrency \d+ \u00b7 \w+ on \w+$/,
+    );
+    // And it copies as plain text.
+    const copyTiming = page.getByTestId("copy-timing");
+    await expect(copyTiming).toHaveText("Copy timing");
+    await copyTiming.click();
+    await expect(copyTiming).toHaveText("Copied");
     await page.screenshot({ path: resolve(DOCS, "m3-done.png"), fullPage: true });
 
     // The copy button next to the txid copies the whole thing.

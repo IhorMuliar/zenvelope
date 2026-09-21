@@ -29,6 +29,9 @@ export const STAGE_LABEL: Record<SweepStage, string> = {
   done: "Done",
 };
 
+/** When each stage started, by `Date.now()`. Missing means it was never reported. */
+export type StageTimes = Partial<Record<SweepStage, number>>;
+
 export interface SendState {
   phase: SendPhase;
   /** The stage running right now. null unless the sweep is under way. */
@@ -39,6 +42,12 @@ export interface SendState {
   done: WorkingStage[];
   /** `Date.now()` when the sweep started, for the elapsed counter. */
   startedAt: number | null;
+  /**
+   * `Date.now()` at each stage the core reported, including the final "done".
+   * First report wins, so a repeated stage cannot stretch a measurement. This is
+   * what the Timing block on the done screen is made of.
+   */
+  stageAt: StageTimes;
   result: SweepResult | null;
   /** The error line, on the failed screen. */
   message: string | null;
@@ -48,8 +57,8 @@ export type SendEvent =
   | { type: "review" }
   | { type: "choose" }
   | { type: "send"; at: number }
-  | { type: "stage"; stage: SweepStage; detail: string }
-  | { type: "result"; result: SweepResult }
+  | { type: "stage"; stage: SweepStage; detail: string; at: number }
+  | { type: "result"; result: SweepResult; at: number }
   | { type: "failed"; message: string };
 
 export const initialSendState: SendState = {
@@ -58,6 +67,7 @@ export const initialSendState: SendState = {
   detail: null,
   done: [],
   startedAt: null,
+  stageAt: {},
   result: null,
   message: null,
 };
@@ -91,6 +101,12 @@ export function sweepFailure(result: SweepResult): string | null {
   if (code === null || code === undefined || code === 0) return null;
   const message = result.error_message?.trim();
   return message && message !== "" ? message : SWEEP_FAILED_COPY;
+}
+
+/** First report of a stage wins: a repeated one cannot stretch a measurement. */
+function markStage(times: StageTimes, stage: SweepStage, at: number): StageTimes {
+  if (times[stage] !== undefined || !Number.isFinite(at)) return times;
+  return { ...times, [stage]: at };
 }
 
 /** The stages finished by the time `stage` is running. */
@@ -127,6 +143,7 @@ export function sendReducer(state: SendState, event: SendEvent): SendState {
         stage: event.stage,
         detail: event.detail,
         done: priorStages(event.stage),
+        stageAt: markStage(state.stageAt, event.stage, event.at),
       };
     }
 
@@ -141,6 +158,9 @@ export function sendReducer(state: SendState, event: SendEvent): SendState {
             done: [...SEND_STAGES],
             result: event.result,
             message: null,
+            // A core that resolves without a final "done" stage still gets a
+            // finish line: the moment its answer arrived.
+            stageAt: markStage(state.stageAt, "done", event.at),
           }
         : { ...state, phase: "failed", result: event.result, message: failure };
     }
@@ -191,4 +211,118 @@ export function elapsedLabel(ms: number): string {
   const minutes = Math.floor(total / 60);
   const seconds = total % 60;
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+/* ------------------------------------------------------------------ timings */
+
+/**
+ * The Timing block on the done screen.
+ *
+ * Every number here is wall clock measured in this browser: the scan, the
+ * background proving-key warm-up, each stage the core reported, and the whole
+ * run from the tap on "Send it on" to the last stage. Nothing is sent anywhere —
+ * it is on screen and behind a copy button, so a recipient (or we) can say what
+ * a real device actually did with a real envelope.
+ */
+export interface TimingInput {
+  state: SendState;
+  /** How long the open scan took, or null when this page did not run one. */
+  openMs: number | null;
+  /** How long `warm_proving_key` took, or null when it never finished. */
+  warmMs: number | null;
+}
+
+export interface TimingRow {
+  key: string;
+  label: string;
+  /** null when the run never produced the pair of timestamps it needs. */
+  ms: number | null;
+  value: string;
+}
+
+/** One decimal, always, and an em dash where there is no measurement. */
+export function formatSeconds(ms: number | null): string {
+  if (ms === null || !Number.isFinite(ms) || ms < 0) return "—";
+  return `${(ms / 1000).toFixed(1)} s`;
+}
+
+/** The gap between two reported stages, or null when either is missing. */
+export function stageSpan(times: StageTimes, from: SweepStage, to: SweepStage): number | null {
+  const a = times[from];
+  const b = times[to];
+  if (a === undefined || b === undefined || b < a) return null;
+  return b - a;
+}
+
+/**
+ * The six lines, in the order they happened. "send" is the broadcast stage, and
+ * on a dry run it is the time the core spent stopping short of one.
+ */
+export function timingRows(input: TimingInput): TimingRow[] {
+  const { state, openMs, warmMs } = input;
+  const t = state.stageAt;
+  const doneAt = t.done;
+  const total =
+    state.startedAt !== null && doneAt !== undefined && doneAt >= state.startedAt
+      ? doneAt - state.startedAt
+      : null;
+  const rows: [string, string, number | null][] = [
+    ["open", "open/scan", openMs],
+    ["keys", "keys (warm)", warmMs],
+    ["witness", "witness", stageSpan(t, "witness", "keys")],
+    ["proving", "proving", stageSpan(t, "proving", "broadcast")],
+    ["send", "send", stageSpan(t, "broadcast", "done")],
+    ["total", "total tap-to-done", total],
+  ];
+  return rows.map(([key, label, ms]) => ({ key, label, ms, value: formatSeconds(ms) }));
+}
+
+/** What the page knows about the machine that did the proving. */
+export interface DeviceInfo {
+  /** Threads the core reported for the proving pool. */
+  threads: number;
+  hardwareConcurrency: number;
+  userAgent: string;
+  /** `navigator.brave` says so: Brave's user agent is Chrome's, to the letter. */
+  brave?: boolean;
+}
+
+/**
+ * Which browser, from the user agent — plus the one flag a user agent cannot
+ * carry. This is for reading a timing report, not for deciding anything, so an
+ * unknown engine is simply "unknown" rather than a guess.
+ */
+export function browserFamily(ua: string, brave = false): string {
+  if (brave) return "Brave";
+  if (/\b(Firefox|FxiOS)\//.test(ua)) return "Firefox";
+  if (/\b(Edg|EdgiOS)\//.test(ua)) return "Edge";
+  // `HeadlessChrome/` has no word boundary before "Chrome", and it is what our
+  // own measurement runs send: a timing report that called them Safari would be
+  // wrong about the only browser we drive ourselves.
+  if (/(HeadlessChrome|Chrome|CriOS|Chromium)\//.test(ua)) return "Chrome";
+  if (/Safari\//.test(ua) && /AppleWebKit\//.test(ua)) return "Safari";
+  return "unknown";
+}
+
+/** Which platform, from the user agent. */
+export function platformName(ua: string): string {
+  if (/(iPhone|iPad|iPod)/.test(ua)) return "iOS";
+  if (/Android/.test(ua)) return "Android";
+  if (/(Macintosh|Mac OS X)/.test(ua)) return "macOS";
+  if (/Windows/.test(ua)) return "Windows";
+  if (/(Linux|CrOS|X11)/.test(ua)) return "Linux";
+  return "unknown";
+}
+
+/** "proving: 4 threads · hardwareConcurrency 8 · Chrome on macOS". */
+export function deviceLine(info: DeviceInfo): string {
+  const threads = `proving: ${info.threads} thread${info.threads === 1 ? "" : "s"}`;
+  const cores = `hardwareConcurrency ${info.hardwareConcurrency}`;
+  const where = `${browserFamily(info.userAgent, info.brave)} on ${platformName(info.userAgent)}`;
+  return `${threads} · ${cores} · ${where}`;
+}
+
+/** What the "Copy timing" button puts on the clipboard: the block, as text. */
+export function timingText(rows: TimingRow[], device: string): string {
+  return [...rows.map((r) => `${r.label} ${r.value}`), device].join("\n");
 }
