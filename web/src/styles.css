@@ -749,3 +749,194 @@ progress.scan-bar:indeterminate::-webkit-progress-bar {
     animation: none;
   }
 }
+
+/* ----------------------------------------- M4: landing, safety, group table */
+
+h3 {
+  font-size: 0.95rem;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+/* The "we never hold funds" strip: sender's wallet, the chain, their browser.
+   One column on a phone, three where there is room. */
+.strip {
+  list-style: none;
+  counter-reset: place;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.6rem;
+}
+
+.strip li {
+  counter-increment: place;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.strip li h3::before {
+  content: counter(place) ". ";
+  color: var(--accent);
+}
+
+/* Two fields side by side where there is room: amount, then how many. */
+.two-up {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.count-field input {
+  width: 100%;
+}
+
+/* The safety half of /how gets a rule above it, so it reads as its own page. */
+.safety {
+  margin-top: 1rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--line);
+}
+
+.steps li h3::before {
+  content: counter(step) ". ";
+  color: var(--accent);
+}
+
+/* ------------------------------------------------------------ trust boundary */
+
+.give-up {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.give-up li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.give-up strong {
+  font-size: 0.95rem;
+}
+
+.give-up span {
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.trust-boundary .check {
+  padding-top: 0.2rem;
+}
+
+/* ------------------------------------------------------------- group table */
+
+/* A table of long strings on a phone: it scrolls sideways rather than being
+   squeezed into unreadable columns, and the CSV is offered right above it for
+   anyone who would rather not scroll at all. */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.group-table {
+  border-collapse: collapse;
+  width: 100%;
+  /* Wide enough to stay readable, narrow enough to fit the shell on a laptop
+     without clipping. Below that the wrapper scrolls sideways. */
+  min-width: 30rem;
+  table-layout: auto;
+  font-size: 0.85rem;
+}
+
+.group-table caption {
+  caption-side: top;
+  text-align: left;
+  padding: 0.7rem 0.7rem 0.4rem;
+}
+
+.group-table th,
+.group-table td {
+  text-align: left;
+  vertical-align: top;
+  padding: 0.5rem 0.6rem;
+  border-top: 1px solid var(--line);
+}
+
+.group-table thead th {
+  border-top: 0;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.group-table tbody tr:nth-child(even) {
+  background: var(--bg);
+}
+
+.col-index {
+  width: 2.2rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.col-amount {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.group-table .cell {
+  display: block;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  max-width: 11rem;
+}
+
+.copy-btn {
+  margin-top: 0.3rem;
+  font-size: 0.72rem;
+  padding: 0.2rem 0.45rem;
+}
+
+/* ------------------------------------------------------------------ footer */
+
+.footer-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0;
+}
+
+@media (min-width: 40rem) {
+  .strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .two-up {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+  .two-up .field:first-child {
+    flex: 1 1 auto;
+  }
+  .count-field {
+    flex: 0 0 9rem;
+  }
+  .footer-lines {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 0.2rem 1rem;
+  }
+}

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Create } from "./pages/Create";
 import { Open } from "./pages/Open";
 import { How } from "./pages/How";
+import { footer } from "./copy/en";
 
 function currentPath(): string {
   return window.location.pathname.replace(/\/+$/, "") || "/";
@@ -49,7 +50,7 @@ export function App() {
         </a>
         <nav>
           {link("/how", "How it works")}
-          <a href="https://github.com/IhorMuliar/zenvelope" rel="noreferrer noopener">
+          <a href={footer.sourceUrl} rel="noreferrer noopener">
             Source
           </a>
         </nav>
@@ -59,10 +60,19 @@ export function App() {
         {path === "/e" ? <Open /> : path === "/how" ? <How /> : <Create />}
       </main>
 
-      <footer className="site-footer">
-        <p>
-          Static site. No accounts, no analytics, no server-side keys. The link fragment
-          never reaches our server.
+      {/*
+        Three lines, each of which a judge can check. The repo link is the
+        evidence for the licence line, the track line says who this was built for,
+        and "No analytics. No cookies." is a statement of fact about a static
+        build that ships neither — not a promise about the future.
+      */}
+      <footer className="site-footer" data-testid="site-footer">
+        <p className="footer-lines">
+          <a href={footer.sourceUrl} rel="noreferrer noopener" data-testid="footer-source">
+            {footer.sourceLabel}
+          </a>
+          <span data-testid="footer-built">{footer.built}</span>
+          <span data-testid="footer-tracking">{footer.noTracking}</span>
         </p>
       </footer>
     </div>

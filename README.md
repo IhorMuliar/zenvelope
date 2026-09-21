@@ -78,6 +78,12 @@ One sender, N recipients, fixed amounts per link. For payroll, contractor payout
 community distributions, and holiday gifting. Fixed split only. No random split, and
 never a payment by the recipient to open an envelope.
 
+**Group envelopes (preview).** The create form already takes an amount per envelope
+and a count of 1 to 50: above one it generates that many secrets and links in the
+browser, shows a table of single-output ZIP-321 URIs, and offers a CSV
+(`index,link,address,amount,memo,payment_uri`). The secrets live in the tab and in
+that file and nowhere else. Batch funding from one wallet is what M6 still owes.
+
 ## Fee
 
 The sender funds a single output of *envelope amount + flat fee*. The fee is paid to
@@ -90,6 +96,44 @@ It is a flat service fee, not a percentage. Recipients pay nothing.
 Not a custodian, not an exchange, not a bridge. No float, no in-house conversion, no
 account, no KYC, no server-side keys. The design is chosen so that no entity in the
 flow is a MiCA crypto-asset service provider or a money transmitter.
+
+## Safety
+
+A link that carries money is the exact shape of a wallet drainer, so the product is
+written against that likeness rather than around it.
+
+**We will never ask for your seed phrase, your wallet password, or a wallet
+connection.** There is no wallet-connect code path in this repository and no screen
+that accepts key material typed by a person. Opening an envelope asks for one thing:
+where the money should go — a Zcash address you paste, or a wallet the page generates
+in your browser. The open page is the only place funds move.
+
+The word **"claim"** appears on no screen, in any tense or compound. It is the top
+drainer lure, so it is banned outright and the ban is enforced by tests, not by
+memory: `web/src/copy/en.ts` is the single source of the sender-side strings and
+`web/src/copy/en.test.ts` audits them, while the Playwright suites assert it against
+the rendered text of every screen.
+
+**How to check a Zenvelope link yourself**, without trusting us, set out in full on
+`/how`:
+
+1. **Read the host in the URL bar.** Everything before the first single `/` is the
+   host; a look-alike spelling or an extra word before the dot is a different site.
+2. **The secret after the `#` never leaves your browser.** Browsers do not send the
+   fragment to any server. Open the network panel before you open the envelope and
+   watch that it appears in no request.
+3. **Read the code that runs on you.** The whole app is MIT and in this repository.
+   There is no backend to audit because there is no backend.
+4. **Check the transaction on a block explorer.** The funding transaction is ordinary
+   public Zcash data on `mainnet.zcashexplorer.app`; the amount stays shielded there,
+   readable only by whoever holds the link.
+
+Leaving the shielded pool is the one irreversible privacy decision in the flow, so it
+gets a screen of its own before any Solana exit: what becomes public, that a
+third-party swap service sees the transaction, that a spread and fees apply, and that
+Zenvelope is not the swap provider and never holds the funds — behind a required
+"I understand this leaves the shielded pool" tick
+(`web/src/components/TrustBoundary.tsx`).
 
 ## Status
 

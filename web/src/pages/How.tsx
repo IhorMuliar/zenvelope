@@ -1,48 +1,50 @@
-import { SENDER_WALLETS } from "../config";
+import { how } from "../copy/en";
 
-const STEPS: [string, string][] = [
-  [
-    "Your browser makes a secret",
-    "32 random bytes from your browser's own generator. It becomes the part of the link after the #, which browsers never send to any server. We never see it.",
-  ],
-  [
-    "The secret becomes a one-time shielded address",
-    "The same secret derives the address, the viewing key and the spending key. No account, no registration, nothing of yours on our side.",
-  ],
-  [
-    "You pay that address from your own wallet",
-    `We show a payment URI and a QR for the envelope amount plus the flat service fee. Your wallet sends it directly on-chain. Works with ${SENDER_WALLETS}.`,
-  ],
-  [
-    "You send the link, they open it in a browser",
-    "The recipient's browser uses the viewing key to find the note and reveal the amount. No wallet, no install, no address to exchange.",
-  ],
-  [
-    "They move the money where they want it",
-    "Their browser signs with the spending key and sends the funds to a Zcash address they choose. The service fee rides along in that transaction. The money never passes through us.",
-  ],
-];
-
+/**
+ * `/how` — the flow, and then the safety page a recipient actually needs.
+ *
+ * The second half is the one that earns its keep. A link that carries money is
+ * the exact shape of a wallet drainer, so the page names what we will never ask
+ * for and then teaches four checks that need no trust in us at all: the host in
+ * the URL bar, the fragment that never leaves the browser, the source, and the
+ * transaction on a block explorer.
+ */
 export function How() {
   return (
     <section className="stack">
-      <h1>We never hold funds</h1>
-      <p className="lede">Five steps, and none of them is us holding your money.</p>
+      <h1>{how.title}</h1>
+      <p className="lede">{how.lede}</p>
       <ol className="steps">
-        {STEPS.map(([title, body], i) => (
-          <li key={i} className="card">
-            <h2>{title}</h2>
-            <p>{body}</p>
+        {how.steps.map((step) => (
+          <li key={step.title} className="card">
+            <h2>{step.title}</h2>
+            <p>{step.body}</p>
           </li>
         ))}
       </ol>
-      <p className="fine">
-        Our server is static HTML, JavaScript and WASM. No keys, no float, no custody. If
-        this site disappeared, an unopened envelope would still be spendable by whoever
-        holds the link, using the open-source code.
-      </p>
+      <p className="fine">{how.fine}</p>
+
+      <section className="stack safety" data-testid="safety">
+        <h2 id="safe">{how.safeTitle}</h2>
+        <p className="warn" data-testid="never-ask">
+          {how.neverAsk}
+        </p>
+        <p>{how.onlyAsk}</p>
+        <p className="fine">{how.neverAskFine}</p>
+
+        <p className="lede">{how.safeLede}</p>
+        <ol className="steps">
+          {how.safeChecks.map((check) => (
+            <li key={check.title} className="card">
+              <h3>{check.title}</h3>
+              <p>{check.body}</p>
+            </li>
+          ))}
+        </ol>
+      </section>
+
       <p>
-        <a href="/">Create an envelope</a>
+        <a href="/">{how.createCta}</a>
       </p>
     </section>
   );
