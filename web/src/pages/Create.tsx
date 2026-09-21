@@ -479,7 +479,8 @@ function GroupResult({
           <thead>
             <tr>
               <th scope="col">{groupCopy.columns.index}</th>
-              <th scope="col">{groupCopy.columns.amount}</th>
+              <th scope="col">{groupCopy.columns.envelope}</th>
+              <th scope="col">{groupCopy.columns.send}</th>
               <th scope="col">{groupCopy.columns.link}</th>
               <th scope="col">{groupCopy.columns.address}</th>
               <th scope="col">{groupCopy.columns.uri}</th>
@@ -489,8 +490,11 @@ function GroupResult({
             {rows.map((r) => (
               <tr key={r.index} data-testid="group-row">
                 <td className="col-index">{r.index}</td>
-                <td className="col-amount" data-testid="row-amount">
-                  {r.amount} ZEC
+                <td className="col-amount" data-testid="row-envelope">
+                  {r.envelopeZec} ZEC
+                </td>
+                <td className="col-amount" data-testid="row-send">
+                  {r.sendZec} ZEC
                 </td>
                 <td>
                   <code className="cell mono" data-testid="row-link">
@@ -521,6 +525,10 @@ function GroupResult({
           </tbody>
         </table>
       </div>
+
+      <p className="hint" data-testid="group-columns-note">
+        {groupCopy.columnsNote}
+      </p>
 
       <p className="fine" data-testid="group-memory">
         {groupCopy.memoryFine}

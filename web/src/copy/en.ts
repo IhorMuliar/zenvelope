@@ -223,11 +223,17 @@ export const group = {
   download: "Download CSV",
   columns: {
     index: "#",
-    amount: "Amount to send",
+    /** What the person who opens that link receives. The CSV's `envelope_zec`. */
+    envelope: "In the envelope",
+    /** Envelope plus the flat service fee: the URI's amount, and `send_zec`. */
+    send: "To send",
     link: "Link",
     address: "Address",
     uri: "Payment URI",
   },
+  /** Said under the table, because two amount columns need one line of explanation. */
+  columnsNote:
+    "“In the envelope” is what the person who opens that link receives. “To send” is that plus the flat service fee, and it is the amount the payment URI asks your wallet for.",
   warn: "Each link is the money. Anyone holding one can open that envelope, so treat the CSV like cash and send each link to one person only.",
   memoryFine:
     "These links exist in this tab and in the CSV you download. They are not stored, not sent anywhere, and not recoverable: leave this page without saving them and the money stays in the envelopes with nobody able to open them.",

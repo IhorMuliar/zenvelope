@@ -161,9 +161,22 @@ describeOnMock("M4: group envelopes (M6 preview)", () => {
     await expect(rows).toHaveCount(3);
     await expect(page.getByTestId("group-total")).toContainText("0.0309 ZEC in total");
 
+    // The header names both amounts rather than one ambiguous "Amount". Read as text
+    // content, not innerText: the column heads are uppercased by CSS, not by the copy.
+    const headers = await page.getByTestId("group-table").locator("thead th").allTextContents();
+    expect(headers).toEqual([
+      "#",
+      "In the envelope",
+      "To send",
+      "Link",
+      "Address",
+      "Payment URI",
+    ]);
+
     const links = await page.getByTestId("row-link").allInnerTexts();
     const uris = await page.getByTestId("row-uri").allInnerTexts();
-    const amounts = await page.getByTestId("row-amount").allInnerTexts();
+    const envelopeAmounts = await page.getByTestId("row-envelope").allInnerTexts();
+    const sendAmounts = await page.getByTestId("row-send").allInnerTexts();
     expect(new Set(links).size).toBe(3);
     expect(new Set(uris).size).toBe(3);
 
@@ -172,7 +185,9 @@ describeOnMock("M4: group envelopes (M6 preview)", () => {
       // Single-output ZIP-321: one address, one amount, no indexed parameters.
       expect(uris[i]).toMatch(/^zcash:[a-z0-9]+\?amount=0\.0103&memo=[A-Za-z0-9_-]+$/);
       expect(uris[i]).not.toMatch(/address\.\d/);
-      expect(amounts[i]).toBe("0.0103 ZEC");
+      // Two amount columns: what the recipient gets, and what the sender sends.
+      expect(envelopeAmounts[i]).toBe("0.01 ZEC");
+      expect(sendAmounts[i]).toBe("0.0103 ZEC");
     }
 
     // The link is the money, and the page says so.
@@ -197,14 +212,18 @@ describeOnMock("M4: group envelopes (M6 preview)", () => {
     const csv = readFileSync(path!, "utf8");
     const lines = csv.split("\r\n");
 
-    expect(lines[0]).toBe("index,link,address,amount,memo,payment_uri");
+    expect(lines[0]).toBe("index,link,address,envelope_zec,send_zec,memo,payment_uri");
     expect(lines).toHaveLength(5); // header + 3 rows + the trailing empty
     for (let i = 0; i < 3; i++) {
       const row = lines[i + 1];
       expect(row.startsWith(`${i + 1},`)).toBe(true);
       expect(row).toContain(links[i]);
       expect(row).toContain(uris[i]);
-      expect(row).toContain("0.0103");
+      // Both amounts, in their own columns, and the send amount is the URI's.
+      const cells = row.split(",");
+      expect(cells[3]).toBe("0.01");
+      expect(cells[4]).toBe("0.0103");
+      expect(row).toContain("amount=0.0103");
       // The memo has a comma in it, so it has to be quoted rather than split.
       expect(row).toContain('"Payroll, March"');
     }

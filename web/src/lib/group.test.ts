@@ -104,12 +104,17 @@ describe("generateGroup over the core worker", () => {
     }
   });
 
-  it("charges the same amount for each: envelope plus the flat fee", async () => {
+  it("separates what the recipient gets from what the sender sends", async () => {
     const rows = await generateGroup(core, REQ);
     for (const r of rows) {
-      expect(r.amountZat).toBe(1_030_000n);
-      expect(r.amount).toBe("0.0103");
+      expect(r.envelopeZat).toBe(1_000_000n);
+      expect(r.envelopeZec).toBe("0.01");
+      expect(r.sendZat).toBe(1_030_000n);
+      expect(r.sendZec).toBe("0.0103");
+      // The ZIP-321 amount is the send amount, fee included: paying the URI and
+      // paying the send_zec column are the same act.
       expect(r.uri).toContain("amount=0.0103");
+      expect(r.sendZat - r.envelopeZat).toBe(REQ.feeZat);
     }
     expect(groupTotal(rows)).toBe("0.0309");
   });
@@ -210,9 +215,9 @@ describe("buildCsv", () => {
     lines = csv.split("\r\n");
   });
 
-  it("starts with the documented header, in order", () => {
-    expect(lines[0]).toBe("index,link,address,amount,memo,payment_uri");
-    expect(CSV_COLUMNS).toHaveLength(6);
+  it("starts with the documented header, in order, with both amount columns", () => {
+    expect(lines[0]).toBe("index,link,address,envelope_zec,send_zec,memo,payment_uri");
+    expect(CSV_COLUMNS).toHaveLength(7);
   });
 
   it("has one row per envelope and a trailing CRLF", () => {
@@ -227,10 +232,21 @@ describe("buildCsv", () => {
       expect(cells[0]).toBe(String(r.index));
       expect(cells[1]).toBe(r.link);
       expect(cells[2]).toBe(r.address);
-      expect(cells[3]).toBe(r.amount);
-      expect(cells[4]).toBe(r.memo);
+      expect(cells[3]).toBe(r.envelopeZec);
+      expect(cells[4]).toBe(r.sendZec);
+      expect(cells[5]).toBe(r.memo);
       expect(lines[i + 1]).toContain(r.uri);
     });
+  });
+
+  it("puts the envelope amount and the send amount in their own columns", () => {
+    for (let i = 0; i < rows.length; i++) {
+      const cells = lines[i + 1].split(",");
+      expect(cells[3]).toBe("0.01"); // what the recipient gets
+      expect(cells[4]).toBe("0.0103"); // what the sender sends, fee included
+      // And the second one is what the wallet is asked for.
+      expect(lines[i + 1]).toContain(`amount=${cells[4]}`);
+    }
   });
 
   it("quotes a memo with a comma in it rather than breaking the row", async () => {
@@ -250,7 +266,7 @@ describe("buildCsv", () => {
   });
 
   it("is empty but well formed for no rows", () => {
-    expect(buildCsv([])).toBe("index,link,address,amount,memo,payment_uri\r\n");
+    expect(buildCsv([])).toBe("index,link,address,envelope_zec,send_zec,memo,payment_uri\r\n");
   });
 
   it("does not contain the word this product never uses", () => {
@@ -267,14 +283,16 @@ describe("csvFilename", () => {
 });
 
 describe("groupTotal", () => {
-  it("sums in zatoshi, never in floating point", () => {
+  it("sums what the sender pays, in zatoshi, never in floating point", () => {
     const rows: GroupEnvelope[] = Array.from({ length: 3 }, (_, i) => ({
       index: i + 1,
       link: "",
       address: "",
       ufvk: "",
-      amountZat: 10_000_003n,
-      amount: "0.10000003",
+      envelopeZat: 9_970_003n,
+      envelopeZec: "0.09970003",
+      sendZat: 10_000_003n,
+      sendZec: "0.10000003",
       memo: "",
       uri: "",
     }));

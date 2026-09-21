@@ -39,10 +39,18 @@ export interface GroupEnvelope {
    * amounts and memos, and a spreadsheet is the wrong place to leave it.
    */
   ufvk: string;
-  /** Zatoshi the sender must send for this envelope: amount + flat service fee. */
-  amountZat: bigint;
-  /** The same number as a ZEC decimal string, matching the URI's `amount=`. */
-  amount: string;
+  /** Zatoshi the person who opens this envelope receives. */
+  envelopeZat: bigint;
+  /** The same number as a ZEC decimal string: the CSV's `envelope_zec`. */
+  envelopeZec: string;
+  /** Zatoshi the sender must send: the envelope plus the flat service fee. */
+  sendZat: bigint;
+  /**
+   * The same number as a ZEC decimal string: the CSV's `send_zec`, and exactly
+   * the `amount=` the URI carries. Paying the URI and paying this column are
+   * therefore the same act, which is the point of having both.
+   */
+  sendZec: string;
   /** The sender's message. The same for every envelope in a group; "" when none. */
   memo: string;
   /** Single-output ZIP-321, exactly what a wallet is handed. */
@@ -122,8 +130,10 @@ export async function generateGroup(
   }
   if (req.envelopeZat <= 0n) throw new Error("the envelope amount must be positive");
 
-  const amountZat = req.envelopeZat + req.feeZat;
-  const amount = zatToZecString(amountZat);
+  const envelopeZat = req.envelopeZat;
+  const envelopeZec = zatToZecString(envelopeZat);
+  const sendZat = envelopeZat + req.feeZat;
+  const sendZec = zatToZecString(sendZat);
   const seen = new Set<string>();
   const out: GroupEnvelope[] = [];
 
@@ -136,7 +146,7 @@ export async function generateGroup(
     const fragment = await core.build_fragment(secret, req.birthday);
     const uri = await core.payment_uri(
       derived.address,
-      amountZat,
+      sendZat,
       req.message === "" ? undefined : req.message,
     );
     out.push({
@@ -144,8 +154,10 @@ export async function generateGroup(
       link: `${req.origin}/e#${fragment}`,
       address: derived.address,
       ufvk: derived.ufvk,
-      amountZat,
-      amount,
+      envelopeZat,
+      envelopeZec,
+      sendZat,
+      sendZec,
       memo: req.message,
       uri,
     });
@@ -156,12 +168,21 @@ export async function generateGroup(
 
 /* --------------------------------------------------------------------- CSV */
 
-/** The header row, in order. Fixed: a spreadsheet somewhere will depend on it. */
+/**
+ * The header row, in order. Fixed: a spreadsheet somewhere will depend on it.
+ *
+ * Two amount columns, because they answer two different questions and conflating
+ * them is how somebody underpays fifty envelopes at once. `envelope_zec` is what
+ * the person who opens that link receives; `send_zec` is what the sender must
+ * actually send for it — the envelope plus the flat service fee — and it is the
+ * same number the `payment_uri` carries in its `amount=`.
+ */
 export const CSV_COLUMNS = [
   "index",
   "link",
   "address",
-  "amount",
+  "envelope_zec",
+  "send_zec",
   "memo",
   "payment_uri",
 ] as const;
@@ -191,11 +212,6 @@ export function csvCell(value: string): string {
 /**
  * The whole file: a header row and one row per envelope, CRLF terminated per
  * RFC 4180 so Excel on Windows reads it without a fight.
- *
- * `amount` is what the sender must actually send for that envelope — the
- * envelope amount plus the flat service fee — and it is the same number the
- * `payment_uri` carries in its `amount=`. Paying the URI and paying the amount
- * column are therefore the same act, which is the point of having both.
  */
 export function buildCsv(rows: readonly GroupEnvelope[]): string {
   const lines = [CSV_COLUMNS.join(",")];
@@ -205,7 +221,8 @@ export function buildCsv(rows: readonly GroupEnvelope[]): string {
         csvCell(String(r.index)),
         csvCell(r.link),
         csvCell(r.address),
-        csvCell(r.amount),
+        csvCell(r.envelopeZec),
+        csvCell(r.sendZec),
         csvCell(r.memo),
         csvCell(r.uri),
       ].join(","),
@@ -223,7 +240,7 @@ export function csvFilename(count: number, now: Date = new Date()): string {
 
 /** The sum the sender is about to pay, as a ZEC string. */
 export function groupTotal(rows: readonly GroupEnvelope[]): string {
-  return zatToZecString(rows.reduce((acc, r) => acc + r.amountZat, 0n));
+  return zatToZecString(rows.reduce((acc, r) => acc + r.sendZat, 0n));
 }
 
 /**

@@ -75,7 +75,8 @@ M4 (in progress 2026-09-21) Drainer-safe copy, trust-boundary screens, in-browse
    sweep is 23 s tap to done against M3's 49 s and the progress screen keeps
    painting throughout; the sender-side copy is one audited module with "claim"
    banned outright; the trust boundary is its own screen behind a required tick;
-   and group envelopes with a CSV export ship early as an M6 preview. Transcript in web/docs/M4-VERIFICATION.md.
+   and group envelopes with a two-column CSV (envelope_zec, send_zec) ship early
+   as an M6 preview. Transcript in web/docs/M4-VERIFICATION.md.
 M5 Solana receive option via 1Click, with the warning screen and a fresh Solana
    keypair path. Demo video 2 recorded here.
 M6 Group envelopes and CSV export.

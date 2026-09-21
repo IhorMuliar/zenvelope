@@ -81,8 +81,11 @@ never a payment by the recipient to open an envelope.
 **Group envelopes (preview).** The create form already takes an amount per envelope
 and a count of 1 to 50: above one it generates that many secrets and links in the
 browser, shows a table of single-output ZIP-321 URIs, and offers a CSV
-(`index,link,address,amount,memo,payment_uri`). The secrets live in the tab and in
-that file and nowhere else. Batch funding from one wallet is what M6 still owes.
+(`index,link,address,envelope_zec,send_zec,memo,payment_uri`). Two amount columns,
+because they answer two questions: `envelope_zec` is what the person who opens that
+link receives, and `send_zec` is that plus the flat service fee — the amount the
+`payment_uri` asks the sender's wallet for. The secrets live in the tab and in that
+file and nowhere else. Batch funding from one wallet is what M6 still owes.
 
 ## Fee
 
