@@ -285,6 +285,17 @@ async function sweepAndAssert(page: Page, label: string, screenshot?: string): P
       `painted ${durations.map(([s, ms]) => `${s} ${(ms / 1000).toFixed(1)} s`).join(", ")}`,
   );
 
+  // The Done screen's own Timing block, which is what a perf report is made of:
+  // it carries open/scan and the gateway the core raced and won with, neither of
+  // which the stage log above can know.
+  console.log(
+    `M3 real dry run (${label}): open/scan ${await page
+      .getByTestId("timing-open")
+      .innerText()}, witness ${await page
+      .getByTestId("timing-witness")
+      .innerText()} — ${await page.getByTestId("timing-device").innerText()}`,
+  );
+
   // --- the done screen is a DRY RUN, and says so ---------------------------
   await expect(page.getByTestId("sent-heading")).toHaveText("Dry run complete.");
   await expect(page.getByTestId("dry-run-note")).toHaveText(
