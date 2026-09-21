@@ -5,10 +5,10 @@ the evidence it rests on. If something here contradicts another doc, this file w
 
 ## 2026-09-21
 
-### D18 The witness walk is capped at 120 blocks
+### D18 The witness walk is capped at 24 blocks (was 120 earlier the same day)
 
 **Decision.** The sweep's anchor is `min(tip, newest note height + ANCHOR_WALK_CAP)` with
-`ANCHOR_WALK_CAP = 120` blocks — about two and a half hours of mainnet at 75 s per block.
+`ANCHOR_WALK_CAP = 24` blocks, about half an hour of mainnet at 75 s per block. Any finalized tree state's root is a consensus-valid anchor, so the walk exists only to keep the anchor off the exact funding block; 24 blocks costs about 2 s of Sinsemilla hashing on a desktop and under 1 s on a recent phone, where 120 cost about 10 s (PERF §10). It was 120 for a few hours on 2026-09-21.
 The old rule walked all the way to the tip whenever the envelope was within ~1,500 blocks
 of it, and fell back to the note's own block beyond that. Also: in the threaded wasm
 package, the open scan's trial decryption now runs on the rayon pool M4 built for proving
