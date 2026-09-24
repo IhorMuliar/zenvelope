@@ -3,6 +3,9 @@
 #
 #   ./scripts/build-core.sh              # both packages
 #   ZENVELOPE_SKIP_MT=1 ./scripts/build-core.sh   # single-threaded only
+#   ZENVELOPE_SKIP_ST=1 ./scripts/build-core.sh   # threaded only
+#   ZENVELOPE_REQUIRE_MT=1 ./scripts/build-core.sh  # fail, not skip, without nightly (CI)
+#   ZENVELOPE_NIGHTLY=nightly-2026-09-19 ./scripts/build-core.sh  # a pinned nightly
 #
 #   web/src/wasm/core/      single-threaded, the default stable toolchain
 #   web/src/wasm/core-mt/   threaded: orchard/multicore + a wasm-bindgen-rayon pool
@@ -41,14 +44,18 @@ report() {
 
 # ----------------------------------------------------- 1. single-threaded ----
 
-mkdir -p "$out_dir"
+if [ "${ZENVELOPE_SKIP_ST:-0}" = "1" ]; then
+  echo "ZENVELOPE_SKIP_ST=1: skipping the single-threaded build." >&2
+else
+  mkdir -p "$out_dir"
 
-wasm-pack build "$repo_root/crates/core" \
-  --target web \
-  --release \
-  --out-dir "$out_dir"
+  wasm-pack build "$repo_root/crates/core" \
+    --target web \
+    --release \
+    --out-dir "$out_dir"
 
-report "wasm (1 thread)" "$out_dir/zenvelope_core_bg.wasm"
+  report "wasm (1 thread)" "$out_dir/zenvelope_core_bg.wasm"
+fi
 
 # ----------------------------------------------------------- 2. threaded ----
 #
@@ -69,7 +76,8 @@ NOTICE
   exit 0
 fi
 
-if ! rustup toolchain list | grep -q '^nightly'; then
+nightly="${ZENVELOPE_NIGHTLY:-nightly}"
+if ! rustup toolchain list | grep -q "^${nightly}"; then
   cat >&2 <<'NOTICE'
 
 NOTICE: no nightly toolchain, so web/src/wasm/core-mt was NOT built.
@@ -81,6 +89,10 @@ NOTICE: no nightly toolchain, so web/src/wasm/core-mt was NOT built.
         The app still works without it: the core worker falls back to the
         single-threaded package and the footer says "proving: 1 thread".
 NOTICE
+  if [ "${ZENVELOPE_REQUIRE_MT:-0}" = "1" ]; then
+    echo "ZENVELOPE_REQUIRE_MT=1, so a missing nightly is an error." >&2
+    exit 1
+  fi
   exit 0
 fi
 
@@ -91,7 +103,7 @@ export RUSTFLAGS='--cfg getrandom_backend="wasm_js" -C target-feature=+atomics,+
 # invalidate the stable build's cache on every alternation.
 export CARGO_TARGET_DIR="$repo_root/target-mt-core"
 
-rustup run nightly wasm-pack build "$repo_root/crates/core" \
+rustup run "$nightly" wasm-pack build "$repo_root/crates/core" \
   --target web \
   --release \
   --out-dir "$out_dir_mt" \

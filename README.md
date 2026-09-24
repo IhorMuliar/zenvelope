@@ -1,5 +1,7 @@
 # Zenvelope
 
+[![CI](https://github.com/IhorMuliar/zenvelope/actions/workflows/ci.yml/badge.svg)](https://github.com/IhorMuliar/zenvelope/actions/workflows/ci.yml)
+
 **Send shielded money as a link. No wallet, no address, no amount on screen.**
 
 Built for the [Colosseum Crypto World's Fair 2026](https://colosseum.com), Zcash track.
