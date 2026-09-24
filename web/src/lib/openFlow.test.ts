@@ -3,17 +3,29 @@ import {
   BAD_FRAGMENT_COPY,
   NOT_FOUND_COPY,
   SCAN_FAILED_COPY,
+  formatSpendDate,
   gatewayList,
   initialOpenState,
   isScanning,
+  latestSpend,
   openReducer,
   progressLabel,
   runOpen,
+  spentNotes,
+  unspentNotes,
   type OpenEvent,
   type OpenState,
 } from "./openFlow";
 import { formatCount } from "./format";
-import { MOCK_NOTE, MOCK_SCAN_MS, MOCK_TIP_HEIGHT, mockCore } from "../core/mock";
+import {
+  MOCK_LEFT_NOTE,
+  MOCK_NOTE,
+  MOCK_SCAN_MS,
+  MOCK_SPENT,
+  MOCK_SPENT_TIP,
+  MOCK_TIP_HEIGHT,
+  mockCore,
+} from "../core/mock";
 import type { OpenResult, ProgressFn } from "../core/types";
 
 const SECRET = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
@@ -32,9 +44,15 @@ const FOUND: OpenResult = {
       txid: "ab",
       pool: "ironwood",
       action_index: 1,
+      spent: false,
+      spent_txid: null,
+      spent_height: null,
+      spent_time: null,
     },
   ],
+  all_spent: false,
   total_zat: "130000",
+  spent_zat: "0",
   tip_height: 3490500,
   birthday: 3490437,
   birthday_defaulted: false,
@@ -44,8 +62,10 @@ const FOUND: OpenResult = {
 
 const EMPTY: OpenResult = {
   found: false,
+  all_spent: false,
   notes: [],
   total_zat: "0",
+  spent_zat: "0",
   tip_height: 3490500,
   birthday: 3490437,
   birthday_defaulted: false,
@@ -309,5 +329,125 @@ describe("the MOCK scan", () => {
     await expect(
       mockCore.open_envelope("nope", undefined, "main", "https://unused.example", () => {}),
     ).rejects.toThrow();
+  });
+});
+
+/* ------------------------------------------------------------ spent detection */
+
+const SPENT_TXID = "ba0f91cfe7ca33dd269b692bf80027df2681a321215e90ab28c2a56260fa2aad";
+
+const SWEPT_NOTE = {
+  ...FOUND.notes[0],
+  spent: true,
+  spent_txid: SPENT_TXID,
+  spent_height: 3491056,
+  spent_time: 1790020800,
+};
+
+const ALL_SPENT: OpenResult = {
+  ...FOUND,
+  notes: [SWEPT_NOTE],
+  all_spent: true,
+  total_zat: "0",
+  spent_zat: "130000",
+};
+
+const PART_SPENT: OpenResult = {
+  ...FOUND,
+  notes: [SWEPT_NOTE, { ...FOUND.notes[0], amount_zat: "30000", txid: "cd" }],
+  all_spent: false,
+  total_zat: "30000",
+  spent_zat: "130000",
+};
+
+describe("openReducer: spent envelopes", () => {
+  const scanning = run([{ type: "parsed" }, { type: "open" }]);
+
+  it("lands on the already-opened state when every note is spent", () => {
+    const s = openReducer(scanning, { type: "result", result: ALL_SPENT });
+    expect(s.phase).toBe("spent");
+    expect(s.result).toBe(ALL_SPENT);
+    expect(s.message).toBeNull();
+    expect(isScanning(s)).toBe(false);
+  });
+
+  it("opens normally when only some notes are spent", () => {
+    const s = openReducer(scanning, { type: "result", result: PART_SPENT });
+    expect(s.phase).toBe("opened");
+    expect(unspentNotes(s.result!.notes).map((n) => n.amount_zat)).toEqual(["30000"]);
+    expect(spentNotes(s.result!.notes).map((n) => n.amount_zat)).toEqual(["130000"]);
+  });
+
+  it("opens normally when nothing is spent", () => {
+    expect(openReducer(scanning, { type: "result", result: FOUND }).phase).toBe("opened");
+  });
+
+  it("treats notes that are all spent as spent even if all_spent disagrees", () => {
+    const odd = { ...ALL_SPENT, all_spent: false };
+    expect(openReducer(scanning, { type: "result", result: odd }).phase).toBe("spent");
+  });
+
+  it("still says nothing is here when nothing was ever found", () => {
+    expect(openReducer(scanning, { type: "result", result: EMPTY }).phase).toBe("empty");
+  });
+
+  it("is terminal: a retry does not rescan an already-opened envelope", () => {
+    const s = openReducer(scanning, { type: "result", result: ALL_SPENT });
+    expect(openReducer(s, { type: "retry" })).toBe(s);
+    expect(openReducer(s, { type: "progress", scanned: 1, total: 2 })).toBe(s);
+  });
+
+  it("names the latest spend, with its date in UTC", () => {
+    expect(latestSpend(ALL_SPENT.notes)).toEqual({
+      txid: SPENT_TXID,
+      height: 3491056,
+      time: 1790020800,
+    });
+    expect(latestSpend(FOUND.notes)).toBeNull();
+    const later = { ...SWEPT_NOTE, spent_txid: "ef", spent_height: 3491100 };
+    expect(latestSpend([SWEPT_NOTE, later])?.txid).toBe("ef");
+    expect(formatSpendDate(1790020800)).toBe("21 September 2026");
+  });
+});
+
+describe("the MOCK scan: spent variants", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function mockOpen(secret: string): Promise<OpenResult> {
+    vi.useFakeTimers();
+    const p = mockCore.open_envelope(secret, 3490437, "main", "https://unused.example", () => {});
+    await vi.advanceTimersByTimeAsync(MOCK_SCAN_MS + 200);
+    return p;
+  }
+
+  it("spentAll… is found, all spent, and holds nothing", async () => {
+    const r = await mockOpen(`spentAll${SECRET.slice(8)}`);
+    expect(r.found).toBe(true);
+    expect(r.all_spent).toBe(true);
+    expect(r.total_zat).toBe("0");
+    expect(r.spent_zat).toBe(MOCK_NOTE.amount_zat);
+    expect(r.tip_height).toBe(MOCK_SPENT_TIP);
+    expect(r.notes[0].spent_txid).toBe(MOCK_SPENT.txid);
+    expect(r.notes[0].spent_height).toBe(MOCK_SPENT.height);
+    const s = run([{ type: "parsed" }, { type: "open" }, { type: "result", result: r }]);
+    expect(s.phase).toBe("spent");
+  });
+
+  it("spentOne… leaves one note to send on", async () => {
+    const r = await mockOpen(`spentOne${SECRET.slice(8)}`);
+    expect(r.all_spent).toBe(false);
+    expect(r.total_zat).toBe(MOCK_LEFT_NOTE.amount_zat);
+    expect(unspentNotes(r.notes)).toHaveLength(1);
+    const s = run([{ type: "parsed" }, { type: "open" }, { type: "result", result: r }]);
+    expect(s.phase).toBe("opened");
+  });
+
+  it("any other secret is one unspent note, as before", async () => {
+    const r = await mockOpen(SECRET);
+    expect(r.all_spent).toBe(false);
+    expect(r.spent_zat).toBe("0");
+    expect(r.notes.every((n) => !n.spent)).toBe(true);
   });
 });

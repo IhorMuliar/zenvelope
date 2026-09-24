@@ -18,10 +18,22 @@
 //! decrypting an Ironwood action with the Orchard domain silently fails and vice versa.
 //! Both pools are reached with the *same* Orchard incoming viewing key, which is why the
 //! Orchard receiver in a unified address receives Ironwood notes.
+//!
+//! # Spent detection
+//!
+//! Finding a note is not the same as finding money: an envelope that was already swept
+//! still has its note on chain. So the same walk over compact blocks also watches for
+//! the note being spent. A compact action carries 52 bytes of note plaintext, which is
+//! the whole note (version, diversifier, value, rseed), and its `rho` is the action's
+//! own nullifier field, so the compact pass can rebuild the full [`orchard::Note`] and
+//! derive its nullifier with the envelope's full viewing key, `Note::nullifier(fvk)` —
+//! the very call orchard's builder makes when the sweep spends that note. Every action's
+//! `nullifier` field (Ironwood actions for an Ironwood note, Orchard actions for an
+//! Orchard note) is then compared against that set. See [`SpendWatch`].
 
 use std::collections::HashMap;
 
-use orchard::keys::{PreparedIncomingViewingKey, Scope};
+use orchard::keys::{FullViewingKey, PreparedIncomingViewingKey, Scope};
 use orchard::note_encryption::{CompactAction, IronwoodDomain, OrchardDomain};
 
 use zcash_client_backend::decrypt_transaction;
@@ -65,13 +77,33 @@ pub struct ReceivedNote {
     /// list in the transaction. M3 needs it to witness the exact note it is spending:
     /// one transaction can carry several Ironwood actions and only one of them is ours.
     pub action_index: usize,
+    /// The note's nullifier, derived with the envelope's full viewing key exactly as the
+    /// sweep derives it. `None` for a Sapling note, which an envelope cannot receive and
+    /// whose spend is not watched.
+    pub nullifier: Option<[u8; 32]>,
+    /// Where this note was spent, if the scan saw its nullifier on chain.
+    pub spent: Option<SpentAt>,
+}
+
+/// The transaction that spent a note, and the block it was mined in.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SpentAt {
+    /// Display (big-endian) txid, like [`ReceivedNote::txid`].
+    pub txid: String,
+    pub height: u32,
+    /// That block's time, unix seconds, from its compact header. Shown as a date.
+    pub time: u32,
 }
 
 /// Everything an envelope scan found.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OpenResult {
+    /// Every note the envelope ever received, spent or not.
     pub notes: Vec<ReceivedNote>,
+    /// The sum of the **unspent** notes: what the envelope holds now.
     pub total_zat: u64,
+    /// The sum of the notes that were already spent.
+    pub spent_zat: u64,
     pub tip_height: u32,
     /// The height the scan actually started at.
     pub birthday: u32,
@@ -85,8 +117,15 @@ pub struct OpenResult {
 }
 
 impl OpenResult {
+    /// True when the envelope ever received anything, spent or not.
     pub fn found(&self) -> bool {
         !self.notes.is_empty()
+    }
+
+    /// True when notes were found and every one of them has been spent: the envelope
+    /// was already opened and swept.
+    pub fn all_spent(&self) -> bool {
+        self.found() && self.notes.iter().all(|n| n.spent.is_some())
     }
 }
 
@@ -96,6 +135,8 @@ impl OpenResult {
 /// spending key is derived and dropped here: M2 only reads the chain.
 pub struct ViewKeys {
     ufvk: UnifiedFullViewingKey,
+    /// The Orchard full viewing key: what a note's nullifier is derived with.
+    fvk: Option<FullViewingKey>,
     /// External then internal, in that order. Used for both the Orchard and the Ironwood
     /// domain: the domains differ, the key type does not.
     ivks: Vec<PreparedIncomingViewingKey>,
@@ -118,7 +159,8 @@ impl ViewKeys {
                 ]
             })
             .unwrap_or_default();
-        Self { ufvk, ivks }
+        let fvk = ufvk.orchard().cloned();
+        Self { ufvk, fvk, ivks }
     }
 
     /// The account map `decrypt_transaction` wants. One envelope is one account.
@@ -177,19 +219,100 @@ fn has_no_shielded_actions(block: &CompactBlock) -> bool {
 /// transactions are mine", and [`notes_from_transaction`] answers "what is in them" from
 /// the full transaction fetched afterwards.
 pub fn scan_compact_block(block: &CompactBlock, keys: &ViewKeys) -> Vec<TxId> {
-    if keys.ivks.is_empty() || has_no_shielded_actions(block) {
+    scan_block_notes(block, keys)
+        .into_iter()
+        .map(|(txid, _)| txid)
+        .collect()
+}
+
+/// A nullifier found for one of the envelope's notes, with the pool it lives in.
+type FoundNullifier = ([u8; 32], NotePool);
+
+/// One block's decrypted transactions, each with the nullifiers of the notes in it.
+fn scan_block_notes(block: &CompactBlock, keys: &ViewKeys) -> Vec<(TxId, Vec<FoundNullifier>)> {
+    let fvk = match &keys.fvk {
+        Some(fvk) if !keys.ivks.is_empty() => fvk,
+        _ => return Vec::new(),
+    };
+    if has_no_shielded_actions(block) {
         return Vec::new();
     }
     let mut hits = Vec::new();
     for tx in &block.vtx {
-        if compact_tx_is_ours(tx, &keys.ivks) {
-            hits.push(tx.txid());
+        let found = compact_tx_notes(tx, &keys.ivks, fvk);
+        if !found.is_empty() {
+            hits.push((tx.txid(), found));
         }
     }
     hits
 }
 
-/// Trial-decrypts a run of compact blocks and returns every hit as `(height, txid)`.
+/// Which Orchard-family pool a watched nullifier would be revealed in.
+///
+/// An Ironwood note is spent by an Ironwood action and an Orchard note by an Orchard
+/// action, so each nullifier is only compared against its own pool's list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NotePool {
+    Orchard,
+    Ironwood,
+}
+
+/// Derives a note's nullifier with the envelope's full viewing key.
+///
+/// This is the derivation the sweep relies on: `add_ironwood_spend(fvk, note, path)`
+/// hands the note and the same `fvk` to orchard's builder, whose `SpendInfo` puts
+/// `note.nullifier(&fvk)` in the spending action. Nothing here is a reimplementation.
+pub fn note_nullifier(fvk: &FullViewingKey, note: &orchard::Note) -> [u8; 32] {
+    note.nullifier(fvk).to_bytes()
+}
+
+/// The nullifiers of the envelope's notes, and where on chain each one was revealed.
+///
+/// The scan fills the watch list as it decrypts notes and checks every action against
+/// it. It is plain data, merged chunk by chunk on the thread that drives the stream, so
+/// the threaded scan needs no locks: a chunk's workers only ever read it.
+#[derive(Clone, Debug, Default)]
+pub struct SpendWatch {
+    watched: HashMap<[u8; 32], NotePool>,
+    /// Height, txid and block time (unix seconds) of each spend seen.
+    spent: HashMap<[u8; 32], (u32, TxId, u32)>,
+}
+
+impl SpendWatch {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Starts watching for this nullifier in `pool`'s actions.
+    pub fn watch(&mut self, nullifier: [u8; 32], pool: NotePool) {
+        self.watched.insert(nullifier, pool);
+    }
+
+    pub fn is_watching(&self, nullifier: &[u8; 32]) -> bool {
+        self.watched.contains_key(nullifier)
+    }
+
+    /// Where the note with this nullifier was spent, if the scan saw it.
+    pub fn spent_at(&self, nullifier: &[u8; 32]) -> Option<(u32, TxId)> {
+        self.spent
+            .get(nullifier)
+            .map(|&(height, txid, _)| (height, txid))
+    }
+
+    /// The block time of that spend, in unix seconds, as the compact block states it.
+    pub fn spent_time(&self, nullifier: &[u8; 32]) -> Option<u32> {
+        self.spent.get(nullifier).map(|&(_, _, time)| time)
+    }
+
+    /// Records a spend. The first one seen in chain order wins; a second would be a
+    /// double spend, which consensus rejects, so on a valid chain there is none.
+    fn record(&mut self, nullifier: [u8; 32], height: u32, txid: TxId, time: u32) {
+        self.spent.entry(nullifier).or_insert((height, txid, time));
+    }
+}
+
+/// Trial-decrypts a run of compact blocks, returns every hit as `(height, txid)`, and
+/// watches for the envelope's notes being spent.
 ///
 /// This is the shape the scan wants and the one that parallelises: a block decrypts
 /// independently of every other block, so in the `multicore` build the run goes through
@@ -203,53 +326,109 @@ pub fn scan_compact_block(block: &CompactBlock, keys: &ViewKeys) -> Vec<TxId> {
 /// frontier replay downstream is built by appending commitments in chain order, and a
 /// scan that reordered its answers would be a different scan.
 ///
+/// **Spends.** A run is handled in two steps. First every block is trial-decrypted (in
+/// parallel) and the nullifier of each note found is added to `watch`. Then, if `watch`
+/// holds anything, every block of the same run is checked (in parallel again) for an
+/// action revealing a watched nullifier, and the matches are merged in chain order. The
+/// second step runs after the first so that a note funded and spent inside one chunk is
+/// still caught. It costs nothing until the envelope's first note turns up and one hash
+/// lookup per action after that. `watch` carries over from run to run, so a spend in
+/// any later chunk is caught too.
+///
 /// A height that does not fit in a `u32` is a malformed answer from the server and is
 /// reported rather than silently skipped.
 pub fn scan_compact_blocks(
     blocks: &[CompactBlock],
     keys: &ViewKeys,
+    watch: &mut SpendWatch,
 ) -> Result<Vec<(u32, TxId)>, String> {
+    // Every height is checked first, so a key-less scan fails on a malformed block
+    // exactly where a real one would, and nothing below has to.
+    let heights = blocks
+        .iter()
+        .map(check_height)
+        .collect::<Result<Vec<u32>, String>>()?;
     if keys.ivks.is_empty() {
-        // The heights are still checked, so a key-less scan fails on a malformed block
-        // exactly where a real one would.
-        for block in blocks {
-            check_height(block)?;
-        }
         return Ok(Vec::new());
     }
 
     #[cfg(feature = "multicore")]
-    let per_block: Vec<Result<Vec<(u32, TxId)>, String>> =
-        blocks.par_iter().map(|b| scan_one(b, keys)).collect();
+    let per_block: Vec<Vec<(TxId, Vec<FoundNullifier>)>> = blocks
+        .par_iter()
+        .map(|b| scan_block_notes(b, keys))
+        .collect();
     #[cfg(not(feature = "multicore"))]
-    let per_block: Vec<Result<Vec<(u32, TxId)>, String>> =
-        blocks.iter().map(|b| scan_one(b, keys)).collect();
+    let per_block: Vec<Vec<(TxId, Vec<FoundNullifier>)>> =
+        blocks.iter().map(|b| scan_block_notes(b, keys)).collect();
 
     let mut hits = Vec::new();
-    for block in per_block {
-        hits.extend(block?);
+    for (height, found) in heights.iter().zip(per_block) {
+        for (txid, notes) in found {
+            for (nf, pool) in notes {
+                watch.watch(nf, pool);
+            }
+            hits.push((*height, txid));
+        }
+    }
+
+    if !watch.watched.is_empty() {
+        let watched = &watch.watched;
+        #[cfg(feature = "multicore")]
+        let spends: Vec<Vec<([u8; 32], TxId)>> =
+            blocks.par_iter().map(|b| find_spends(b, watched)).collect();
+        #[cfg(not(feature = "multicore"))]
+        let spends: Vec<Vec<([u8; 32], TxId)>> =
+            blocks.iter().map(|b| find_spends(b, watched)).collect();
+        for ((block, height), block_spends) in blocks.iter().zip(&heights).zip(spends) {
+            for (nf, txid) in block_spends {
+                watch.record(nf, *height, txid, block.time);
+            }
+        }
     }
     Ok(hits)
 }
 
-/// One block's hits, tagged with its height. The unit of parallel work.
-fn scan_one(block: &CompactBlock, keys: &ViewKeys) -> Result<Vec<(u32, TxId)>, String> {
-    let height = check_height(block)?;
-    Ok(scan_compact_block(block, keys)
-        .into_iter()
-        .map(|txid| (height, txid))
-        .collect())
+/// Every action in this block that reveals a watched nullifier, in `vtx` order.
+fn find_spends(
+    block: &CompactBlock,
+    watched: &HashMap<[u8; 32], NotePool>,
+) -> Vec<([u8; 32], TxId)> {
+    let mut out = Vec::new();
+    for tx in &block.vtx {
+        let lists = [
+            (&tx.ironwood_actions, NotePool::Ironwood),
+            (&tx.actions, NotePool::Orchard),
+        ];
+        for (actions, pool) in lists {
+            for action in actions {
+                let Ok(nf) = <[u8; 32]>::try_from(action.nullifier.as_slice()) else {
+                    continue;
+                };
+                if watched.get(&nf) == Some(&pool) {
+                    out.push((nf, tx.txid()));
+                }
+            }
+        }
+    }
+    out
 }
 
 fn check_height(block: &CompactBlock) -> Result<u32, String> {
     u32::try_from(block.height).map_err(|_| format!("block height {} is absurd", block.height))
 }
 
-/// True if any Orchard-family action in this compact transaction decrypts to us.
+/// The notes in this compact transaction that decrypt to us, as nullifiers.
 ///
-/// Each pool is skipped outright when the transaction carries no actions in it, so a
-/// transparent or Sapling-only transaction costs two length checks and no allocation.
-fn compact_tx_is_ours(tx: &CompactTx, ivks: &[PreparedIncomingViewingKey]) -> bool {
+/// An empty answer means the transaction is not ours. Each pool is skipped outright when
+/// the transaction carries no actions in it, so a transparent or Sapling-only
+/// transaction costs two length checks and no allocation. The nullifier derivation runs
+/// only for a note that decrypted, which is the envelope's own handful, never per action.
+fn compact_tx_notes(
+    tx: &CompactTx,
+    ivks: &[PreparedIncomingViewingKey],
+    fvk: &FullViewingKey,
+) -> Vec<FoundNullifier> {
+    let mut found = Vec::new();
     if !tx.actions.is_empty() {
         let orchard: Vec<(OrchardDomain, CompactAction)> = tx
             .actions
@@ -257,28 +436,31 @@ fn compact_tx_is_ours(tx: &CompactTx, ivks: &[PreparedIncomingViewingKey]) -> bo
             .filter_map(|a| CompactAction::try_from(a).ok())
             .map(|a| (OrchardDomain::for_compact_action(&a), a))
             .collect();
-        if batch::try_compact_note_decryption(ivks, &orchard)
-            .iter()
-            .any(Option::is_some)
+        for ((note, _), _) in batch::try_compact_note_decryption(ivks, &orchard)
+            .into_iter()
+            .flatten()
         {
-            return true;
+            found.push((note_nullifier(fvk, &note), NotePool::Orchard));
         }
     }
 
     // The Ironwood pass. Same actions shape, same keys, different domain: an Ironwood
     // note is a version 3 plaintext and only `IronwoodDomain` will read it.
-    if tx.ironwood_actions.is_empty() {
-        return false;
+    if !tx.ironwood_actions.is_empty() {
+        let ironwood: Vec<(IronwoodDomain, CompactAction)> = tx
+            .ironwood_actions
+            .iter()
+            .filter_map(|a| CompactAction::try_from(a).ok())
+            .map(|a| (IronwoodDomain::for_compact_action(&a), a))
+            .collect();
+        for ((note, _), _) in batch::try_compact_note_decryption(ivks, &ironwood)
+            .into_iter()
+            .flatten()
+        {
+            found.push((note_nullifier(fvk, &note), NotePool::Ironwood));
+        }
     }
-    let ironwood: Vec<(IronwoodDomain, CompactAction)> = tx
-        .ironwood_actions
-        .iter()
-        .filter_map(|a| CompactAction::try_from(a).ok())
-        .map(|a| (IronwoodDomain::for_compact_action(&a), a))
-        .collect();
-    batch::try_compact_note_decryption(ivks, &ironwood)
-        .iter()
-        .any(Option::is_some)
+    found
 }
 
 /// Parses a raw transaction as served by lightwalletd.
@@ -317,6 +499,8 @@ pub fn notes_from_transaction(
                 txid: txid.clone(),
                 pool: pool_name(out.value_pool()),
                 action_index: out.index(),
+                nullifier: None,
+                spent: None,
             });
         }
     }
@@ -335,10 +519,59 @@ pub fn notes_from_transaction(
                 txid: txid.clone(),
                 pool: pool_name(out.value_pool()),
                 action_index: out.index(),
+                nullifier: keys
+                    .fvk
+                    .as_ref()
+                    .map(|fvk| note_nullifier(fvk, &out.note().0)),
+                spent: None,
             });
         }
     }
     notes
+}
+
+/// Marks each note spent or not from what the block walk saw, and builds the result.
+///
+/// Every Orchard-family note fetched in full must have been watched by the compact
+/// pass: both passes derive the nullifier from the same note with the same key. A note
+/// that was not is refused rather than shown as unspent, because "unspent" would then
+/// be an answer this scan never checked.
+pub fn finish_open(
+    mut notes: Vec<ReceivedNote>,
+    watch: &SpendWatch,
+    tip_height: u32,
+    birthday: u32,
+    birthday_defaulted: bool,
+    scanned_blocks: u32,
+    gateway: String,
+) -> Result<OpenResult, String> {
+    for note in &mut notes {
+        let Some(nf) = note.nullifier else { continue };
+        if !watch.is_watching(&nf) {
+            return Err(format!(
+                "note {} of transaction {} was found in full but not in the block walk, so \
+                 whether it was spent is unknown",
+                note.action_index, note.txid
+            ));
+        }
+        note.spent = watch.spent_at(&nf).map(|(height, txid)| SpentAt {
+            txid: txid.to_string(),
+            height,
+            time: watch.spent_time(&nf).unwrap_or(0),
+        });
+    }
+    let (spent, unspent): (Vec<ReceivedNote>, Vec<ReceivedNote>) =
+        notes.iter().cloned().partition(|n| n.spent.is_some());
+    Ok(OpenResult {
+        total_zat: total_zat(&unspent)?,
+        spent_zat: total_zat(&spent)?,
+        notes,
+        tip_height,
+        birthday,
+        birthday_defaulted,
+        scanned_blocks,
+        gateway,
+    })
 }
 
 /// An output belongs to the envelope when it was decrypted with an incoming viewing key,
@@ -502,6 +735,8 @@ mod tests {
             txid: String::new(),
             pool: "ironwood",
             action_index: 0,
+            nullifier: None,
+            spent: None,
         };
         assert_eq!(total_zat(&[]), Ok(0));
         assert_eq!(total_zat(&[note(130_000), note(70_000)]), Ok(200_000));
@@ -637,7 +872,10 @@ mod tests {
                 ..Default::default()
             })
             .collect();
-        assert_eq!(scan_compact_blocks(&blocks, &keys), Ok(Vec::new()));
+        assert_eq!(
+            scan_compact_blocks(&blocks, &keys, &mut SpendWatch::new()),
+            Ok(Vec::new())
+        );
     }
 
     #[test]
@@ -648,7 +886,7 @@ mod tests {
             height: u64::from(u32::MAX) + 1,
             ..Default::default()
         }];
-        assert!(scan_compact_blocks(&blocks, &keys).is_err());
+        assert!(scan_compact_blocks(&blocks, &keys, &mut SpendWatch::new()).is_err());
     }
 
     #[test]
@@ -677,5 +915,292 @@ mod tests {
             ..Default::default()
         };
         assert!(scan_compact_block(&block, &keys).is_empty());
+    }
+
+    // ------------------------------------------------------------ spent detection
+
+    mod spent {
+        use super::*;
+        use orchard::builder::{Builder, BundleType};
+        use orchard::bundle::{BundleVersion, Flags};
+        use orchard::keys::FullViewingKey;
+        use orchard::note::ExtractedNoteCommitment;
+        use orchard::tree::{MerkleHashOrchard, MerklePath};
+        use orchard::value::NoteValue;
+        use orchard::{Address, Anchor};
+        use rand::rngs::OsRng;
+        use zcash_client_backend::proto::compact_formats::{CompactOrchardAction, CompactTx};
+
+        const SECRET: &str = "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA";
+
+        fn keys() -> (ViewKeys, FullViewingKey) {
+            let keys = ViewKeys::from_secret(SECRET, Network::MainNetwork).unwrap();
+            let fvk = keys.fvk.clone().unwrap();
+            (keys, fvk)
+        }
+
+        fn ironwood() -> (BundleVersion, Flags) {
+            let v = BundleVersion::ironwood_v3();
+            (v, v.default_flags())
+        }
+
+        /// The compact form of every action in a bundle, as lightwalletd serves it.
+        fn compact_actions<T, V>(bundle: &orchard::Bundle<T, V>) -> Vec<CompactOrchardAction>
+        where
+            T: orchard::bundle::Authorization,
+        {
+            bundle
+                .actions()
+                .iter()
+                .map(|a| CompactOrchardAction {
+                    nullifier: a.nullifier().to_bytes().to_vec(),
+                    cmx: a.cmx().to_bytes().to_vec(),
+                    ephemeral_key: a.encrypted_note().epk_bytes.to_vec(),
+                    ciphertext: a.encrypted_note().enc_ciphertext[..52].to_vec(),
+                })
+                .collect()
+        }
+
+        fn block(
+            height: u64,
+            txid: u8,
+            ironwood_actions: Vec<CompactOrchardAction>,
+        ) -> CompactBlock {
+            CompactBlock {
+                height,
+                // A block time that is easy to tell apart from the height.
+                time: 1_758_000_000 + height as u32,
+                vtx: vec![CompactTx {
+                    txid: vec![txid; 32],
+                    ironwood_actions,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }
+        }
+
+        /// A synthetic Ironwood bundle paying `value` to `to`, unproven: the actions
+        /// (commitment, nullifier, ciphertext) are all a scan ever sees.
+        fn fund(
+            to: Address,
+            value: u64,
+        ) -> orchard::Bundle<impl orchard::bundle::Authorization, i64> {
+            let (v, flags) = ironwood();
+            let mut b = Builder::new(BundleType::DEFAULT, v, flags, Anchor::empty_tree()).unwrap();
+            b.add_output(None, to, NoteValue::from_raw(value), [0u8; 512])
+                .unwrap();
+            b.build::<i64>(OsRng).unwrap().unwrap().0
+        }
+
+        /// Spends `note` the way the sweep does, through orchard's builder with the
+        /// envelope's `fvk`, and returns the nullifier the builder put on chain.
+        fn sweep_nullifier(
+            fvk: &FullViewingKey,
+            note: orchard::Note,
+        ) -> ([u8; 32], Vec<CompactOrchardAction>) {
+            let cmx = ExtractedNoteCommitment::from(note.commitment());
+            let path = MerklePath::from_parts(0, [MerkleHashOrchard::from_cmx(&cmx); 32]);
+            let anchor = path.root(cmx);
+            let (v, flags) = ironwood();
+            let mut b = Builder::new(BundleType::DEFAULT, v, flags, anchor).unwrap();
+            b.add_spend(fvk.clone(), note, path).unwrap();
+            let (bundle, meta) = b.build::<i64>(OsRng).unwrap().unwrap();
+            let at = meta.spend_action_index(0).unwrap();
+            let nf = bundle.actions()[at].nullifier().to_bytes();
+            (nf, compact_actions(&bundle))
+        }
+
+        /// The note the compact pass rebuilds from a funding bundle's 52-byte ciphertext.
+        fn compact_note(keys: &ViewKeys, actions: &[CompactOrchardAction]) -> orchard::Note {
+            let pairs: Vec<(IronwoodDomain, CompactAction)> = actions
+                .iter()
+                .filter_map(|a| CompactAction::try_from(a).ok())
+                .map(|a| (IronwoodDomain::for_compact_action(&a), a))
+                .collect();
+            batch::try_compact_note_decryption(&keys.ivks, &pairs)
+                .into_iter()
+                .flatten()
+                .map(|((note, _), _)| note)
+                .next()
+                .expect("the funding output decrypts with the envelope's key")
+        }
+
+        #[test]
+        fn the_scan_derives_the_nullifier_the_sweep_reveals() {
+            let (keys, fvk) = keys();
+            let to = fvk.address_at(0u32, Scope::External);
+            let funding = compact_actions(&fund(to, 130_000));
+
+            // The note as the compact pass sees it: 52 bytes of plaintext and a rho.
+            let note = compact_note(&keys, &funding);
+            assert_eq!(note.value().inner(), 130_000);
+
+            let (swept, _) = sweep_nullifier(&fvk, note);
+            assert_eq!(note_nullifier(&fvk, &note), swept);
+
+            // And the scan's own per-transaction answer carries that same nullifier.
+            let tx = CompactTx {
+                txid: vec![1; 32],
+                ironwood_actions: funding,
+                ..Default::default()
+            };
+            assert_eq!(
+                compact_tx_notes(&tx, &keys.ivks, &fvk),
+                vec![(swept, NotePool::Ironwood)]
+            );
+        }
+
+        #[test]
+        fn another_key_derives_a_different_nullifier() {
+            let (keys, fvk) = keys();
+            let note = compact_note(
+                &keys,
+                &compact_actions(&fund(fvk.address_at(0u32, Scope::External), 1)),
+            );
+            let other = ViewKeys::from_secret(
+                "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+                Network::MainNetwork,
+            )
+            .unwrap()
+            .fvk
+            .unwrap();
+            assert_ne!(note_nullifier(&fvk, &note), note_nullifier(&other, &note));
+        }
+
+        /// Funding in one block, the sweep two blocks later: the walk marks it spent.
+        fn funded_then_swept() -> (ViewKeys, Vec<CompactBlock>, [u8; 32]) {
+            let (keys, fvk) = keys();
+            let funding = compact_actions(&fund(fvk.address_at(0u32, Scope::External), 130_000));
+            let note = compact_note(&keys, &funding);
+            let (nf, sweep_actions) = sweep_nullifier(&fvk, note);
+            let blocks = vec![
+                block(3_490_472, 1, funding),
+                block(3_490_473, 7, Vec::new()),
+                block(3_491_056, 2, sweep_actions),
+            ];
+            (keys, blocks, nf)
+        }
+
+        #[test]
+        fn a_spend_in_the_same_chunk_is_seen() {
+            let (keys, blocks, nf) = funded_then_swept();
+            let mut watch = SpendWatch::new();
+            let hits = scan_compact_blocks(&blocks, &keys, &mut watch).unwrap();
+            assert_eq!(hits, vec![(3_490_472, TxId::from_bytes([1; 32]))]);
+            assert!(watch.is_watching(&nf));
+            assert_eq!(
+                watch.spent_at(&nf),
+                Some((3_491_056, TxId::from_bytes([2; 32])))
+            );
+            assert_eq!(watch.spent_time(&nf), Some(1_758_000_000 + 3_491_056));
+        }
+
+        #[test]
+        fn a_spend_in_a_later_chunk_is_seen() {
+            let (keys, blocks, nf) = funded_then_swept();
+            let mut watch = SpendWatch::new();
+            // One block per chunk: the funding chunk finds the note, the last one the spend.
+            for b in blocks.chunks(1) {
+                scan_compact_blocks(b, &keys, &mut watch).unwrap();
+            }
+            assert_eq!(
+                watch.spent_at(&nf),
+                Some((3_491_056, TxId::from_bytes([2; 32])))
+            );
+        }
+
+        #[test]
+        fn an_unswept_note_stays_unspent() {
+            let (keys, blocks, nf) = funded_then_swept();
+            let mut watch = SpendWatch::new();
+            scan_compact_blocks(&blocks[..2], &keys, &mut watch).unwrap();
+            assert!(watch.is_watching(&nf));
+            assert_eq!(watch.spent_at(&nf), None);
+        }
+
+        #[test]
+        fn the_nullifier_in_the_orchard_list_does_not_spend_an_ironwood_note() {
+            let (keys, mut blocks, nf) = funded_then_swept();
+            // Move the sweep's actions to the Orchard list: wrong pool, no match.
+            let tx = &mut blocks[2].vtx[0];
+            tx.actions = std::mem::take(&mut tx.ironwood_actions);
+            let mut watch = SpendWatch::new();
+            scan_compact_blocks(&blocks, &keys, &mut watch).unwrap();
+            assert_eq!(watch.spent_at(&nf), None);
+        }
+
+        fn note(zat: u64, nf: u8) -> ReceivedNote {
+            ReceivedNote {
+                amount_zat: zat,
+                memo: None,
+                height: 3_490_472,
+                txid: "aa".repeat(32),
+                pool: "ironwood",
+                action_index: 1,
+                nullifier: Some([nf; 32]),
+                spent: None,
+            }
+        }
+
+        fn result(notes: Vec<ReceivedNote>, watch: &SpendWatch) -> Result<OpenResult, String> {
+            finish_open(
+                notes,
+                watch,
+                3_491_100,
+                3_490_437,
+                false,
+                664,
+                String::new(),
+            )
+        }
+
+        #[test]
+        fn totals_count_only_unspent_notes() {
+            let mut watch = SpendWatch::new();
+            watch.watch([1; 32], NotePool::Ironwood);
+            watch.watch([2; 32], NotePool::Ironwood);
+            watch.record([1; 32], 3_491_056, TxId::from_bytes([9; 32]), 1_758_500_000);
+
+            let r = result(vec![note(130_000, 1), note(30_000, 2)], &watch).unwrap();
+            assert_eq!(r.total_zat, 30_000);
+            assert_eq!(r.spent_zat, 130_000);
+            assert!(r.found());
+            assert!(!r.all_spent());
+            let at = r.notes[0].spent.as_ref().unwrap();
+            assert_eq!(at.height, 3_491_056);
+            assert_eq!(at.time, 1_758_500_000);
+            assert_eq!(at.txid, TxId::from_bytes([9; 32]).to_string());
+            assert_eq!(r.notes[1].spent, None);
+        }
+
+        #[test]
+        fn all_spent_means_found_and_nothing_left() {
+            let mut watch = SpendWatch::new();
+            watch.watch([1; 32], NotePool::Ironwood);
+            watch.record([1; 32], 3_491_056, TxId::from_bytes([9; 32]), 1_758_500_000);
+            let r = result(vec![note(130_000, 1)], &watch).unwrap();
+            assert!(r.found() && r.all_spent());
+            assert_eq!(r.total_zat, 0);
+
+            let empty = result(Vec::new(), &SpendWatch::new()).unwrap();
+            assert!(!empty.found() && !empty.all_spent());
+        }
+
+        #[test]
+        fn a_note_the_walk_never_watched_is_an_error_not_unspent() {
+            assert!(result(vec![note(130_000, 1)], &SpendWatch::new()).is_err());
+        }
+
+        #[test]
+        fn a_later_spend_does_not_overwrite_the_first() {
+            let mut watch = SpendWatch::new();
+            watch.watch([1; 32], NotePool::Ironwood);
+            watch.record([1; 32], 10, TxId::from_bytes([2; 32]), 1_758_500_000);
+            watch.record([1; 32], 11, TxId::from_bytes([3; 32]), 1_758_500_000);
+            assert_eq!(
+                watch.spent_at(&[1; 32]),
+                Some((10, TxId::from_bytes([2; 32])))
+            );
+        }
     }
 }

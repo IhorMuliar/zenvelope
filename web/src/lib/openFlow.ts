@@ -2,7 +2,7 @@
  * The open-flow state machine, kept out of the component so it can be tested
  * without a DOM.
  *
- * reading -> sealed -> scanning -> opened | empty | failed
+ * reading -> sealed -> scanning -> opened | spent | empty | failed
  *                        ^                     |
  *                        +----- retry ---------+
  *
@@ -10,7 +10,7 @@
  * and the state only ever carries what is safe to render.
  */
 
-import type { LoadedCore, Network, OpenResult, ProgressFn } from "../core/types";
+import type { FoundNote, LoadedCore, Network, OpenResult, ProgressFn } from "../core/types";
 
 export type OpenPhase =
   | "reading"
@@ -18,6 +18,7 @@ export type OpenPhase =
   | "sealed"
   | "scanning"
   | "opened"
+  | "spent"
   | "empty"
   | "failed";
 
@@ -147,9 +148,14 @@ export function openReducer(state: OpenState, event: OpenEvent): OpenState {
       if (state.phase !== "scanning") return state;
       const { result } = event;
       const got = result.found && result.notes.length > 0;
-      return got
-        ? { ...state, phase: "opened", result, message: null }
-        : { ...state, phase: "empty", result, message: NOT_FOUND_COPY };
+      if (!got) return { ...state, phase: "empty", result, message: NOT_FOUND_COPY };
+      // Found, but every note was already swept: the "already opened" screen,
+      // never the send-on controls. `all_spent` is the core's answer; the note
+      // check is belt and braces for a result that says otherwise.
+      if (result.all_spent || unspentNotes(result.notes).length === 0) {
+        return { ...state, phase: "spent", result, message: null };
+      }
+      return { ...state, phase: "opened", result, message: null };
     }
 
     case "failed":
@@ -163,6 +169,57 @@ export function openReducer(state: OpenState, event: OpenEvent): OpenState {
     default:
       return state;
   }
+}
+
+/**
+ * The notes that are still there: the only ones the send-on flow may be handed.
+ * A spent note in a sweep would be a nullifier the chain has already seen, and
+ * no node accepts that.
+ */
+export function unspentNotes(notes: readonly FoundNote[]): FoundNote[] {
+  return notes.filter((n) => !n.spent);
+}
+
+/** The notes someone already moved on. */
+export function spentNotes(notes: readonly FoundNote[]): FoundNote[] {
+  return notes.filter((n) => n.spent);
+}
+
+/** Where an envelope was swept: the latest spend among its notes. */
+export interface SpendInfo {
+  txid: string;
+  height: number;
+  /** Unix seconds, or null when the core did not report a block time. */
+  time: number | null;
+}
+
+/**
+ * The spend to show on the "already opened" screen. Notes are usually swept
+ * together in one transaction; when they were not, the latest one is the moment
+ * the envelope became empty.
+ */
+export function latestSpend(notes: readonly FoundNote[]): SpendInfo | null {
+  let best: SpendInfo | null = null;
+  for (const n of notes) {
+    if (!n.spent || n.spent_txid === null || n.spent_height === null) continue;
+    if (best === null || n.spent_height > best.height) {
+      best = { txid: n.spent_txid, height: n.spent_height, time: n.spent_time || null };
+    }
+  }
+  return best;
+}
+
+/**
+ * A block time as a date, in UTC so every reader of a screenshot sees the same
+ * day: "21 September 2026".
+ */
+export function formatSpendDate(unixSeconds: number): string {
+  return new Date(unixSeconds * 1000).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
 }
 
 /** True while the page should show the progress screen. */

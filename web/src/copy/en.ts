@@ -475,6 +475,29 @@ export const single = {
  * the copy without knowing the shape of it. Functions are called with sample
  * arguments, because a template is copy too.
  */
+/* ------------------------------------------- open page: already opened (/e) */
+
+/**
+ * What the open page says when the scan found the envelope's notes but saw them
+ * spent on chain. Without this the page would show the money, take a
+ * destination, prove for half a minute, and only then fail at broadcast.
+ */
+export const alreadyOpened = {
+  title: "This envelope was already opened",
+  lede: "Someone with this link already moved the money on, so there is nothing left in it to send.",
+  /** Height and date of the block the sweep was mined in. */
+  when: (height: string, date: string | null) =>
+    date ? `Opened in block ${height}, on ${date}.` : `Opened in block ${height}.`,
+  txLabel: "Moved on in",
+  explorerLink: `See it on ${EXPLORER_NAME}`,
+  received: (zec: string) => `It held ${zec}.`,
+  notYou:
+    "If that was not you, someone else who has this link got there first. The link is the money: whoever holds it can open the envelope, and a spend on chain cannot be undone.",
+  /** Shown on the normal open screen when only some of the notes were already moved on. */
+  partial: (spentZec: string) =>
+    `Another ${spentZec} was sent to this envelope and has already been moved on. It is not counted above.`,
+};
+
 export function allStrings(): string[] {
   const out: string[] = [];
   const walk = (v: unknown): void => {
@@ -497,6 +520,7 @@ export function allStrings(): string[] {
     solanaExit,
     group,
     single,
+    alreadyOpened,
     NEVER_ASK,
     ONLY_ASK,
   });

@@ -1,16 +1,20 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { LIGHTWALLETD, LIGHTWALLETD_FALLBACK } from "../config";
+import { LIGHTWALLETD, LIGHTWALLETD_FALLBACK, explorerTxUrl } from "../config";
+import { alreadyOpened } from "../copy/en";
 import { loadCore, provingNote } from "../core";
 import type { FoundNote, LoadedCore, Network } from "../core/types";
 import {
   BAD_FRAGMENT_COPY,
   LINK_FORGOTTEN_COPY,
   NO_FRAGMENT_COPY,
+  formatSpendDate,
   initialOpenState,
+  latestSpend,
   openReducer,
   progressLabel,
   runOpen,
   stripSecretFromUrl,
+  unspentNotes,
 } from "../lib/openFlow";
 import { formatCount, formatZecAmount, poolLabel, sumZat, truncateTxid } from "../lib/format";
 import { CopyField } from "../components/CopyField";
@@ -220,10 +224,22 @@ export function Open() {
     );
   }
 
+  if (state.phase === "spent" && state.result) {
+    return (
+      <AlreadyOpened
+        notes={state.result.notes}
+        network={link.network}
+        badge={badge}
+        provingFooter={provingFooter}
+      />
+    );
+  }
+
   if (state.phase === "opened" && state.result && core.current && secret.current) {
     return (
       <Opened
-        notes={state.result.notes}
+        notes={unspentNotes(state.result.notes)}
+        spentZat={BigInt(state.result.spent_zat ?? "0")}
         tipHeight={state.result.tip_height}
         badge={badge}
         provingFooter={provingFooter}
@@ -269,8 +285,71 @@ export function Open() {
   );
 }
 
+/**
+ * Found, and already swept. Deliberately no send-on controls: there is nothing
+ * to send, and proving a spend of a note the chain has already seen spent would
+ * only fail at broadcast.
+ */
+function AlreadyOpened({
+  notes,
+  network,
+  badge,
+  provingFooter,
+}: {
+  notes: FoundNote[];
+  network: Network;
+  badge: React.ReactNode;
+  provingFooter: React.ReactNode;
+}) {
+  const spend = latestSpend(notes);
+  const received = sumZat(notes.map((n) => n.amount_zat));
+  const date = spend?.time ? formatSpendDate(spend.time) : null;
+  return (
+    <section className="stack" data-testid="already-opened">
+      <h1>{alreadyOpened.title}</h1>
+      {badge}
+      <div className="unwrap">
+        <Envelope open />
+      </div>
+      <div className="card stack">
+        <p className="lede">{alreadyOpened.lede}</p>
+        {spend ? (
+          <>
+            <p data-testid="spent-when">{alreadyOpened.when(formatCount(spend.height), date)}</p>
+            <CopyField
+              label={alreadyOpened.txLabel}
+              value={spend.txid}
+              display={truncateTxid(spend.txid)}
+              testId="spent-txid"
+            />
+            <p>
+              <a
+                href={explorerTxUrl(spend.txid, network)}
+                target="_blank"
+                rel="noreferrer noopener"
+                data-testid="spent-explorer"
+              >
+                {alreadyOpened.explorerLink}
+              </a>
+            </p>
+          </>
+        ) : null}
+        <p className="hint" data-testid="spent-received">
+          {alreadyOpened.received(formatZecAmount(received))}
+        </p>
+      </div>
+      <p className="fine">{alreadyOpened.notYou}</p>
+      <p className="fine" data-testid="link-forgotten">
+        {LINK_FORGOTTEN_COPY}
+      </p>
+      {provingFooter}
+    </section>
+  );
+}
+
 function Opened({
   notes,
+  spentZat,
   tipHeight,
   badge,
   provingFooter,
@@ -280,7 +359,10 @@ function Opened({
   envelopeAddress,
   openMs,
 }: {
+  /** The UNSPENT notes only: these are what the amount shows and SendOn sweeps. */
   notes: FoundNote[];
+  /** Zatoshi already moved on out of this envelope, for the line about the rest. */
+  spentZat: bigint;
   tipHeight: number;
   badge: React.ReactNode;
   provingFooter: React.ReactNode;
@@ -308,6 +390,11 @@ function Opened({
           {formatZecAmount(total)}
         </p>
         <FiatReveal amount={formatZecAmount(total)} />
+        {spentZat > 0n ? (
+          <p className="hint" data-testid="spent-partial">
+            {alreadyOpened.partial(formatZecAmount(spentZat))}
+          </p>
+        ) : null}
       </div>
 
       {memo ? (

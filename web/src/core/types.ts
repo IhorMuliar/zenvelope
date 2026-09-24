@@ -49,6 +49,19 @@ export interface FoundNote {
    * spend at the right note without scanning the block again.
    */
   action_index: number;
+  /**
+   * True when the scan saw this note's nullifier revealed on chain: someone
+   * already swept it. The core derives the nullifier with the link's full
+   * viewing key exactly as the sweep does, and compares it against every
+   * action in the blocks it walks.
+   */
+  spent: boolean;
+  /** The transaction that spent it, display order. null while unspent. */
+  spent_txid: string | null;
+  /** The block that transaction was mined in. null while unspent. */
+  spent_height: number | null;
+  /** That block's time, unix seconds. null while unspent. */
+  spent_time: number | null;
 }
 
 /**
@@ -58,10 +71,16 @@ export interface FoundNote {
  * see `to_js` in crates/core/src/grpc.rs.
  */
 export interface OpenResult {
+  /** True when the envelope ever received a note, spent or not. */
   found: boolean;
+  /** True when notes were found and every one of them is already spent. */
+  all_spent: boolean;
+  /** Every note the envelope received, spent ones included. */
   notes: FoundNote[];
-  /** Sum of the notes, zatoshi as a decimal string. */
+  /** Sum of the UNSPENT notes, zatoshi as a decimal string: what is there now. */
   total_zat: string;
+  /** Sum of the notes already spent, zatoshi as a decimal string. */
+  spent_zat: string;
   /** Chain tip the scan reached. */
   tip_height: number;
   /** The height the scan actually started at, after defaulting and clamping. */

@@ -28,8 +28,9 @@ use zcash_protocol::TxId;
 use crate::gateway;
 use crate::network_from_str;
 use crate::scan::{
-    normalize_endpoints, notes_from_transaction, parse_transaction, scan_compact_blocks,
-    scan_range, total_zat, OpenResult, ReceivedNote, ViewKeys, SCAN_CHUNK_BLOCKS,
+    finish_open, normalize_endpoints, notes_from_transaction, parse_transaction,
+    scan_compact_blocks, scan_range, OpenResult, ReceivedNote, SpendWatch, ViewKeys,
+    SCAN_CHUNK_BLOCKS,
 };
 use crate::sweep::{sweep, NoteRef, SweepOutcome, SweepRequest};
 
@@ -111,7 +112,13 @@ async fn open_envelope_inner(
     // run over a buffer instead of over one block. Either way the chunks are consumed in
     // the order the stream produced them and `scan_compact_blocks` keeps chain order
     // inside each one, so the hits come out in exactly the order they used to.
+    //
+    // The same walk watches for the envelope's notes being spent: each chunk adds the
+    // nullifiers of the notes it found to `watch` and then checks its own actions
+    // against everything watched so far (see `scan_compact_blocks`). The blocks are
+    // already here, so an already-swept envelope costs no extra round trip.
     let mut hits: BTreeSet<(u32, TxId)> = BTreeSet::new();
+    let mut watch = SpendWatch::new();
     let mut scanned: u32 = 0;
     let mut chunk: Vec<CompactBlock> = Vec::with_capacity(SCAN_CHUNK_BLOCKS);
     report(on_progress, 0, scanned_blocks);
@@ -119,14 +126,14 @@ async fn open_envelope_inner(
     while let Some(block) = stream.next().await {
         chunk.push(block.map_err(|e| format!("block stream failed: {}", e.message()))?);
         if chunk.len() == SCAN_CHUNK_BLOCKS {
-            hits.extend(scan_compact_blocks(&chunk, &keys)?);
+            hits.extend(scan_compact_blocks(&chunk, &keys, &mut watch)?);
             scanned += chunk.len() as u32;
             chunk.clear();
             report(on_progress, scanned, scanned_blocks);
         }
     }
     if !chunk.is_empty() {
-        hits.extend(scan_compact_blocks(&chunk, &keys)?);
+        hits.extend(scan_compact_blocks(&chunk, &keys, &mut watch)?);
         scanned += chunk.len() as u32;
     }
     report(on_progress, scanned, scanned_blocks);
@@ -163,16 +170,15 @@ async fn open_envelope_inner(
         notes.extend(notes_from_transaction(&tx, height, &keys, network));
     }
 
-    let total = total_zat(&notes)?;
-    Ok(OpenResult {
+    finish_open(
         notes,
-        total_zat: total,
+        &watch,
         tip_height,
-        birthday: start,
+        start,
         birthday_defaulted,
         scanned_blocks,
-        gateway: chosen.label,
-    })
+        chosen.label,
+    )
 }
 
 /// Calls the progress callback, ignoring anything it throws.
@@ -218,16 +224,37 @@ fn to_js(result: &OpenResult) -> JsValue {
             "action_index",
             &JsValue::from_f64(note.action_index as f64),
         );
+        // Spent detection: the block walk saw this note's nullifier revealed.
+        set(&o, "spent", &JsValue::from_bool(note.spent.is_some()));
+        match &note.spent {
+            Some(at) => {
+                set(&o, "spent_txid", &JsValue::from_str(&at.txid));
+                set(&o, "spent_height", &JsValue::from_f64(f64::from(at.height)));
+                set(&o, "spent_time", &JsValue::from_f64(f64::from(at.time)));
+            }
+            None => {
+                set(&o, "spent_txid", &JsValue::NULL);
+                set(&o, "spent_height", &JsValue::NULL);
+                set(&o, "spent_time", &JsValue::NULL);
+            }
+        }
         notes.push(&o);
     }
 
     let out = Object::new();
     set(&out, "found", &JsValue::from_bool(result.found()));
+    set(&out, "all_spent", &JsValue::from_bool(result.all_spent()));
     set(&out, "notes", &notes);
+    // Unspent only: what the envelope holds now.
     set(
         &out,
         "total_zat",
         &JsValue::from_str(&result.total_zat.to_string()),
+    );
+    set(
+        &out,
+        "spent_zat",
+        &JsValue::from_str(&result.spent_zat.to_string()),
     );
     set(
         &out,

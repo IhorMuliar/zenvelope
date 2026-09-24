@@ -38,6 +38,10 @@ const NOTES: FoundNote[] = [
     txid: "281e9f7b00000000000000000000000000000000000000000000000000341d43",
     pool: "ironwood",
     action_index: 1,
+    spent: false,
+    spent_txid: null,
+    spent_height: null,
+    spent_time: null,
   },
 ];
 
