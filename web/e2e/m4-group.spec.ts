@@ -169,6 +169,8 @@ describeOnMock("M4: group envelopes (M6 preview)", () => {
       "In the envelope",
       "To send",
       "Link",
+      "Paid",
+      "Final link",
       "Address",
       "Payment URI",
     ]);
@@ -212,7 +214,7 @@ describeOnMock("M4: group envelopes (M6 preview)", () => {
     const csv = readFileSync(path!, "utf8");
     const lines = csv.split("\r\n");
 
-    expect(lines[0]).toBe("index,link,address,envelope_zec,send_zec,memo,payment_uri");
+    expect(lines[0]).toBe("index,link,address,envelope_zec,send_zec,memo,payment_uri,paid_height,final_link");
     expect(lines).toHaveLength(5); // header + 3 rows + the trailing empty
     for (let i = 0; i < 3; i++) {
       const row = lines[i + 1];

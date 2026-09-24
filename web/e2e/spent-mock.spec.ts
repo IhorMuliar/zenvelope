@@ -72,9 +72,11 @@ describeOnMock("spent detection: the screens", () => {
       "Another 0.0013 ZEC was sent to this envelope and has already been moved on. It is not counted above.",
     );
     await expect(page.getByTestId("already-opened")).toHaveCount(0);
-    // One note left: the single-note details, and the send-on flow for it.
+    // One note left: the single-note details. At 0.0003 ZEC it is under the
+    // service-fee floor, so the page says so instead of offering to send it on.
     await expect(page.getByTestId("height")).toHaveText("3,491,056");
-    await expect(page.getByTestId("dest-address")).toBeVisible();
+    await expect(page.getByTestId("too-small")).toBeVisible();
+    await expect(page.getByTestId("dest-address")).toHaveCount(0);
   });
 
   test("an unspent envelope says nothing about spends", async ({ page }) => {

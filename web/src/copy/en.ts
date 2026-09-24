@@ -441,6 +441,10 @@ export const group = {
     /** Envelope plus the flat service fee: the URI's amount, and `send_zec`. */
     send: "To send",
     link: "Link",
+    /** The block the payment arrived in, once this tab has seen it. The CSV's `paid_height`. */
+    paid: "Paid",
+    /** The link with its birthday at the payment's block. The CSV's `final_link`. */
+    finalLink: "Final link",
     address: "Address",
     uri: "Payment URI",
   },
@@ -468,6 +472,44 @@ export const single = {
   sendBody:
     "Once the payment confirms, whoever opens the link unwraps the envelope in their browser and moves the money where they want it.",
   again: "Create another envelope",
+} as const;
+
+/* ------------------------------------------------------------ payment watch */
+
+/**
+ * The create page watching for the sender's payment. Sender-facing: it names
+ * the payment, the block and the faster link, and nothing a recipient does.
+ */
+export const watch = {
+  waitingTitle: "Waiting for your payment",
+  waitingBody:
+    "Keep this tab open and it checks the chain every 45 seconds for the next two hours. When the payment lands you get a faster link to share. Close it and nothing is lost: the link above works just the same.",
+  groupWaitingBody:
+    "Keep this tab open and it checks each envelope in turn, every 45 seconds, for the next two hours. As payments land, the table and the CSV gain the block they arrived in and a faster link for that envelope. Close it and nothing is lost: the links you have work just the same.",
+  firstLook: "First look in about 30 seconds.",
+  checking: "Checking the chain now…",
+  checkingOne: (i: number, n: number) => `Checking envelope ${i} of ${n}…`,
+  nothingYet: (time: string) => `Nothing yet as of ${time}. Next look in 45 seconds.`,
+  paused: "Paused while this tab is in the background. It picks up again when you come back.",
+  stopped: "Stopped checking after two hours. Your link still works as it is.",
+  checkAgain: "Check again",
+  errors: (n: number) =>
+    `${n === 1 ? "One look" : `${n} looks`} could not reach the chain. It keeps trying.`,
+  noHeight:
+    "This page could not read the chain height when it made the link, so it is not watching for the payment. The link works as it is.",
+  paidTitle: (zec: string, height: number) => `Paid: ${zec} ZEC arrived at block ${height}`,
+  finalLabel: "Final link: share this one",
+  finalBody: (height: number) =>
+    `It starts its scan at block ${height}, where the payment is, so it opens after about one block of scanning when used straight away, and it stays faster than the original however long it waits.`,
+  originalLabel: "Original link: still works, slower to open",
+  originalBody: (birthday: number) =>
+    `It scans from block ${birthday}, when the link was made. Both links open the same envelope; send only one of them.`,
+  finalQr: "Show the final link as a QR code",
+  groupPaid: (paid: number, n: number) => `${paid} of ${n} paid.`,
+  groupDone: (n: number) =>
+    `All ${n} paid. Download the CSV again for the final links; the originals still work.`,
+  groupPaidCell: (height: number) => `block ${height}`,
+  groupUnpaidCell: "not yet",
 } as const;
 
 /**
@@ -521,6 +563,7 @@ export function allStrings(): string[] {
     group,
     single,
     alreadyOpened,
+    watch,
     NEVER_ASK,
     ONLY_ASK,
   });
