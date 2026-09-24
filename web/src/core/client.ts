@@ -13,7 +13,7 @@
  */
 
 import type { CoreMethod, WorkerLike } from "./rpc";
-import type { CoreInfo, LoadedCore, ProgressFn, StageFn } from "./types";
+import type { CoreInfo, LoadedCore, ProgressFn, ScanEvent, StageFn } from "./types";
 
 /**
  * Where the callback sits in each core method's argument list. Anything not named here
@@ -77,7 +77,12 @@ export function createCoreClient(
         return;
       }
       case "progress": {
-        onProgress.get(id)?.(msg.scanned as number, msg.total as number);
+        const cb = onProgress.get(id);
+        const event = (msg.event as ScanEvent | null | undefined) ?? null;
+        // The structured event rides along only when there is one, so a plain
+        // count still reaches the callback as exactly two arguments.
+        if (event) cb?.(msg.scanned as number, msg.total as number, event);
+        else cb?.(msg.scanned as number, msg.total as number);
         return;
       }
       case "stage": {

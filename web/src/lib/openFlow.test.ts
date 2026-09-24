@@ -5,8 +5,10 @@ import {
   SCAN_FAILED_COPY,
   formatSpendDate,
   gatewayList,
+  eventFromScan,
   initialOpenState,
   isScanning,
+  isWalking,
   latestSpend,
   openReducer,
   progressLabel,
@@ -26,7 +28,7 @@ import {
   MOCK_TIP_HEIGHT,
   mockCore,
 } from "../core/mock";
-import type { OpenResult, ProgressFn } from "../core/types";
+import type { OpenResult, ProgressFn, ScanEvent } from "../core/types";
 
 const SECRET = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
 
@@ -449,5 +451,159 @@ describe("the MOCK scan: spent variants", () => {
     expect(r.all_spent).toBe(false);
     expect(r.spent_zat).toBe("0");
     expect(r.notes.every((n) => !n.spent)).toBe(true);
+  });
+});
+
+/* ------------------------------------------------------- two-phase open */
+
+const NOTE_EVENT: OpenEvent = {
+  type: "note",
+  notes: FOUND.notes,
+  total_zat: FOUND.total_zat,
+  tip_height: FOUND.tip_height,
+};
+
+describe("openReducer: two-phase open", () => {
+  const scanning = run([{ type: "parsed" }, { type: "open" }]);
+
+  it("moves to verifying on the early note, with the amount known", () => {
+    const s = openReducer(scanning, NOTE_EVENT);
+    expect(s.phase).toBe("verifying");
+    expect(s.early?.total_zat).toBe("130000");
+    expect(s.early?.notes).toHaveLength(1);
+    expect(isScanning(s)).toBe(false);
+    expect(isWalking(s)).toBe(true);
+  });
+
+  it("keeps counting blocks while verifying", () => {
+    const s = run(
+      [NOTE_EVENT, { type: "progress", scanned: 1, total: 3000 }, { type: "progress", scanned: 640, total: 3000 }],
+      scanning,
+    );
+    expect(s.phase).toBe("verifying");
+    expect(s.scanned).toBe(640);
+    expect(s.total).toBe(3000);
+    expect(progressLabel(s, formatCount)).toBe("block 640 of 3,000");
+  });
+
+  it("lands on opened when the walk finds no spend, dropping the early notes", () => {
+    const s = run([NOTE_EVENT, { type: "result", result: FOUND }], scanning);
+    expect(s.phase).toBe("opened");
+    expect(s.result).toBe(FOUND);
+    expect(s.early).toBeNull();
+  });
+
+  it("switches to already opened when the walk finds the spend", () => {
+    const s = run([NOTE_EVENT, { type: "result", result: ALL_SPENT }], scanning);
+    expect(s.phase).toBe("spent");
+    expect(s.early).toBeNull();
+  });
+
+  it("a failure mid-check is a failure, and a retry scans from the start", () => {
+    const failed = run([NOTE_EVENT, { type: "failed", message: SCAN_FAILED_COPY }], scanning);
+    expect(failed.phase).toBe("failed");
+    expect(failed.early).toBeNull();
+    const again = openReducer(failed, { type: "retry" });
+    expect(again.phase).toBe("scanning");
+    expect(again.early).toBeNull();
+  });
+
+  it("a failover mid-check keeps the amount and restarts the count", () => {
+    const s = run(
+      [NOTE_EVENT, { type: "progress", scanned: 900, total: 3000 }, { type: "attempt", attempt: 1 }],
+      scanning,
+    );
+    expect(s.phase).toBe("verifying");
+    expect(s.attempt).toBe(1);
+    expect(s.scanned).toBe(0);
+    expect(s.early?.total_zat).toBe("130000");
+  });
+
+  it("ignores an early note outside a walk, or with no notes in it", () => {
+    expect(openReducer(initialOpenState, NOTE_EVENT)).toBe(initialOpenState);
+    const opened = openReducer(scanning, { type: "result", result: FOUND });
+    expect(openReducer(opened, NOTE_EVENT)).toBe(opened);
+    expect(openReducer(scanning, { ...NOTE_EVENT, notes: [] } as OpenEvent)).toBe(scanning);
+  });
+
+  it("reads the note out of a progress call's third argument, and nothing else", () => {
+    const event: ScanEvent = {
+      kind: "note",
+      phase: "verify",
+      notes: FOUND.notes,
+      total_zat: "130000",
+      spent_zat: "0",
+      tip_height: 3490500,
+      birthday: 3490472,
+    };
+    expect(eventFromScan(event)).toEqual(NOTE_EVENT);
+    expect(eventFromScan({ kind: "progress", phase: "find" })).toBeNull();
+    expect(eventFromScan(undefined)).toBeNull();
+  });
+});
+
+describe("the MOCK scan: two-phase open", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function mockOpen(
+    secret: string,
+    birthday: number,
+  ): Promise<{ result: OpenResult; events: Array<{ at: number; event: ScanEvent | undefined }> }> {
+    vi.useFakeTimers();
+    const events: Array<{ at: number; event: ScanEvent | undefined }> = [];
+    const t0 = Date.now();
+    const p = mockCore.open_envelope(secret, birthday, "main", "https://unused.example", (_s, _t, e) =>
+      events.push({ at: Date.now() - t0, event: e }),
+    );
+    await vi.advanceTimersByTimeAsync(MOCK_SCAN_MS + 200);
+    return { result: await p, events };
+  }
+
+  const notes = <T extends { event: ScanEvent | undefined }>(events: T[]): T[] =>
+    events.filter((e) => e.event?.kind === "note");
+
+  it("a birthday at the note's block reveals it early, then verifies", async () => {
+    const { result, events } = await mockOpen(SECRET, MOCK_NOTE.height);
+    const early = notes(events);
+    expect(early).toHaveLength(1);
+    expect(early[0].at).toBeLessThan(1000);
+    const e = early[0].event as Extract<ScanEvent, { kind: "note" }>;
+    expect(e.total_zat).toBe("130000");
+    expect(e.notes[0].spent).toBe(false);
+    // Everything after the reveal is the verify phase.
+    const after = events.slice(events.indexOf(early[0]) + 1);
+    expect(after.every((x) => x.event?.phase === "verify")).toBe(true);
+    expect(result.all_spent).toBe(false);
+    expect(result.notes).toHaveLength(1);
+  });
+
+  it("an original link keeps the one-phase scan", async () => {
+    const { events } = await mockOpen(SECRET, 3490437);
+    expect(notes(events)).toHaveLength(0);
+    expect(events.every((x) => x.event?.phase !== "verify")).toBe(true);
+  });
+
+  it("a spent envelope reveals early and then ends already opened", async () => {
+    const { result, events } = await mockOpen(`spentAll${SECRET.slice(8)}`, MOCK_NOTE.height);
+    expect(notes(events)).toHaveLength(1);
+    expect(result.all_spent).toBe(true);
+    const e = notes(events)[0].event!;
+    const s = run([
+      { type: "parsed" },
+      { type: "open" },
+      eventFromScan(e)!,
+      { type: "result", result },
+    ]);
+    expect(s.phase).toBe("spent");
+  });
+
+  it("spentOne from the final link only knows the first block's note", async () => {
+    const { result } = await mockOpen(`spentOne${SECRET.slice(8)}`, MOCK_NOTE.height);
+    expect(result.notes).toHaveLength(1);
+    expect(result.all_spent).toBe(true);
+    expect(result.total_zat).toBe("0");
+    expect(result.spent_zat).toBe(MOCK_NOTE.amount_zat);
   });
 });

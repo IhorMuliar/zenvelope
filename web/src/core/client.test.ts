@@ -131,6 +131,12 @@ describe("the forwarded callbacks", () => {
       [60, 100],
     ]);
 
+    // The two-phase open's structured event is forwarded as the third argument.
+    const note = { kind: "note", phase: "verify", notes: [], total_zat: "0" };
+    worker.reply({ kind: "progress", id: call.id, scanned: 1, total: 100, event: note });
+    worker.reply({ kind: "progress", id: call.id, scanned: 2, total: 100, event: null });
+    expect(onProgress.mock.calls.slice(2)).toEqual([[1, 100, note], [2, 100]]);
+
     worker.reply({ kind: "result", id: call.id, value: { found: false, notes: [] } });
     await expect(pending).resolves.toMatchObject({ found: false });
   });

@@ -164,6 +164,19 @@ the endpoint must be a gRPC-web gateway: `https://zjs.zec.rocks/mainnet`, failin
 `https://zcash-mainnet.chainsafe.dev` (D3). Progress is reported once per decrypted chunk
 (`SCAN_CHUNK_BLOCKS`, 64 blocks) and once at each end of the range.
 
+#### Two-phase open: reveal first, then verify
+
+The walk's first block, the birthday, is scanned on its own. A final link
+(`#<secret>.<H>`, H the block the payment was mined in) puts the note in exactly that
+block, so it is found, fetched in full and handed to `on_progress` as an early
+`{ kind: "note" }` event before the rest of the range has been read. The rest of the walk
+then runs in `ScanMode::SpendsOnly`: no trial decryption, only a hash lookup of every
+action's nullifier against the notes already found. That is download-bound rather than
+CPU-bound (PERF §12: a 3,265-block check in under a second). When the first block holds
+nothing, as with an original link whose birthday is the creation height, the walk stays
+`ScanMode::Full` and is the scan described above. The trade: a `SpendsOnly` walk does not
+look for a second payment in a later block; the original link's full walk still would.
+
 #### What the compact pass does not do
 
 Trial decryption is the whole cost of an open (about 96% of it; see
@@ -656,7 +669,7 @@ const uri = core.payment_uri(address, 10_000n + 100_000n, "Coffee");
 | `zat_to_zec_string` | `(zat: bigint \| string \| number) => string` |
 | `zec_string_to_zat` | `(zec: string) => bigint` |
 | `is_orchard_only` | `(address: string) => boolean` — decodes the address and confirms one receiver, Orchard |
-| `open_envelope` | `(secret: string, birthday: number \| undefined, network: "main" \| "test", lightwalletd_url: string, on_progress?: (scanned: number, total: number) => void) => Promise<Opened>` |
+| `open_envelope` | `(secret: string, birthday: number \| undefined, network: "main" \| "test", lightwalletd_url: string, on_progress?: (scanned: number, total: number, event?: ScanEvent) => void) => Promise<Opened>` |
 | `classify_address` | `(address: string, network: "main" \| "test") => { kind: Kind, reason: string \| null }` — never throws on a bad address |
 | `new_wallet` | `(network: "main" \| "test", birthday: number) => { mnemonic: string, address: string, ufvk: string, birthday: number }` |
 | `warm_proving_key` | `() => Promise<number>` — builds the Ironwood proving key now; resolves with the milliseconds it took |
@@ -699,7 +712,11 @@ interface Opened {
 
 `open_envelope` rejects with a plain string like every other export. `on_progress` is
 optional and anything it throws is ignored: a scan must not die because a progress bar
-did.
+did. Its third argument is `{ kind: "progress", phase: "find" | "verify" }` with every
+count, and once, when the birthday block held the envelope's notes,
+`{ kind: "note", phase: "verify", notes, total_zat, spent_zat, tip_height, birthday }`,
+`notes` shaped exactly as in the result. A note from that event may still turn out spent
+when the walk reaches the tip; the result is the answer.
 
 ### `classify_address` and `new_wallet`
 

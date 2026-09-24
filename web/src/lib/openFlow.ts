@@ -3,20 +3,34 @@
  * without a DOM.
  *
  * reading -> sealed -> scanning -> opened | spent | empty | failed
- *                        ^                     |
- *                        +----- retry ---------+
+ *                        |   ^                 ^               |
+ *                        v   +---- retry ------|---------------+
+ *                     verifying ---------------+
+ *
+ * `verifying` is the two-phase open: the core found the note in the link's
+ * first block and reported it early, so the amount is on screen while the walk
+ * to the tip checks that it has not been spent. Its result lands on `opened` or
+ * `spent` exactly as a one-phase scan's does.
  *
  * Nothing here holds the secret: the component passes it straight to the core
  * and the state only ever carries what is safe to render.
  */
 
-import type { FoundNote, LoadedCore, Network, OpenResult, ProgressFn } from "../core/types";
+import type {
+  FoundNote,
+  LoadedCore,
+  Network,
+  OpenResult,
+  ProgressFn,
+  ScanEvent,
+} from "../core/types";
 
 export type OpenPhase =
   | "reading"
   | "invalid"
   | "sealed"
   | "scanning"
+  | "verifying"
   | "opened"
   | "spent"
   | "empty"
@@ -32,6 +46,18 @@ export interface OpenState {
   attempt: number;
   result: OpenResult | null;
   message: string | null;
+  /**
+   * The early reveal, while `verifying`: the notes the first block held. They
+   * are shown, never swept: the send-on flow waits for `result`.
+   */
+  early: EarlyNotes | null;
+}
+
+/** What the early note event carries that the screens need. */
+export interface EarlyNotes {
+  notes: FoundNote[];
+  total_zat: string;
+  tip_height: number;
 }
 
 export type OpenEvent =
@@ -39,6 +65,7 @@ export type OpenEvent =
   | { type: "invalid"; message: string }
   | { type: "open" }
   | { type: "progress"; scanned: number; total: number }
+  | { type: "note"; notes: FoundNote[]; total_zat: string; tip_height: number }
   | { type: "attempt"; attempt: number }
   | { type: "result"; result: OpenResult }
   | { type: "failed"; message: string }
@@ -51,6 +78,7 @@ export const initialOpenState: OpenState = {
   attempt: 0,
   result: null,
   message: null,
+  early: null,
 };
 
 const SCANNING: OpenState = {
@@ -129,10 +157,25 @@ export function openReducer(state: OpenState, event: OpenEvent): OpenState {
       return state.phase === "sealed" ? { ...SCANNING } : state;
 
     case "attempt":
-      return state.phase === "scanning" ? { ...state, attempt: event.attempt } : state;
+      if (state.phase === "scanning") return { ...state, attempt: event.attempt };
+      // A retry on the other gateway walks again from the birthday: keep the
+      // amount on screen, restart the count.
+      if (state.phase === "verifying")
+        return { ...state, attempt: event.attempt, scanned: 0 };
+      return state;
+
+    case "note": {
+      if (state.phase !== "scanning" && state.phase !== "verifying") return state;
+      if (event.notes.length === 0) return state;
+      return {
+        ...state,
+        phase: "verifying",
+        early: { notes: event.notes, total_zat: event.total_zat, tip_height: event.tip_height },
+      };
+    }
 
     case "progress": {
-      if (state.phase !== "scanning") return state;
+      if (!isWalking(state)) return state;
       // Progress only ever moves forward, and a late 0 total never erases a
       // span we already know.
       const total = event.total > 0 ? event.total : state.total;
@@ -145,22 +188,23 @@ export function openReducer(state: OpenState, event: OpenEvent): OpenState {
     }
 
     case "result": {
-      if (state.phase !== "scanning") return state;
+      if (!isWalking(state)) return state;
       const { result } = event;
       const got = result.found && result.notes.length > 0;
-      if (!got) return { ...state, phase: "empty", result, message: NOT_FOUND_COPY };
+      if (!got)
+        return { ...state, phase: "empty", result, message: NOT_FOUND_COPY, early: null };
       // Found, but every note was already swept: the "already opened" screen,
       // never the send-on controls. `all_spent` is the core's answer; the note
       // check is belt and braces for a result that says otherwise.
       if (result.all_spent || unspentNotes(result.notes).length === 0) {
-        return { ...state, phase: "spent", result, message: null };
+        return { ...state, phase: "spent", result, message: null, early: null };
       }
-      return { ...state, phase: "opened", result, message: null };
+      return { ...state, phase: "opened", result, message: null, early: null };
     }
 
     case "failed":
-      return state.phase === "scanning"
-        ? { ...state, phase: "failed", message: event.message }
+      return isWalking(state)
+        ? { ...state, phase: "failed", message: event.message, early: null }
         : state;
 
     case "retry":
@@ -225,6 +269,25 @@ export function formatSpendDate(unixSeconds: number): string {
 /** True while the page should show the progress screen. */
 export function isScanning(state: OpenState): boolean {
   return state.phase === "scanning";
+}
+
+/** True while a walk is running: looking for notes, or checking a found one. */
+export function isWalking(state: OpenState): boolean {
+  return state.phase === "scanning" || state.phase === "verifying";
+}
+
+/**
+ * The event a progress call's third argument turns into, or null when it is
+ * only a count. Kept here so the page's callback is one line.
+ */
+export function eventFromScan(event: ScanEvent | undefined): OpenEvent | null {
+  if (!event || event.kind !== "note") return null;
+  return {
+    type: "note",
+    notes: event.notes,
+    total_zat: event.total_zat,
+    tip_height: event.tip_height,
+  };
 }
 
 /** The progress line, or null while the span is still unknown. */

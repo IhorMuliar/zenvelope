@@ -342,6 +342,65 @@ pub fn scan_compact_blocks(
     keys: &ViewKeys,
     watch: &mut SpendWatch,
 ) -> Result<Vec<(u32, TxId)>, String> {
+    scan_compact_blocks_in(blocks, keys, watch, ScanMode::Full)
+}
+
+/// How the block walk treats each block it is handed.
+///
+/// # Two-phase open
+///
+/// A final link (`#<secret>.<H>`) carries the height the envelope was paid at, so the
+/// note is in the walk's very first block. `open_envelope` therefore scans that one block
+/// on its own first. When it holds a note, the note is reported at once and the rest of
+/// the walk to the tip only has one question left to answer — has that note been spent
+/// since? — which is a hash lookup per action, with no trial decryption at all
+/// ([`ScanMode::SpendsOnly`]). That makes the rest of the walk bound by the download, not
+/// the CPU. When the first block holds nothing (an original link, whose birthday is the
+/// creation height, or a link with no birthday), the walk stays [`ScanMode::Full`] and is
+/// exactly the scan it always was.
+///
+/// The trade, stated plainly: in `SpendsOnly` a *second* payment to the same envelope in
+/// a later block is not looked for. An envelope is paid once, by the one payment its
+/// final link was issued for; a second payment would still be found by opening the
+/// original link, whose walk is `Full` from the creation height.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScanMode {
+    /// Trial-decrypt every block for notes, and check every action for a spend.
+    Full,
+    /// Notes are already known: only check every action for their spends.
+    SpendsOnly,
+}
+
+impl ScanMode {
+    /// The mode for the rest of the walk, given the hits in its first block.
+    pub fn after_first_block(first_block_hits: &[(u32, TxId)]) -> Self {
+        if first_block_hits.is_empty() {
+            ScanMode::Full
+        } else {
+            ScanMode::SpendsOnly
+        }
+    }
+
+    /// The name the progress events carry: `"find"` while notes are still being looked
+    /// for, `"verify"` once they are known and only their spends are.
+    pub fn phase(self) -> &'static str {
+        match self {
+            ScanMode::Full => "find",
+            ScanMode::SpendsOnly => "verify",
+        }
+    }
+}
+
+/// [`scan_compact_blocks`], in the given [`ScanMode`].
+///
+/// In `SpendsOnly` nothing is trial-decrypted and no hit is ever returned: the run only
+/// records spends of the nullifiers already in `watch`.
+pub fn scan_compact_blocks_in(
+    blocks: &[CompactBlock],
+    keys: &ViewKeys,
+    watch: &mut SpendWatch,
+    mode: ScanMode,
+) -> Result<Vec<(u32, TxId)>, String> {
     // Every height is checked first, so a key-less scan fails on a malformed block
     // exactly where a real one would, and nothing below has to.
     let heights = blocks
@@ -349,6 +408,10 @@ pub fn scan_compact_blocks(
         .map(check_height)
         .collect::<Result<Vec<u32>, String>>()?;
     if keys.ivks.is_empty() {
+        return Ok(Vec::new());
+    }
+    if mode == ScanMode::SpendsOnly {
+        record_spends(blocks, &heights, watch);
         return Ok(Vec::new());
     }
 
@@ -371,21 +434,28 @@ pub fn scan_compact_blocks(
         }
     }
 
-    if !watch.watched.is_empty() {
-        let watched = &watch.watched;
-        #[cfg(feature = "multicore")]
-        let spends: Vec<Vec<([u8; 32], TxId)>> =
-            blocks.par_iter().map(|b| find_spends(b, watched)).collect();
-        #[cfg(not(feature = "multicore"))]
-        let spends: Vec<Vec<([u8; 32], TxId)>> =
-            blocks.iter().map(|b| find_spends(b, watched)).collect();
-        for ((block, height), block_spends) in blocks.iter().zip(&heights).zip(spends) {
-            for (nf, txid) in block_spends {
-                watch.record(nf, *height, txid, block.time);
-            }
+    record_spends(blocks, &heights, watch);
+    Ok(hits)
+}
+
+/// Checks every action of a run for a watched nullifier and records the spends found,
+/// in chain order. Does nothing while nothing is watched.
+fn record_spends(blocks: &[CompactBlock], heights: &[u32], watch: &mut SpendWatch) {
+    if watch.watched.is_empty() {
+        return;
+    }
+    let watched = &watch.watched;
+    #[cfg(feature = "multicore")]
+    let spends: Vec<Vec<([u8; 32], TxId)>> =
+        blocks.par_iter().map(|b| find_spends(b, watched)).collect();
+    #[cfg(not(feature = "multicore"))]
+    let spends: Vec<Vec<([u8; 32], TxId)>> =
+        blocks.iter().map(|b| find_spends(b, watched)).collect();
+    for ((block, height), block_spends) in blocks.iter().zip(heights).zip(spends) {
+        for (nf, txid) in block_spends {
+            watch.record(nf, *height, txid, block.time);
         }
     }
-    Ok(hits)
 }
 
 /// Every action in this block that reveals a watched nullifier, in `vtx` order.
@@ -1127,6 +1197,83 @@ mod tests {
             let mut watch = SpendWatch::new();
             scan_compact_blocks(&blocks, &keys, &mut watch).unwrap();
             assert_eq!(watch.spent_at(&nf), None);
+        }
+
+        /// The walk `open_envelope` makes, minus the network: the first block on its
+        /// own in full, then the rest in whatever mode that block decided.
+        /// First-block hits, the rest's hits, the mode chosen, and the watch at the tip.
+        type Walked = (Vec<(u32, TxId)>, Vec<(u32, TxId)>, ScanMode, SpendWatch);
+
+        fn two_phase_walk(keys: &ViewKeys, blocks: &[CompactBlock]) -> Walked {
+            let mut watch = SpendWatch::new();
+            let first = scan_compact_blocks(&blocks[..1], keys, &mut watch).unwrap();
+            let mode = ScanMode::after_first_block(&first);
+            let mut rest = Vec::new();
+            for chunk in blocks[1..].chunks(2) {
+                rest.extend(scan_compact_blocks_in(chunk, keys, &mut watch, mode).unwrap());
+            }
+            (first, rest, mode, watch)
+        }
+
+        #[test]
+        fn the_mode_follows_the_first_block() {
+            assert_eq!(ScanMode::after_first_block(&[]), ScanMode::Full);
+            assert_eq!(
+                ScanMode::after_first_block(&[(1, TxId::from_bytes([1; 32]))]),
+                ScanMode::SpendsOnly
+            );
+            assert_eq!(ScanMode::Full.phase(), "find");
+            assert_eq!(ScanMode::SpendsOnly.phase(), "verify");
+        }
+
+        #[test]
+        fn a_note_in_the_first_block_switches_to_spends_only_and_still_sees_the_spend() {
+            let (keys, blocks, nf) = funded_then_swept();
+            let (first, rest, mode, watch) = two_phase_walk(&keys, &blocks);
+            assert_eq!(first, vec![(3_490_472, TxId::from_bytes([1; 32]))]);
+            assert_eq!(mode, ScanMode::SpendsOnly);
+            assert!(rest.is_empty());
+            assert_eq!(
+                watch.spent_at(&nf),
+                Some((3_491_056, TxId::from_bytes([2; 32])))
+            );
+        }
+
+        #[test]
+        fn an_empty_first_block_keeps_the_full_scan() {
+            let (keys, mut blocks, nf) = funded_then_swept();
+            // The original link: its birthday is the creation height, before the payment.
+            blocks.insert(0, block(3_490_400, 9, Vec::new()));
+            let (first, rest, mode, watch) = two_phase_walk(&keys, &blocks);
+            assert!(first.is_empty());
+            assert_eq!(mode, ScanMode::Full);
+            assert_eq!(rest, vec![(3_490_472, TxId::from_bytes([1; 32]))]);
+            assert_eq!(
+                watch.spent_at(&nf),
+                Some((3_491_056, TxId::from_bytes([2; 32])))
+            );
+        }
+
+        #[test]
+        fn spends_only_does_no_trial_decryption() {
+            let (keys, blocks, nf) = funded_then_swept();
+            // Nothing watched: a SpendsOnly run over the funding block finds no note.
+            let mut watch = SpendWatch::new();
+            let hits =
+                scan_compact_blocks_in(&blocks, &keys, &mut watch, ScanMode::SpendsOnly).unwrap();
+            assert!(hits.is_empty());
+            assert!(!watch.is_watching(&nf));
+            assert_eq!(watch.spent_at(&nf), None);
+        }
+
+        #[test]
+        fn spends_only_still_refuses_an_absurd_height() {
+            let (keys, mut blocks, _) = funded_then_swept();
+            blocks[1].height = u64::from(u32::MAX) + 1;
+            let mut watch = SpendWatch::new();
+            assert!(
+                scan_compact_blocks_in(&blocks, &keys, &mut watch, ScanMode::SpendsOnly).is_err()
+            );
         }
 
         fn note(zat: u64, nf: u8) -> ReceivedNote {

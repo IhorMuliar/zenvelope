@@ -540,6 +540,24 @@ export const alreadyOpened = {
     `Another ${spentZec} was sent to this envelope and has already been moved on. It is not counted above.`,
 };
 
+/* ------------------------------------ open page: the spend check (/e) */
+
+/**
+ * A final link carries the block the envelope was paid in, so the core finds the
+ * note in the first block it reads and the page shows it at once. The walk to
+ * the chain tip then only checks that nobody has moved it on; until that is
+ * done, nothing can be sent.
+ */
+export const spendCheck = {
+  /** Shown under the amount while the walk runs; the span is not known yet. */
+  starting: "Checking it hasn't been opened…",
+  line: (scanned: string, total: string) =>
+    `Checking it hasn't been opened… block ${scanned} of ${total}`,
+  sendOnTitle: "Send it on",
+  sendOnWaiting: "You can send it on as soon as the check finishes.",
+  sendOnButton: "Checking…",
+};
+
 export function allStrings(): string[] {
   const out: string[] = [];
   const walk = (v: unknown): void => {
@@ -563,6 +581,7 @@ export function allStrings(): string[] {
     group,
     single,
     alreadyOpened,
+    spendCheck,
     watch,
     NEVER_ASK,
     ONLY_ASK,

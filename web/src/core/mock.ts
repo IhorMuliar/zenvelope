@@ -9,6 +9,7 @@
 
 import type {
   AddressClass,
+  FoundNote,
   Derived,
   SyncCore,
   Network,
@@ -17,6 +18,8 @@ import type {
   OpenResult,
   ParsedFragment,
   ProgressFn,
+  ScanEvent,
+  ScanPhase,
   StageFn,
   SweepResult,
   SweepStage,
@@ -325,50 +328,120 @@ export async function openEnvelope(
   const total = birthday !== undefined && birthday < tip ? tip - birthday + 1 : MOCK_DEFAULT_SPAN;
   const ticks = Math.round(MOCK_SCAN_MS / MOCK_TICK_MS);
 
+  // What this look finds, worked out up front; the ticks below only pace it.
+  const looks = freshLooks.get(secret_b64url);
+  if (looks !== undefined) freshLooks.set(secret_b64url, looks + 1);
+  let result: OpenResult;
+  if (looks !== undefined && looks < MOCK_UNPAID_LOOKS) {
+    result = {
+      found: false,
+      all_spent: false,
+      notes: [],
+      total_zat: "0",
+      spent_zat: "0",
+      tip_height: tip,
+      birthday: tip - total + 1,
+      birthday_defaulted: birthday === undefined,
+      scanned_blocks: total,
+      gateway: MOCK_GATEWAY,
+    };
+  } else {
+    result = mockResult(variant, birthday, total);
+    const tiny = secret_b64url === MOCK_TINY_SECRET;
+    if (tiny || looks !== undefined) {
+      const amount_zat = tiny ? MOCK_TINY_ZAT : MOCK_NOTE.amount_zat;
+      result.notes = [
+        looks !== undefined
+          ? { ...MOCK_NOTE, amount_zat, height: MOCK_PAID_HEIGHT }
+          : { ...MOCK_NOTE, amount_zat },
+      ];
+      result.total_zat = amount_zat;
+    }
+  }
+
+  // Two-phase open, as the real core does it: when the link's birthday is the
+  // block a note sits in (a final link), that note is revealed after the first
+  // block and the rest of the walk only checks for its spend. A later note is
+  // then not looked for, so it is not in the result either.
+  const early =
+    birthday !== undefined && result.notes.some((n) => n.height === birthday)
+      ? earlyReveal(result, birthday)
+      : null;
+  if (early) result = early.final;
+
   return new Promise((resolve) => {
     let tick = 0;
+    let phase: ScanPhase = "find";
     const timer = setInterval(() => {
       tick += 1;
       if (tick >= ticks) {
         clearInterval(timer);
-        on_progress?.(total, total);
-        const looks = freshLooks.get(secret_b64url);
-        if (looks !== undefined) freshLooks.set(secret_b64url, looks + 1);
-        if (looks !== undefined && looks < MOCK_UNPAID_LOOKS) {
-          resolve({
-            found: false,
-            all_spent: false,
-            notes: [],
-            total_zat: "0",
-            spent_zat: "0",
-            tip_height: tip,
-            birthday: tip - total + 1,
-            birthday_defaulted: birthday === undefined,
-            scanned_blocks: total,
-            gateway: MOCK_GATEWAY,
-          });
-          return;
-        }
-        const result = mockResult(variant, birthday, total);
-        const tiny = secret_b64url === MOCK_TINY_SECRET;
-        if (tiny || looks !== undefined) {
-          const amount_zat = tiny ? MOCK_TINY_ZAT : MOCK_NOTE.amount_zat;
-          result.notes = [
-            looks !== undefined
-              ? { ...MOCK_NOTE, amount_zat, height: MOCK_PAID_HEIGHT }
-              : { ...MOCK_NOTE, amount_zat },
-          ];
-          result.total_zat = amount_zat;
-        }
+        on_progress?.(total, total, { kind: "progress", phase });
         resolve(result);
         return;
       }
+      if (early && tick === MOCK_EARLY_TICK) {
+        phase = "verify";
+        on_progress?.(1, total, early.event);
+      }
       // The span is unknown for the first few ticks: total 0 keeps the bar
       // indeterminate, exactly as it is while the real scanner fetches the tip.
-      if (tick <= MOCK_UNKNOWN_TICKS) on_progress?.(0, 0);
-      else on_progress?.(Math.floor((total * tick) / ticks), total);
+      if (tick <= MOCK_UNKNOWN_TICKS && !early) on_progress?.(0, 0, { kind: "progress", phase });
+      else
+        on_progress?.(Math.max(1, Math.floor((total * tick) / ticks)), total, {
+          kind: "progress",
+          phase,
+        });
     }, MOCK_TICK_MS);
   });
+}
+
+/** The tick the early note event fires on: 0.3 s, one block's worth of mock scan. */
+export const MOCK_EARLY_TICK = 3;
+
+function sumNotes(notes: readonly FoundNote[]): bigint {
+  return notes.reduce((sum, n) => sum + BigInt(n.amount_zat), 0n);
+}
+
+/**
+ * The early note event for a result whose notes include one at `birthday`, and
+ * the final result the walk ends on: only the notes in that first block (a
+ * SpendsOnly walk looks for no others), with their spends as the variant says.
+ */
+function earlyReveal(
+  result: OpenResult,
+  birthday: number,
+): { event: ScanEvent; final: OpenResult } {
+  const notes = result.notes.filter((n) => n.height === birthday);
+  const unspent = notes.filter((n) => !n.spent);
+  const spent = notes.filter((n) => n.spent);
+  const final: OpenResult = {
+    ...result,
+    notes,
+    all_spent: unspent.length === 0,
+    total_zat: sumNotes(unspent).toString(),
+    spent_zat: sumNotes(spent).toString(),
+  };
+  // At the first block no spend has been seen yet.
+  const shown = notes.map((n) => ({
+    ...n,
+    spent: false,
+    spent_txid: null,
+    spent_height: null,
+    spent_time: null,
+  }));
+  return {
+    final,
+    event: {
+      kind: "note",
+      phase: "verify",
+      notes: shown,
+      total_zat: sumNotes(shown).toString(),
+      spent_zat: "0",
+      tip_height: result.tip_height,
+      birthday,
+    },
+  };
 }
 
 /* ------------------------------------------------------------ M3: the spend */

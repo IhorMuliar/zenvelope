@@ -396,8 +396,9 @@ async function handleCall(msg: CallMessage): Promise<void> {
     // The two callbacks the core takes are rebuilt here and forwarded as messages
     // tagged with this call's id, so a superseded run cannot be confused for a live one.
     if (msg.method === "open_envelope") {
-      const onProgress: ProgressFn = (scanned, total) =>
-        post({ kind: "progress", id: msg.id, scanned, total });
+      // The event is a plain object built by the core (or the mock), so it clones.
+      const onProgress: ProgressFn = (scanned, total, event) =>
+        post({ kind: "progress", id: msg.id, scanned, total, event: event ?? null });
       args[4] = onProgress;
     } else if (msg.method === "sweep_envelope") {
       const onStage: StageFn = (stage, detail) =>

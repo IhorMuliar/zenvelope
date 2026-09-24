@@ -13,8 +13,8 @@
  *   - the day-one M1 envelope, funded at block 3,490,472 and swept in ba0f91cf… at
  *     block 3,491,056, opens to "This envelope was already opened": the spend's
  *     block, its txid and an explorer link, and no amount and no send-on controls
- *   - the fee envelope, unspent, still opens normally with 0.0003 ZEC and the
- *     send-on flow, and nothing on it says anything was spent
+ *   - the fee envelope, unspent, still opens normally with 0.0003 ZEC (too small to
+ *     send on with the service fee), and nothing on it says anything was spent
  *
  * It NEVER broadcasts: the page is loaded with `?dry=1`, and neither test gets as
  * far as a sweep anyway.
@@ -104,7 +104,10 @@ test.describe("spent detection on mainnet", () => {
 
       await expect(page.getByTestId("already-opened")).toHaveCount(0);
       await expect(page.getByTestId("spent-partial")).toHaveCount(0);
-      await expect(page.getByTestId("dest-address")).toBeVisible();
+      // 0.0003 ZEC is under the service-fee floor: the page says so rather than
+      // offering the send-on flow.
+      await expect(page.getByTestId("too-small")).toBeVisible();
+      await expect(page.getByTestId("dest-address")).toHaveCount(0);
     }
     console.log(
       `fee envelope open, tap to amount: ${times.map((t) => `${t.toFixed(1)} s`).join(", ")}`,

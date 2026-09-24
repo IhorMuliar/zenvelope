@@ -29,8 +29,8 @@ use crate::gateway;
 use crate::network_from_str;
 use crate::scan::{
     finish_open, normalize_endpoints, notes_from_transaction, parse_transaction,
-    scan_compact_blocks, scan_range, OpenResult, ReceivedNote, SpendWatch, ViewKeys,
-    SCAN_CHUNK_BLOCKS,
+    scan_compact_blocks, scan_compact_blocks_in, scan_range, OpenResult, ReceivedNote, ScanMode,
+    SpendWatch, ViewKeys, SCAN_CHUNK_BLOCKS,
 };
 use crate::sweep::{sweep, NoteRef, SweepOutcome, SweepRequest};
 
@@ -117,34 +117,90 @@ async fn open_envelope_inner(
     // nullifiers of the notes it found to `watch` and then checks its own actions
     // against everything watched so far (see `scan_compact_blocks`). The blocks are
     // already here, so an already-swept envelope costs no extra round trip.
+    //
+    // Two phases (see [`ScanMode`]): the first block, the birthday, is scanned on its
+    // own. A note there is fetched in full and reported through `on_progress` straight
+    // away, and the rest of the walk only checks for its spend. Otherwise the walk is
+    // the full scan it always was.
     let mut hits: BTreeSet<(u32, TxId)> = BTreeSet::new();
+    let mut early: Vec<ReceivedNote> = Vec::new();
     let mut watch = SpendWatch::new();
+    let mut mode = ScanMode::Full;
+    let mut first = true;
     let mut scanned: u32 = 0;
     let mut chunk: Vec<CompactBlock> = Vec::with_capacity(SCAN_CHUNK_BLOCKS);
-    report(on_progress, 0, scanned_blocks);
+    report(on_progress, 0, scanned_blocks, mode);
 
     while let Some(block) = stream.next().await {
-        chunk.push(block.map_err(|e| format!("block stream failed: {}", e.message()))?);
+        let block = block.map_err(|e| format!("block stream failed: {}", e.message()))?;
+        if first {
+            first = false;
+            let found = scan_compact_blocks(std::slice::from_ref(&block), &keys, &mut watch)?;
+            scanned += 1;
+            mode = ScanMode::after_first_block(&found);
+            if !found.is_empty() {
+                early = fetch_notes(&client, &found, &keys, network).await?;
+                // A snapshot of what is known so far: the notes, and any spend seen in
+                // this one block. The walk to the tip settles the rest.
+                let so_far = finish_open(
+                    early.clone(),
+                    &watch,
+                    tip_height,
+                    start,
+                    birthday_defaulted,
+                    scanned_blocks,
+                    chosen.label.clone(),
+                )?;
+                report_notes(on_progress, scanned, scanned_blocks, &so_far);
+            }
+            report(on_progress, scanned, scanned_blocks, mode);
+            continue;
+        }
+        chunk.push(block);
         if chunk.len() == SCAN_CHUNK_BLOCKS {
-            hits.extend(scan_compact_blocks(&chunk, &keys, &mut watch)?);
+            hits.extend(scan_compact_blocks_in(&chunk, &keys, &mut watch, mode)?);
             scanned += chunk.len() as u32;
             chunk.clear();
-            report(on_progress, scanned, scanned_blocks);
+            report(on_progress, scanned, scanned_blocks, mode);
         }
     }
     if !chunk.is_empty() {
-        hits.extend(scan_compact_blocks(&chunk, &keys, &mut watch)?);
+        hits.extend(scan_compact_blocks_in(&chunk, &keys, &mut watch, mode)?);
         scanned += chunk.len() as u32;
     }
-    report(on_progress, scanned, scanned_blocks);
+    report(on_progress, scanned, scanned_blocks, mode);
 
-    // Pass 2: fetch each hit in full. Compact blocks carry 52 bytes of ciphertext, enough
-    // to recognise a note but not to read its memo, so the memo comes from here.
-    //
-    // The hits are independent of each other, so they go out together rather than one
-    // round trip after another. `try_join_all` preserves the order of the list, which is
-    // the `BTreeSet`'s (height, txid) order, so the notes come out sorted exactly as the
-    // sequential version produced them.
+    // Pass 2: fetch each remaining hit in full. Compact blocks carry 52 bytes of
+    // ciphertext, enough to recognise a note but not to read its memo, so the memo
+    // comes from here. In the two-phase walk there are none left: the first block's
+    // were fetched already.
+    let mut notes = early;
+    let hits: Vec<(u32, TxId)> = hits.into_iter().collect();
+    notes.extend(fetch_notes(&client, &hits, &keys, network).await?);
+
+    finish_open(
+        notes,
+        &watch,
+        tip_height,
+        start,
+        birthday_defaulted,
+        scanned_blocks,
+        chosen.label,
+    )
+}
+
+/// Fetches each hit's transaction in full and decrypts the envelope's notes out of it.
+///
+/// The hits are independent of each other, so they go out together rather than one
+/// round trip after another. `try_join_all` preserves the order of the list, which is
+/// chain order, so the notes come out sorted exactly as the sequential version produced
+/// them.
+async fn fetch_notes(
+    client: &CompactTxStreamerClient<gateway::Failover>,
+    hits: &[(u32, TxId)],
+    keys: &ViewKeys,
+    network: Network,
+) -> Result<Vec<ReceivedNote>, String> {
     let fetches = hits.iter().map(|(height, txid)| {
         let mut client = client.clone();
         let txid = *txid;
@@ -167,29 +223,55 @@ async fn open_envelope_inner(
     let mut notes: Vec<ReceivedNote> = Vec::new();
     for (height, raw) in fetched {
         let tx = parse_transaction(&raw, height, network)?;
-        notes.extend(notes_from_transaction(&tx, height, &keys, network));
+        notes.extend(notes_from_transaction(&tx, height, keys, network));
     }
-
-    finish_open(
-        notes,
-        &watch,
-        tip_height,
-        start,
-        birthday_defaulted,
-        scanned_blocks,
-        chosen.label,
-    )
+    Ok(notes)
 }
 
-/// Calls the progress callback, ignoring anything it throws.
+/// Calls the progress callback as `(scanned, total, { kind: "progress", phase })`,
+/// ignoring anything it throws. `phase` is `"find"` or `"verify"` (see
+/// [`ScanMode::phase`]); a two-argument callback simply never reads it.
 ///
 /// A recipient's scan must not die because a progress bar did.
-fn report(on_progress: Option<&Function>, scanned: u32, total: u32) {
+fn report(on_progress: Option<&Function>, scanned: u32, total: u32, mode: ScanMode) {
     if let Some(f) = on_progress {
-        let _ = f.call2(
+        let info = Object::new();
+        set(&info, "kind", &JsValue::from_str("progress"));
+        set(&info, "phase", &JsValue::from_str(mode.phase()));
+        let _ = f.call3(
             &JsValue::NULL,
             &JsValue::from_f64(f64::from(scanned)),
             &JsValue::from_f64(f64::from(total)),
+            &info,
+        );
+    }
+}
+
+/// The early reveal: `(scanned, total, { kind: "note", phase: "verify", notes,
+/// total_zat, spent_zat, tip_height, birthday })`, where `notes` has exactly the shape
+/// of the final result's. The walk to the tip is still to come, so a note shown from
+/// this event may yet turn out spent.
+fn report_notes(on_progress: Option<&Function>, scanned: u32, total: u32, so_far: &OpenResult) {
+    if let Some(f) = on_progress {
+        let snapshot = to_js(so_far);
+        let info = Object::new();
+        set(&info, "kind", &JsValue::from_str("note"));
+        set(
+            &info,
+            "phase",
+            &JsValue::from_str(ScanMode::SpendsOnly.phase()),
+        );
+        for key in ["notes", "total_zat", "spent_zat", "tip_height", "birthday"] {
+            let k = JsValue::from_str(key);
+            if let Ok(v) = Reflect::get(&snapshot, &k) {
+                let _ = Reflect::set(&info, &k, &v);
+            }
+        }
+        let _ = f.call3(
+            &JsValue::NULL,
+            &JsValue::from_f64(f64::from(scanned)),
+            &JsValue::from_f64(f64::from(total)),
+            &info,
         );
     }
 }

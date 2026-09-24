@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { LIGHTWALLETD, LIGHTWALLETD_FALLBACK, explorerTxUrl } from "../config";
-import { alreadyOpened } from "../copy/en";
+import { alreadyOpened, spendCheck } from "../copy/en";
 import { loadCore, provingNote } from "../core";
 import type { FoundNote, LoadedCore, Network } from "../core/types";
 import {
   BAD_FRAGMENT_COPY,
   LINK_FORGOTTEN_COPY,
+  eventFromScan,
   NO_FRAGMENT_COPY,
   formatSpendDate,
   initialOpenState,
@@ -109,8 +110,13 @@ export function Open() {
         birthday: link.birthday,
         network: link.network,
         hosts: [LIGHTWALLETD[link.network], LIGHTWALLETD_FALLBACK[link.network]],
-        onProgress: (scanned, total) => {
-          if (id === runId.current) dispatch({ type: "progress", scanned, total });
+        onProgress: (scanned, total, event) => {
+          if (id !== runId.current) return;
+          // The early reveal first, so the count that rides with it lands on the
+          // verifying screen.
+          const early = eventFromScan(event);
+          if (early) dispatch(early);
+          dispatch({ type: "progress", scanned, total });
         },
         onAttempt: (attempt) => {
           if (id === runId.current) dispatch({ type: "attempt", attempt });
@@ -231,6 +237,26 @@ export function Open() {
         network={link.network}
         badge={badge}
         provingFooter={provingFooter}
+      />
+    );
+  }
+
+  if (state.phase === "verifying" && state.early && core.current && secret.current) {
+    // The note is known; the walk to the tip is still checking for its spend.
+    // The amount shows now, the send-on controls wait for the result.
+    return (
+      <Opened
+        notes={unspentNotes(state.early.notes)}
+        spentZat={0n}
+        tipHeight={state.early.tip_height}
+        badge={badge}
+        provingFooter={provingFooter}
+        core={core.current}
+        getSecret={getSecret}
+        network={link.network}
+        envelopeAddress={link.address}
+        openMs={null}
+        checking={{ scanned: state.scanned, total: state.total }}
       />
     );
   }
@@ -358,6 +384,7 @@ function Opened({
   network,
   envelopeAddress,
   openMs,
+  checking = null,
 }: {
   /** The UNSPENT notes only: these are what the amount shows and SendOn sweeps. */
   notes: FoundNote[];
@@ -374,6 +401,13 @@ function Opened({
   envelopeAddress: string;
   /** Wall clock of the scan that got here, for the Timing block on the done screen. */
   openMs: number | null;
+  /**
+   * Set while the walk to the tip is still checking the note has not been
+   * spent: the count for the check line. The send-on flow is not mounted until
+   * it is done — mounting it would start the proving-key warm-up, which runs on
+   * the same worker thread as the walk and would hold the check up.
+   */
+  checking?: { scanned: number; total: number } | null;
 }) {
   const total = sumZat(notes.map((n) => n.amount_zat));
   const memo = notes.find((n) => n.memo && n.memo.trim() !== "")?.memo ?? null;
@@ -390,6 +424,13 @@ function Opened({
           {formatZecAmount(total)}
         </p>
         <FiatReveal amount={formatZecAmount(total)} />
+        {checking ? (
+          <p className="hint" aria-live="polite" data-testid="spend-check">
+            {checking.total > 0
+              ? spendCheck.line(formatCount(checking.scanned), formatCount(checking.total))
+              : spendCheck.starting}
+          </p>
+        ) : null}
         {spentZat > 0n ? (
           <p className="hint" data-testid="spent-partial">
             {alreadyOpened.partial(formatZecAmount(spentZat))}
@@ -441,18 +482,30 @@ function Opened({
             </details>
           </>
         )}
-        <p className="hint">Chain tip {formatCount(tipHeight)} when this scan finished.</p>
+        {checking ? null : (
+          <p className="hint">Chain tip {formatCount(tipHeight)} when this scan finished.</p>
+        )}
       </div>
 
-      <SendOn
-        core={core}
-        getSecret={getSecret}
-        network={network}
-        notes={notes}
-        tipHeight={tipHeight}
-        envelopeAddress={envelopeAddress}
-        openMs={openMs}
-      />
+      {checking ? (
+        <div className="card stack" data-testid="send-on-waiting">
+          <h2>{spendCheck.sendOnTitle}</h2>
+          <p className="hint">{spendCheck.sendOnWaiting}</p>
+          <button type="button" className="primary" disabled data-testid="send-on-disabled">
+            {spendCheck.sendOnButton}
+          </button>
+        </div>
+      ) : (
+        <SendOn
+          core={core}
+          getSecret={getSecret}
+          network={network}
+          notes={notes}
+          tipHeight={tipHeight}
+          envelopeAddress={envelopeAddress}
+          openMs={openMs}
+        />
+      )}
 
       <p className="fine">
         The secret in this link stayed in your browser. Nothing about this envelope was sent

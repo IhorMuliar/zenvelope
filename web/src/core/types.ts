@@ -100,10 +100,41 @@ export interface OpenResult {
 }
 
 /**
- * Scan progress. `total` is 0 until the scanner knows how many blocks it has to
- * cover, which is what puts the progress bar in its indeterminate state.
+ * Which half of a two-phase open the walk is in.
+ *
+ * `find`: notes are still being looked for (trial decryption on every block).
+ * `verify`: the note was in the link's first block, the birthday, so it is known
+ * already; the rest of the walk to the tip only checks whether it has been spent.
  */
-export type ProgressFn = (scanned: number, total: number) => void;
+export type ScanPhase = "find" | "verify";
+
+/**
+ * The structured third argument of a progress call.
+ *
+ * `progress` rides along with every block count. `note` is the early reveal: the
+ * first block held the envelope's notes, here they are with the same shape as the
+ * final result's, and the walk goes on in the `verify` phase. A note shown from
+ * this event may still turn out spent when the walk reaches the tip.
+ */
+export type ScanEvent =
+  | { kind: "progress"; phase: ScanPhase }
+  | {
+      kind: "note";
+      phase: "verify";
+      notes: FoundNote[];
+      total_zat: string;
+      spent_zat: string;
+      tip_height: number;
+      birthday: number;
+    };
+
+/**
+ * Scan progress. `total` is 0 until the scanner knows how many blocks it has to
+ * cover, which is what puts the progress bar in its indeterminate state. `event`
+ * is optional: an older core never sends it, and a two-argument callback never
+ * reads it.
+ */
+export type ProgressFn = (scanned: number, total: number, event?: ScanEvent) => void;
 
 /* ----------------------------------------------------------------- M3: spend */
 
