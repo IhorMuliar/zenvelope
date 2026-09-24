@@ -1,0 +1,163 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  WASM_PACK_VERSION: v0.13.1
+  # The threaded build needs -Z build-std, so nightly. Pinned to the nightly it was
+  # verified on; bump it deliberately.
+  NIGHTLY: nightly-2026-09-19
+
+jobs:
+  rust:
+    name: Rust (fmt, clippy, test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      # Not blocking yet: crates/core/src and crates/spike-witness have rustfmt drift on
+      # main. Drop continue-on-error once `cargo fmt --all` has been committed.
+      - name: cargo fmt --check
+        continue-on-error: true
+        run: cargo fmt --all --check
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: cargo test
+        run: cargo test --workspace
+
+  wasm-st:
+    name: WASM, single thread (+ smoke)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clang (secp256k1-sys builds C for wasm32)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends clang
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Install wasm-pack
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -sSL "https://github.com/rustwasm/wasm-pack/releases/download/${WASM_PACK_VERSION}/wasm-pack-${WASM_PACK_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            | tar -xz -C "$HOME/.local/bin" --strip-components=1 --wildcards '*/wasm-pack'
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build (wasm-pack, stable)
+        run: ./scripts/build-core.sh
+        env:
+          ZENVELOPE_SKIP_MT: "1"
+      - name: Smoke test the wasm under Node
+        run: node scripts/smoke-core.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wasm-core
+          path: web/src/wasm/core
+          if-no-files-found: error
+          retention-days: 7
+
+  wasm-mt:
+    name: WASM, threaded (nightly)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clang (secp256k1-sys builds C for wasm32)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends clang
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.NIGHTLY }}
+          targets: wasm32-unknown-unknown
+          components: rust-src
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # build-core.sh puts the atomics build in its own target dir.
+          workspaces: ". -> target-mt-core"
+      - name: Install wasm-pack
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -sSL "https://github.com/rustwasm/wasm-pack/releases/download/${WASM_PACK_VERSION}/wasm-pack-${WASM_PACK_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            | tar -xz -C "$HOME/.local/bin" --strip-components=1 --wildcards '*/wasm-pack'
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build (wasm-pack, nightly, -Z build-std, shared memory)
+        run: ./scripts/build-core.sh
+        env:
+          ZENVELOPE_SKIP_ST: "1"
+          ZENVELOPE_REQUIRE_MT: "1"
+          ZENVELOPE_NIGHTLY: ${{ env.NIGHTLY }}
+      - name: Assert the module imports a shared memory
+        run: node scripts/check-shared-memory.mjs web/src/wasm/core-mt/zenvelope_core_bg.wasm
+      - name: Assert the rayon worker glue was patched
+        run: |
+          grep -rq 'module_or_path: data.module' web/src/wasm/core-mt/snippets
+
+  web:
+    name: Web (unit tests, build with real core)
+    needs: wasm-st
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - uses: actions/download-artifact@v4
+        with:
+          name: wasm-core
+          path: web/src/wasm/core
+      - run: npm run build
+
+  web-e2e-mock:
+    name: Web e2e (MOCK core, no secrets)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      # No web/src/wasm here and no ZENV_M1_FRAGMENT: the app runs on the MOCK core and
+      # the specs that need the real core or a funded envelope skip themselves.
+      - name: Playwright (MOCK)
+        run: npm run e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-results
+          path: web/test-results
+          retention-days: 7
