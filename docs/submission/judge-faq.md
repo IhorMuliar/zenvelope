@@ -1,6 +1,6 @@
 # Judge FAQ
 
-Twelve questions we expect, answered as they would be live.
+Fourteen questions we expect, answered as they would be live. State as of 2026-09-24.
 
 **1. Do you ever hold the funds?** No, and no code path could. The money sits at a
 one-time shielded address derived from the link secret, which lives only in the URL
@@ -30,10 +30,12 @@ carries no amount.
 format. Testnet activates 2026-10-06 and mainnet 2026-11-05, after submissions close,
 which is one reason we build on mainnet only.
 
-**7. How do you make money?** A flat fee per link, 0.0003 ZEC today, paid by the sender
-as a second output of the recipient's sweep — a single-output ZIP-321 URI is the only
-shape every wallet accepts. Never a percentage, recipients pay nothing, and it is off
-until there is a real fee address.
+**7. How do you make money?** A flat fee per link, 0.0003 ZEC, live on the site since
+2026-09-24. The sender pays envelope plus fee in one output — a single-output ZIP-321 URI
+is the shape every wallet accepts — and the fee goes to the service address as a second
+output when the recipient sends the money on. Never a percentage, and recipients pay
+nothing. An envelope too small to cover both the network fee and the service fee says so
+before any proving starts.
 
 **8. Do group payouts actually work?** The link side does: up to 50 secrets and links
 made in the tab, a table of single-output URIs, and a CSV whose amount columns are
@@ -51,6 +53,12 @@ fallback. For scale, the closest published figure we know of is ChainSafe's 5.4 
 desktop-browser benchmark on a MacBook Air M2; we are not aware of a prior
 mobile-browser number. Transcript: `web/docs/M4-VERIFICATION.md`.
 
+Opening is faster than sending. Since 2026-09-24 a link is finalised with the height of
+its funding block, and the page reveals the amount and then verifies: on a desktop (the fee
+envelope, dry run, four threads) the amount is on screen in about **0.6 s** and the spent
+check finishes in about **1.5 s**, against **31 s** for a link that still scans from the
+moment it was created.
+
 **10. Safari?** WebKit itself is fine with threads: the iPhone 16e run above was Brave
 on iOS, which is WebKit, and it was cross-origin isolated and proved on three threads. What
 matters is the headers and the probe, not the engine — without cross-origin isolation or
@@ -67,3 +75,16 @@ envelope was made; your own endpoint removes even that.
 `zcash-mainnet.chainsafe.dev`, and the endpoint is configuration, not architecture: any
 gRPC-web gateway works, including your own. An outage delays scanning or broadcast; it
 never strands funds, since the money is on-chain and the keys are in the link.
+
+**13. What if someone opens a link that was already opened?** The page says "already
+opened" and shows the spending transaction. The scanner checks the envelope's nullifiers
+as it walks the chain, so a spent note is recognised from the chain itself, not from any
+record we keep — we keep none.
+
+**14. Is the wallet the page makes for a recipient a real wallet?** Yes. "A new wallet in
+this browser" is 24 BIP-39 words, account 0 — the seed scheme Zodl uses too. On
+2026-09-24 the owner restored the M3 destination wallet, minted by that same core
+function, in the Noir browser-extension wallet: it shows 0.0009 ZEC shielded, exactly
+what the M3 sweep sent. Noir's unified address reads differently because it adds a
+transparent receiver; the keys are the same. Transcript: `web/docs/M3-VERIFICATION.md`
+§10.

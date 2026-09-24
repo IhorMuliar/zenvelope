@@ -466,5 +466,22 @@ W=/root/Projects/web3-sweep/tools/wallets
 The driver that broadcasts is deliberately **not** committed: `e2e/m3-real.spec.ts` stays
 dry-run-only, so nothing in this repository can spend an envelope by being run.
 
+## 10. The destination wallet in a third-party wallet, 2026-09-24
+
+The destination of the §9 sweep was minted by `zenvelope_core::spend::new_wallet` — the
+function behind "A new wallet in this browser": 24 BIP-39 words, account 0
+(`mint_m3_destination` in `crates/core/tests/m3_sweep.rs`). On **2026-09-24** the owner
+restored those 24 words in the **Noir** browser-extension wallet. After its sync, Noir
+shows **0.0009 ZEC shielded** — the 90,000 zatoshi output of
+`ba0f91cfe7…6260fa2aad`, to the zatoshi.
+
+Noir's unified-address string is not the one in `M3-DEST.md`: Noir's address carries a
+transparent receiver as well, so its encoding differs. The keys behind it are the same,
+which is why the balance is the sweep's exact output. Zodl derives from the same BIP-39,
+account-0 scheme. The practical result: a recipient who takes the new-wallet path can
+move those words into a third-party Zcash wallet and keep the money there.
+
+The words are the money and stay in the gitignored `M3-DEST.md`; nothing here repeats them.
+
 **M3 is done.** A link, on mainnet, opened in a browser and swept to its recipient with
 the proof built in that browser. Nothing in the path held the money.

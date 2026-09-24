@@ -91,10 +91,12 @@ retroactive grant.
    fails, falls back to the single-threaded prover: same transaction, roughly 47 s
    instead of 23 s on a desktop. WebKit is not the dividing line — the 2026-09-21 iPhone
    run was Brave on iOS, isolated, and proved on three threads — the headers are.
-2. Opening an envelope is bound by the public lightwalletd gateway, and that varies
-   widely: the scan and the witness walk took about 9 s on the iPhone run of 2026-09-21
-   and about 22 s on a desktop on the same build through the same gateway. Proving is the
-   predictable part; the network is not. Pointing the app at your own gateway removes it.
+2. Sending on is bound by the public lightwalletd gateway, and that varies widely: the
+   witness walk took about 3 s on the iPhone run of 2026-09-21 and about 22 s on a
+   desktop through the same gateway. Opening no longer is, for a finalised link: since
+   2026-09-24 one carrying its funding height reveals in about 0.6 s and finishes the spent
+   check in about 1.5 s on a desktop, against 31 s for a link that scans from creation.
+   Proving is the predictable part; the network is not. Your own gateway removes it.
 3. The Solana exit is poor value at small amounts — about 16% spread into USDC at the
    0.00132 ZEC floor against about 1% into SOL. The screen says so, and the shielded way
    out stays one tap away.

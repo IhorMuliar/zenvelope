@@ -99,7 +99,9 @@ file and nowhere else. Batch funding from one wallet is what M6 still owes.
 The sender funds a single output of *envelope amount + flat fee*. The fee is paid to
 Zenvelope when the recipient opens the envelope, as a second output in the sweep
 transaction. One output keeps the ZIP-321 URI compatible with every sender wallet.
-It is a flat service fee, not a percentage. Recipients pay nothing.
+It is a flat service fee, not a percentage. Recipients pay nothing. Live since
+2026-09-24; an envelope too small to cover both the network fee and the service fee says
+so before proving.
 
 ## What we are not
 
@@ -154,6 +156,23 @@ product one-pager in [docs/PRODUCT.md](docs/PRODUCT.md), decision log in
 Measured on an iPhone 16e (Brave on iOS, 3 threads): under 8 seconds from "Send it on"
 to done, 4.4 s of it proving — 2026-09-21, dry run against the live site, nothing broadcast
 ([web/docs/M4-VERIFICATION.md](web/docs/M4-VERIFICATION.md)).
+
+State on 2026-09-24:
+
+- **The flat service fee is live.** The sender pays envelope + 0.0003 ZEC in one output;
+  the fee goes to the service address when the recipient sends on. An envelope too small
+  to cover the network fee and the service fee says so before proving starts.
+- **Two-phase open.** A link finalised with its funding height reveals the amount in
+  about 0.6 s and finishes the spent check in about 1.5 s on a desktop (fee envelope, dry
+  run, 4 threads), against 31 s for a link that still scans from creation. An envelope
+  already opened says "already opened" and shows the spending transaction.
+- **The new wallet restores elsewhere.** The M3 destination (24 BIP-39 words, account 0,
+  the same `new_wallet` the page runs) was restored by the owner in the Noir
+  browser-extension wallet and shows 0.0009 ZEC shielded, the exact sweep output. Zodl
+  uses the same seed scheme. Noir's unified address differs because it adds a
+  transparent receiver ([M3-VERIFICATION.md](web/docs/M3-VERIFICATION.md) §10).
+- **CI on every push:** Rust tests and clippy, both wasm builds with a shared-memory
+  check, the web tests, and the mock browser suite.
 
 - [x] **M0** Repo, README one-pager, license, arena project draft, first builder update posted.
 - [x] **M1 (done)** Create a link on mainnet: secret, derived address, ZIP-321 URI, QR, fee in the amount. M1 done 2026-09-20: first envelope funded from Zodl on mainnet, Ironwood note confirmed by zcash-devtool (tx 281e9f7b…341d43, block 3490472). Verification transcript in [web/docs/M1-VERIFICATION.md](web/docs/M1-VERIFICATION.md).
@@ -237,8 +256,9 @@ ZIP-321 URI and QR, re-derives the address from the link alone, and opens a fund
 envelope — scanning and decrypting the Ironwood note in the browser, with the secret
 never leaving the tab. The spend core is in too: `sweep_envelope` witnesses every
 note the envelope holds, builds one transaction that spends them all, proves it in WASM
-and can broadcast it. The screens that drive
-it are next.
+and broadcasts it, driven by the open page's own screens — to a pasted address, a wallet
+generated in the page, or the Solana exit. The create page watches for the payment and
+hands out the final link; an envelope already opened says so.
 
 ## License
 
