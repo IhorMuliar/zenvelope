@@ -216,8 +216,8 @@ describe("buildCsv", () => {
   });
 
   it("starts with the documented header, in order, with both amount columns", () => {
-    expect(lines[0]).toBe("index,link,address,envelope_zec,send_zec,memo,payment_uri");
-    expect(CSV_COLUMNS).toHaveLength(7);
+    expect(lines[0]).toBe("index,link,address,envelope_zec,send_zec,memo,payment_uri,paid_height,final_link");
+    expect(CSV_COLUMNS).toHaveLength(9);
   });
 
   it("has one row per envelope and a trailing CRLF", () => {
@@ -266,7 +266,7 @@ describe("buildCsv", () => {
   });
 
   it("is empty but well formed for no rows", () => {
-    expect(buildCsv([])).toBe("index,link,address,envelope_zec,send_zec,memo,payment_uri\r\n");
+    expect(buildCsv([])).toBe("index,link,address,envelope_zec,send_zec,memo,payment_uri,paid_height,final_link\r\n");
   });
 
   it("does not contain the word this product never uses", () => {

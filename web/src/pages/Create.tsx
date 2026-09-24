@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   FLAT_FEE_ZAT,
   LIGHTWALLETD,
@@ -24,7 +24,18 @@ import {
 import { CopyField } from "../components/CopyField";
 import { CopyButton } from "../components/CopyButton";
 import { Qr } from "../components/Qr";
-import { group as groupCopy, landing, single as singleCopy } from "../copy/en";
+import { group as groupCopy, landing, single as singleCopy, watch as watchCopy } from "../copy/en";
+import { gatewayList } from "../lib/openFlow";
+import { zatToZecString } from "../core/mock";
+import {
+  createPaymentWatch,
+  finalLink,
+  linkParts,
+  toCheckResult,
+  type PaymentWatch,
+  type WatchSnapshot,
+  type WatchTarget,
+} from "../lib/paymentWatch";
 
 /**
  * What one submission produced.
@@ -42,6 +53,8 @@ interface Created {
   heightSource: string | null;
   network: Network;
   message: string;
+  /** The core that made them, which the payment watch asks to look for the payment. */
+  core: LoadedCore;
 }
 
 export function Create() {
@@ -139,6 +152,7 @@ export function Create() {
         heightSource: chain?.source ?? null,
         network,
         message: trimmed,
+        core: loaded,
       });
     } catch (err) {
       setError((err as Error).message || "Could not create the envelope.");
@@ -339,6 +353,122 @@ function Birthday({ created }: { created: Created }) {
   );
 }
 
+/* ------------------------------------------------------------ payment watch */
+
+/**
+ * Watches the chain for the payment(s) of what was just created, while this tab
+ * is open. See src/lib/paymentWatch.ts for the schedule. The secrets it looks
+ * with are the ones already in `created`; nothing new is kept anywhere.
+ *
+ * Without a birthday there is nothing cheap to watch from — the first look
+ * would scan ten thousand blocks — so no watch is started and the page says so.
+ */
+function usePaymentWatch(created: Created): {
+  snap: WatchSnapshot | null;
+  restart: () => void;
+} {
+  const [snap, setSnap] = useState<WatchSnapshot | null>(null);
+  const ref = useRef<PaymentWatch | null>(null);
+
+  useEffect(() => {
+    const birthday = created.birthday;
+    if (birthday === null) return;
+    const targets: WatchTarget[] = [];
+    for (const r of created.rows) {
+      const parts = linkParts(r.link);
+      if (parts) targets.push({ id: r.index, secret: parts.secret, birthday });
+    }
+    const hosts = gatewayList([
+      LIGHTWALLETD[created.network],
+      LIGHTWALLETD_FALLBACK[created.network],
+    ]);
+    const w = createPaymentWatch({
+      targets,
+      check: async (target, fromHeight) =>
+        toCheckResult(
+          await created.core.open_envelope(target.secret, fromHeight, created.network, hosts),
+        ),
+      onChange: setSnap,
+    });
+    ref.current = w;
+    const onVisibility = () => w.setHidden(document.hidden);
+    document.addEventListener("visibilitychange", onVisibility);
+    w.setHidden(document.hidden);
+    w.start();
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      w.dispose();
+      ref.current = null;
+    };
+  }, [created]);
+
+  return { snap, restart: () => ref.current?.restart() };
+}
+
+function clockTime(ms: number): string {
+  return new Date(ms).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+/** The status line under "Waiting for your payment", for either screen. */
+function WatchStatus({
+  snap,
+  total,
+  onRestart,
+}: {
+  snap: WatchSnapshot | null;
+  total: number;
+  onRestart: () => void;
+}) {
+  if (!snap || snap.phase === "done") return null;
+  let line: string;
+  switch (snap.phase) {
+    case "checking":
+      line =
+        total > 1 && snap.current !== null
+          ? watchCopy.checkingOne(snap.current, total)
+          : watchCopy.checking;
+      break;
+    case "paused":
+      line = watchCopy.paused;
+      break;
+    case "stopped":
+      line = watchCopy.stopped;
+      break;
+    default:
+      line =
+        snap.lastCheckedAt === null
+          ? watchCopy.firstLook
+          : watchCopy.nothingYet(clockTime(snap.lastCheckedAt));
+  }
+  return (
+    <>
+      <p
+        className="hint"
+        aria-live="polite"
+        data-testid="watch-status"
+        data-phase={snap.phase}
+        data-rounds={snap.rounds}
+      >
+        {line}
+      </p>
+      {snap.errors > 0 ? (
+        <p className="hint" data-testid="watch-errors">
+          {watchCopy.errors(snap.errors)}
+        </p>
+      ) : null}
+      {snap.phase === "stopped" ? (
+        <button type="button" className="ghost" onClick={onRestart} data-testid="watch-again">
+          {watchCopy.checkAgain}
+        </button>
+      ) : null}
+    </>
+  );
+}
+
 /* --------------------------------------------------------- one envelope (M1) */
 
 function SingleResult({
@@ -352,14 +482,57 @@ function SingleResult({
 }) {
   const envelope = created.rows[0];
   const [line1, line2] = breakdownLines(created.breakdown);
+  const { snap, restart } = usePaymentWatch(created);
+  const paid = snap?.paid.get(envelope.index) ?? null;
+  const final = paid ? finalLink(envelope.link, paid.height) : null;
   return (
     <section className="stack">
       <h1>{singleCopy.title}</h1>
       {isMock ? <MockBadge /> : null}
 
+      <div className="card stack" data-testid="watch-card" data-paid={paid ? "yes" : "no"}>
+        {paid && final ? (
+          <>
+            <h2 data-testid="watch-paid">
+              {watchCopy.paidTitle(zatToZecString(paid.zat), paid.height)}
+            </h2>
+            <CopyField label={watchCopy.finalLabel} value={final} testId="final-link" />
+            <p className="hint">{watchCopy.finalBody(paid.height)}</p>
+            <p className="warn">{singleCopy.keepWarn}</p>
+            <details data-testid="final-qr">
+              <summary>{watchCopy.finalQr}</summary>
+              <Qr value={final} />
+            </details>
+          </>
+        ) : (
+          <>
+            <h2 data-testid="watch-waiting">{watchCopy.waitingTitle}</h2>
+            {created.birthday === null ? (
+              <p className="hint" data-testid="watch-off">
+                {watchCopy.noHeight}
+              </p>
+            ) : (
+              <>
+                <p className="hint">{watchCopy.waitingBody}</p>
+                <WatchStatus snap={snap} total={1} onRestart={restart} />
+              </>
+            )}
+          </>
+        )}
+      </div>
+
       <div className="card stack">
         <h2>{singleCopy.keepTitle}</h2>
-        <CopyField label="Envelope link" value={envelope.link} testId="envelope-link" />
+        <CopyField
+          label={paid ? watchCopy.originalLabel : "Envelope link"}
+          value={envelope.link}
+          testId="envelope-link"
+        />
+        {paid && created.birthday !== null ? (
+          <p className="hint" data-testid="original-slower">
+            {watchCopy.originalBody(created.birthday)}
+          </p>
+        ) : null}
         <p className="warn">{singleCopy.keepWarn}</p>
         <Birthday created={created} />
       </div>
@@ -441,7 +614,19 @@ function GroupResult({
   isMock: boolean;
   onReset: () => void;
 }) {
-  const { rows } = created;
+  const { snap, restart } = usePaymentWatch(created);
+  // The rows as the table and the CSV see them: the originals, plus the block and
+  // the final link of every payment this tab has seen arrive so far. The CSV
+  // button reads these, so a second download carries the latest state.
+  const rows = useMemo(
+    () =>
+      created.rows.map((r) => {
+        const p = snap?.paid.get(r.index);
+        return p ? { ...r, paidHeight: p.height, finalLink: finalLink(r.link, p.height) } : r;
+      }),
+    [created.rows, snap],
+  );
+  const paidCount = rows.filter((r) => r.paidHeight !== undefined).length;
   const each = created.breakdown.total;
   return (
     <section className="stack">
@@ -473,6 +658,25 @@ function GroupResult({
         <Birthday created={created} />
       </div>
 
+      <div className="card stack" data-testid="watch-card">
+        <h2 data-testid="watch-waiting">
+          {snap?.phase === "done" ? watchCopy.groupDone(rows.length) : watchCopy.waitingTitle}
+        </h2>
+        {created.birthday === null ? (
+          <p className="hint" data-testid="watch-off">
+            {watchCopy.noHeight}
+          </p>
+        ) : snap?.phase === "done" ? null : (
+          <>
+            <p className="hint">{watchCopy.groupWaitingBody}</p>
+            <p className="hint" data-testid="watch-count">
+              {watchCopy.groupPaid(paidCount, rows.length)}
+            </p>
+            <WatchStatus snap={snap} total={rows.length} onRestart={restart} />
+          </>
+        )}
+      </div>
+
       <div className="table-scroll">
         <table className="group-table" data-testid="group-table">
           <caption className="hint">{groupCopy.tableCaption}</caption>
@@ -482,6 +686,8 @@ function GroupResult({
               <th scope="col">{groupCopy.columns.envelope}</th>
               <th scope="col">{groupCopy.columns.send}</th>
               <th scope="col">{groupCopy.columns.link}</th>
+              <th scope="col">{groupCopy.columns.paid}</th>
+              <th scope="col">{groupCopy.columns.finalLink}</th>
               <th scope="col">{groupCopy.columns.address}</th>
               <th scope="col">{groupCopy.columns.uri}</th>
             </tr>
@@ -501,6 +707,24 @@ function GroupResult({
                     {r.link}
                   </code>
                   <CopyButton value={r.link} label={`Copy the link for envelope ${r.index}`} />
+                </td>
+                <td className="col-amount" data-testid="row-paid">
+                  {r.paidHeight === undefined
+                    ? watchCopy.groupUnpaidCell
+                    : watchCopy.groupPaidCell(r.paidHeight)}
+                </td>
+                <td>
+                  {r.finalLink ? (
+                    <>
+                      <code className="cell mono" data-testid="row-final-link">
+                        {r.finalLink}
+                      </code>
+                      <CopyButton
+                        value={r.finalLink}
+                        label={`Copy the final link for envelope ${r.index}`}
+                      />
+                    </>
+                  ) : null}
                 </td>
                 <td>
                   <code className="cell mono" data-testid="row-address">

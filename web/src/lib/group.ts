@@ -55,6 +55,17 @@ export interface GroupEnvelope {
   memo: string;
   /** Single-output ZIP-321, exactly what a wallet is handed. */
   uri: string;
+  /**
+   * The block the payment was mined in, once the create page has seen it arrive.
+   * Undefined until then, and forever if the tab was closed first.
+   */
+  paidHeight?: number;
+  /**
+   * `link` with its birthday moved to `paidHeight`: `#<secret>.<paid_height>`.
+   * Opens faster, because the scan starts at the payment instead of at creation.
+   * The original `link` stays valid.
+   */
+  finalLink?: string;
 }
 
 export interface GroupRequest {
@@ -185,6 +196,10 @@ export const CSV_COLUMNS = [
   "send_zec",
   "memo",
   "payment_uri",
+  // Filled in as payments arrive while the create page is open; empty otherwise.
+  // Appended rather than inserted, so a sheet built on the first seven still reads.
+  "paid_height",
+  "final_link",
 ] as const;
 
 /** Characters that make a spreadsheet treat a cell as a formula instead of text. */
@@ -225,6 +240,8 @@ export function buildCsv(rows: readonly GroupEnvelope[]): string {
         csvCell(r.sendZec),
         csvCell(r.memo),
         csvCell(r.uri),
+        csvCell(r.paidHeight === undefined ? "" : String(r.paidHeight)),
+        csvCell(r.finalLink ?? ""),
       ].join(","),
     );
   }

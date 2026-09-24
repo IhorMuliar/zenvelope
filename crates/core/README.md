@@ -78,7 +78,10 @@ Per [D4](../../docs/DECISIONS.md), there is no testnet milestone.
 `birthday` is the decimal block height at the moment the link was created, as a `u32`.
 It is optional, and it is only a scan hint: it tells the recipient's light client where
 to start, so opening a link does not mean scanning the whole chain. It is not a secret
-and it is not part of the derivation.
+and it is not part of the derivation. A birthday equal to the height the envelope was
+funded at is the "final" form of the link: same format, but the scan starts at the
+payment's own block instead of at the moment the link was made. The create page hands
+one out when it sees the payment arrive while the tab is still open.
 
 ```
 #AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA.3490400

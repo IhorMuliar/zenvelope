@@ -143,11 +143,15 @@ export function parseFragment(frag: string): ParsedFragment {
   return { secret, birthday: Number(rest) };
 }
 
+/** Looks so far at each secret this mock generated. See {@link MOCK_UNPAID_LOOKS}. */
+const freshLooks = new Map<string, number>();
+
 export function generateSecret(): string {
   const bytes = new Uint8Array(SECRET_BYTES);
   crypto.getRandomValues(bytes);
   const s = bytesToBase64Url(bytes);
   if (s.length !== SECRET_CHARS) throw new Error("unexpected secret length");
+  freshLooks.set(s, 0);
   return s;
 }
 
@@ -202,6 +206,20 @@ export const MOCK_NOTE = {
 export const MOCK_TINY_SECRET = "dGlueXRpbnl0aW55dGlueXRpbnl0aW55dGlueXRpbnk";
 export const MOCK_TINY_ZAT = "30000";
 
+/**
+ * A secret this mock generated itself is an envelope made seconds ago, and a
+ * real one of those is empty until the sender's payment is mined. So the mock
+ * answers "not yet" for its first {@link MOCK_UNPAID_LOOKS} looks and then finds
+ * one note at {@link MOCK_PAID_HEIGHT}. That is what lets the create page's
+ * payment watch be driven end to end. Every other secret — the fixtures the
+ * open-flow tests use — is found at once, exactly as before. The map holds the
+ * secret in worker memory for as long as the worker lives, the same place the
+ * real core holds it during a scan.
+ */
+export const MOCK_UNPAID_LOOKS = 2;
+/** Three blocks below the mock tip, so a birthday pinned just under it still precedes it. */
+export const MOCK_PAID_HEIGHT = MOCK_TIP_HEIGHT - 3;
+
 export async function openEnvelope(
   secret_b64url: string,
   birthday: number | undefined,
@@ -224,11 +242,29 @@ export async function openEnvelope(
       if (tick >= ticks) {
         clearInterval(timer);
         on_progress?.(total, total);
+        const looks = freshLooks.get(secret_b64url);
+        if (looks !== undefined) freshLooks.set(secret_b64url, looks + 1);
+        if (looks !== undefined && looks < MOCK_UNPAID_LOOKS) {
+          resolve({
+            found: false,
+            notes: [],
+            total_zat: "0",
+            tip_height: MOCK_TIP_HEIGHT,
+            birthday: MOCK_TIP_HEIGHT - total + 1,
+            birthday_defaulted: birthday === undefined,
+            scanned_blocks: total,
+            gateway: MOCK_GATEWAY,
+          });
+          return;
+        }
+        const fresh = looks !== undefined;
         const amount_zat =
           secret_b64url === MOCK_TINY_SECRET ? MOCK_TINY_ZAT : MOCK_NOTE.amount_zat;
         resolve({
           found: true,
-          notes: [{ ...MOCK_NOTE, amount_zat }],
+          notes: [
+            fresh ? { ...MOCK_NOTE, amount_zat, height: MOCK_PAID_HEIGHT } : { ...MOCK_NOTE, amount_zat },
+          ],
           total_zat: amount_zat,
           tip_height: MOCK_TIP_HEIGHT,
           birthday: MOCK_TIP_HEIGHT - total + 1,

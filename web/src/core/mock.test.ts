@@ -1,5 +1,12 @@
-import { describe, expect, it } from "vitest";
-import { base64UrlToBytes, memoToBase64Url, mockCore } from "./mock";
+import { describe, expect, it, vi } from "vitest";
+import {
+  MOCK_PAID_HEIGHT,
+  MOCK_SCAN_MS,
+  MOCK_UNPAID_LOOKS,
+  base64UrlToBytes,
+  memoToBase64Url,
+  mockCore,
+} from "./mock";
 import { memoByteLength } from "../lib/format";
 
 const SECRET = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"; // 43 base64url chars
@@ -128,5 +135,27 @@ describe("payment_uri", () => {
 
   it("accepts a zat amount handed back from wasm as a string", () => {
     expect(mockCore.payment_uri(addr, "1030000")).toBe(`zcash:${addr}?amount=0.0103`);
+  });
+});
+
+describe("open_envelope on a secret the mock just made", () => {
+  it("is unpaid for two looks, then paid at MOCK_PAID_HEIGHT", async () => {
+    vi.useFakeTimers();
+    try {
+      const s = mockCore.generate_secret();
+      const look = async () => {
+        const p = mockCore.open_envelope(s, MOCK_PAID_HEIGHT - 5, "main", "mock");
+        await vi.advanceTimersByTimeAsync(MOCK_SCAN_MS);
+        return p;
+      };
+      expect((await look()).found).toBe(false);
+      expect((await look()).found).toBe(false);
+      const third = await look();
+      expect(third.found).toBe(true);
+      expect(third.notes[0].height).toBe(MOCK_PAID_HEIGHT);
+      expect(MOCK_UNPAID_LOOKS).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
