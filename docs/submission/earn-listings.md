@@ -1,45 +1,111 @@
-# Superteam Earn listings
+# Superteam Earn and demo day entries
 
-Three submissions off one product. Links are placeholders until hosting and video are
-done.
+Updated 2026-09-24. Times are as the organisers publish them.
 
-## Ukraine sidetrack
+| Date | What |
+| --- | --- |
+| 2026-10-06 04:00 PDT | Colosseum final submit opens |
+| 2026-10-09 | Online Demo Day (Superteam Ukraine) |
+| 2026-10-12 23:59 PT | Colosseum final submit closes |
+| 2026-10-13 06:59 UTC | All Superteam Earn side tracks close |
+| 2026-10-15 20:59 UTC | Online Demo Day bounty closes |
 
-Zenvelope sends shielded money as a link, and the case it was built for is the one where
-the person receiving has nothing set up: no wallet, no install, no address, and often no
-safe way to publish one. The sender pays a QR from their own Zcash wallet; the recipient
-opens the link in a browser, sees the amount for the first time, and moves it to a Zcash
-address, a wallet the page makes for them, or — with the privacy cost spelled out first —
-USDC or SOL on Solana. The amount is not in the link, so forwarding it through a chat app
-discloses nothing, and nobody holds the funds. Mainnet, MIT.
-Repo `https://github.com/IhorMuliar/zenvelope` · Demo `https://zenvelope.netlify.app` · Video `<DEMO_VIDEO_URL>`
+## Superteam Ukraine track
 
-## RPC Fast
+Listing: <https://superteam.fun/earn/listing/colosseum-crypto-worlds-fair-hackathon-superteam-ukraine-track>
 
-Zenvelope is a browser-only Zcash client: no backend, no server-side keys, so every chain
-read and the broadcast go straight from the tab over gRPC-web. That makes the endpoint
-load-bearing in a way a server-backed app never sees: a recipient's whole experience is
-compact-block streaming plus one send. We stream from `zjs.zec.rocks/mainnet` with
-ChainSafe as failover — a 64-block scan to the tip took 2.0 s, and a sweep's witness
-stage costs 8–9 s of round trips, the largest non-proving cost in the flow. CORS-correct
-gRPC-web with headroom moves that number, and we would publish the before and after.
-Repo `https://github.com/IhorMuliar/zenvelope` · Demo `https://zenvelope.netlify.app`
+Prizes: 10,000 USDG. 4,000 / 2,500 / 1,500, plus two 1,000 bonuses. Winners by Oct 27.
 
-## Pitch bounty
+Requirements:
 
-Three minutes, one voice: the first twenty seconds are a diagram of where the money
-actually goes, our server a grey box off to the side holding nothing. Then the problem (a
-shielded payment cannot reach someone with no wallet), the product (an envelope is a
-link), the mechanism (secret in the fragment, Ironwood note, proved in the browser in
-about 24 seconds), prior art named and dated, mainnet traction with transaction ids, and
-a flat per-link fee with no custody. Script: `docs/submission/pitch-script.md`.
-Pitch `<PITCH_URL>` · Repo `https://github.com/IhorMuliar/zenvelope`
+- Submit on Colosseum first.
+- Attend the Online Demo Day on Oct 9 (see below) or the Kyiv Demo Day on Oct 10.
+- Judged on Solana ecosystem impact, PMF on Solana, and growth of Solana users.
+- Contact: t.me/SirHi.
 
-## Ukraine demo day, Oct 9 — slot request (5 lines)
+Open question: the Colosseum country field says Poland. The UA track asks for Ukraine.
+The founder is Ukrainian and lives in Warsaw. Founder decides whether to change the field
+or ask the contact first.
 
-> Hi — I would like a demo slot on Oct 9 for Zenvelope, a Colosseum Zcash-track project.
-> It sends shielded ZEC as a link: whoever receives it needs no wallet, no install and no
-> address, and the amount is not in the link until it is opened.
-> It is live on mainnet — create, pay by QR from a phone, open in a browser, the spend
-> proved in that browser in about 24 seconds; 5 minutes is plenty.
-> Repo `https://github.com/IhorMuliar/zenvelope`, demo `https://zenvelope.netlify.app`. Thank you — `<NAME>`
+### Form answers
+
+**Project name:** Zenvelope
+
+**Description:**
+
+> Zenvelope sends shielded ZEC as a link. The person who gets it needs no wallet, no install and no address. The amount is not in the link, and the site never holds the funds.
+>
+> Solana leg: the recipient can exit to USDC or SOL through NEAR Intents 1Click. The page makes a Solana keypair in the browser and shows the privacy cost first. A live test on 2026-09-24 delivered 14.400612 USDC on Solana.
+
+**GitHub:** <https://github.com/IhorMuliar/zenvelope>
+
+**Website:** <https://zenvelope.netlify.app>
+
+**X:** `<X_HANDLE>`
+
+**Pitch deck or video:** demo <https://youtu.be/nH9FWXQz8JM>, pitch `<PITCH_URL>`
+
+**Submitted on Colosseum:** yes
+
+**Colosseum project:** <https://colosseum.com/arena/projects/zenvelope>
+
+**Colosseum profile:** `<COLOSSEUM_PROFILE_URL>`
+
+## Online Demo Day, Oct 9
+
+Register: <https://luma.com/onlinedemod>. The host approves each entry. Pitch in English
+with a deck and a live or recorded demo. Confirm the start time on the Luma page.
+
+The Luma page lists an Open Track for other chains and cross-chain (500 / 200 / 100) and a
+Solana Demo track (1,000 / 500 / 200).
+
+Prepare:
+
+- A short deck.
+- A 3-minute live demo, with the demo video as backup.
+
+Pitch outline:
+
+1. A shielded payment cannot reach someone who has no wallet.
+2. Zenvelope turns the payment into a link.
+3. The recipient opens it in a browser. No install, no address.
+4. The secret stays in the URL fragment. The spend is proved in the browser.
+5. Optional exit to USDC or SOL on Solana. Live test delivered 14.400612 USDC.
+6. Live on mainnet, MIT, one developer. Link and repo on the last slide.
+
+### Earn bounty answer
+
+Listing: <https://superteam.fun/earn/listing/pitch-and-demo-your-product-at-online-demo-day>.
+800 USDG (500 / 200 / 100). Closes 2026-10-15 20:59 UTC.
+
+> I pitched Zenvelope at the Online Demo Day on Oct 9. It sends shielded ZEC as a link that works for someone with no wallet. The demo showed a link opened in a browser, the spend proved in that tab, and the optional exit to USDC on Solana. Live at https://zenvelope.netlify.app, code at https://github.com/IhorMuliar/zenvelope.
+
+## Adevar Labs pre-audit
+
+Listing: <https://superteam.fun/earn/listing/pre-audit-credits-adevarlabs>. 5 x $4k
+pre-audit credits. The listing says "Solana/Rust submissions only". Closes Oct 12 per the
+listing body, Oct 13 06:59 UTC per Earn. Must follow @AdevarLabs.
+
+### Form answers
+
+**Project description:**
+
+> Zenvelope sends shielded ZEC as a link, and the recipient spends it in the browser. We would like an audit of the in-browser Ironwood spend builder and the witness and nullifier logic in `crates/core`. We would also like a review of how `web/` handles the secret in the URL fragment.
+
+**Lines of code:** 15,907 lines of Rust and TypeScript, not counting tests. 25,641 with tests.
+
+**Funding stage:** none, pre-revenue, solo founder
+
+**New or existing project:** new, started 2026-09-20
+
+**Names:** Ihor Muliar, `<LINKEDIN_URL>`
+
+**Tweet:**
+
+> Applying for pre-audit credits from @AdevarLabs for Zenvelope. It sends shielded ZEC as a link, and a Rust core proves the spend in the browser. Built for @Colosseum Crypto World's Fair, via @superteamearn. https://github.com/IhorMuliar/zenvelope
+
+## Not entered
+
+- Poland track: the Earn region is fixed to Ukraine by a 21-day location cooldown.
+- RPC Fast: credits only, and it needs 2 months of social posting.
+- CertiK: audit credits aimed at contracts. Zenvelope has none.
