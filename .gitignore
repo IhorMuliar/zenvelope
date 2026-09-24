@@ -45,3 +45,7 @@ TEST-ENVELOPES-*.png
 
 # concurrent test destination: mnemonic, spendable
 TEST-B-DEST.md
+
+# local tool state
+web/.netlify/
+web/.playwright-cli/

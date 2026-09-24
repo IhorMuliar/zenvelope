@@ -127,7 +127,7 @@ text can split the query into extra parameters.
 `message=` was what M1 used and it is now gone. A ZIP-321 `message` is a human-readable
 label *for the sending wallet's own history*: nothing in the spec puts it on the chain,
 and nothing did. The funded M1 envelope was created with `message=Zenvelope%20M1` and the
-zcash-devtool oracle reports `Memo: Memo::Empty` for the note it produced — the text
+zcash-devtool oracle reports `Memo: Memo::Empty` for the note it produced: the text
 never left the sender's wallet. A message that the recipient can never see is a promise
 the product cannot keep, so `payment_uri` does not offer one.
 
@@ -195,14 +195,14 @@ is the work skipped:
 
 In the `multicore` package the compact pass is parallel. Blocks are buffered in chunks of
 `SCAN_CHUNK_BLOCKS` (64) as they come off the single `GetBlockRange` stream, and each
-chunk goes through rayon's `par_iter` — one block per unit of work, which is coarse enough
+chunk goes through rayon's `par_iter`, one block per unit of work, which is coarse enough
 that scheduling is not the workload and fine enough to keep every thread busy. The
 single-threaded package compiles the same loop with `iter()`; the parallel path is behind
 `#[cfg(feature = "multicore")]` and the stable build is unchanged.
 
 **The answers are identical either way.** Rayon's `collect` into a `Vec` preserves source
 order however the work finished, and within a block the hits are pushed in `vtx` order, so
-both builds produce the same `(height, txid)` list in the same order — and therefore the
+both builds produce the same `(height, txid)` list in the same order, and therefore the
 same notes, with the same `action_index`, out of the full pass. That is not cosmetic:
 everything downstream, the frontier replay above all, reads the chain in order.
 
@@ -291,15 +291,15 @@ The scan holds one compact block at a time plus a set of hits, and nothing else.
 no block cache, no note commitment tree, no database: peak usage is the wasm linear
 memory (a few MB, growing with the largest block seen) and is flat in the number of
 blocks scanned. A 10,000-block default scan and a 57-block scan cost the same memory.
-Nothing is persisted, so closing the tab leaves nothing behind — which is the privacy
+Nothing is persisted, so closing the tab leaves nothing behind, which is the privacy
 property the product wants anyway.
 
 ### What M3 needed from M2, and what it reuses
 
 M2 deliberately stopped at "what did this envelope receive". Spending needed a position
 in the Ironwood commitment tree and a Merkle path to an anchor, which trial decryption
-alone does not give. M3 gets both without a wallet database — see
-[Sweeping an envelope](#sweeping-an-envelope-m3) below — and reuses the rest of M2
+alone does not give. M3 gets both without a wallet database (see
+[Sweeping an envelope](#sweeping-an-envelope-m3) below) and reuses the rest of M2
 unchanged: the key derivation (`ufvk_from_secret` gives the Orchard-only UFVK, and the
 spending key comes from the same seed), the gRPC-web transport and its generated client,
 and the full-transaction Ironwood decryption that produces the note itself.
@@ -324,7 +324,7 @@ flat-fee output to Zenvelope (D5), no change.
 `amount_to_destination = Σ notes − ZIP-317 network fee − flat fee`, and a sweep that would
 leave nothing to send is refused rather than built.
 
-An envelope usually holds one note, and then this is exactly what M3 did — the proved
+An envelope usually holds one note, and then this is exactly what M3 did: the proved
 transaction is the same 9,166 bytes it always was. An envelope holds more than one when
 the sender pays it twice, or when a group of senders each pay the same link, and the
 recipient should not have to open the link once per payment to collect them. Naming the
@@ -335,7 +335,7 @@ The whole sequence lives in `src/sweep.rs` and is **generic over the gRPC transp
 the browser (gRPC-web over `fetch`) and the native integration test (plain gRPC over
 `tonic::transport::Channel`) run the same code against mainnet. That is deliberate: the
 sequence that spends real money is exercised natively before a browser is pointed at it.
-The transport-free half — addresses, fees, witness replay, keys, build and prove — is
+The transport-free half (addresses, fees, witness replay, keys, build and prove) is
 `src/spend.rs` and is unit-tested without a network.
 
 ### Building the transaction
@@ -375,8 +375,8 @@ Builder::new(
 threaded build. See **Two wasm packages** below.
 
 **`circuits` cannot be narrowed.** It is defined as `["orchard/circuit",
-"sapling/circuit"]`, and `Builder::build` — the only entry point that can produce a
-transaction — is `#[cfg(feature = "circuits")]`. Cargo features are additive, so there is
+"sapling/circuit"]`, and `Builder::build`, the entry point that produces a
+transaction, is `#[cfg(feature = "circuits")]`. Cargo features are additive, so there is
 no way to ask for the Orchard half without the Sapling half: taking `circuits` takes
 bellman and groth16 with it, even though [`NoSaplingProver`](#nosaplingprover) means no
 Groth16 proof is ever created. Splitting the feature upstream would need a
@@ -408,8 +408,8 @@ Two extra exports exist for that loader, in both packages:
 
 | Export | |
 | --- | --- |
-| `is_threaded()` | `() => boolean` — the build stamp: true only in the `multicore` package |
-| `thread_count()` | `() => number` — `rayon::current_num_threads()`, or 1. Meaningful only after `initThreadPool` has resolved |
+| `is_threaded()` | `() => boolean`: the build stamp, true only in the `multicore` package |
+| `thread_count()` | `() => number`: `rayon::current_num_threads()`, or 1. Meaningful only after `initThreadPool` has resolved |
 
 and the `multicore` package additionally exports `wasm-bindgen-rayon`'s
 `initThreadPool(n) -> Promise`, which must be awaited on the thread that instantiated the
@@ -430,7 +430,7 @@ provers are never called. `NoSaplingProver` is a zero-sized type whose every met
 broken.
 
 The alternative is the real `SpendParameters`, which means shipping the 51.5 MB Sapling
-proving parameters to a browser — exactly what [D2](../../docs/DECISIONS.md) rules out,
+proving parameters to a browser, exactly what [D2](../../docs/DECISIONS.md) rules out,
 and `download.z.cash` does not serve them cross-origin anyway. A unit test asserts both
 provers abort and that the type is zero-sized; the native integration test asserts the
 built transaction has no Sapling bundle at all.
@@ -464,7 +464,7 @@ block:
   leaves. They share the tree replay and cost nothing extra.
 - **Notes in different blocks** are witnessed as the replay reaches each of their blocks.
   The tree the replay holds when it arrives at a later note's block *is* that block's
-  `h − 1` frontier — arrived at by replaying rather than by fetching it again — which is
+  `h − 1` frontier (arrived at by replaying rather than by fetching it again), which is
   why one continuous replay from the earliest note's block is both correct and the
   cheapest thing available: every witness has to see every commitment after its own leaf
   anyway.
@@ -482,8 +482,8 @@ a recent one, which gives two valid strategies:
 
 | | Cost | What the anchor reveals |
 | --- | --- | --- |
-| **Same-block anchor** — witness in the note's own block and stop | one `GetTreeState` + one `GetBlock`, constant | the note's block, which anyone who already knows the funding transaction knows |
-| **Recent anchor** — roll the witness forward to the chain tip | one streamed block per block of distance | nothing about the note's age; this is what an ordinary wallet does |
+| **Same-block anchor**: witness in the note's own block and stop | one `GetTreeState` + one `GetBlock`, constant | the note's block, which anyone who already knows the funding transaction knows |
+| **Recent anchor**: roll the witness forward to the chain tip | one streamed block per block of distance | nothing about the note's age; this is what an ordinary wallet does |
 
 The policy takes the middle of the two, bounded by `ANCHOR_WALK_CAP` (**24 blocks**,
 about half an hour of mainnet at 75 s per block):
@@ -492,19 +492,19 @@ about half an hour of mainnet at 75 s per block):
 anchor = min(tip, newest note height + ANCHOR_WALK_CAP)
 ```
 
-A recipient opening a link minutes after it was funded — the normal case — still gets the
+A recipient opening a link minutes after it was funded (the normal case) still gets the
 chain tip, because the tip is then the smaller of the two and nothing changes for them. An
 older envelope gets an anchor 24 blocks past its newest note instead of the tip, and the
 walk is bounded there rather than growing with the envelope's age. The height used comes
 back as `anchor_height`.
 
 **This is a privacy/latency trade-off, not a correctness one** (DECISIONS.md D18). Any
-finalized tree state's root is a consensus-valid anchor — the M3 spike verified a
-same-block anchor against mainnet, which is the extreme case of the same thing — so no
+finalized tree state's root is a consensus-valid anchor (the M3 spike verified a
+same-block anchor against mainnet, which is the extreme case of the same thing), so no
 cap, of any size, can produce a transaction the chain will not take. The walk is
 therefore there for one purpose only: so the anchor does not pin the exact funding block.
 Any distance past the note buys that, and each block of it is paid for in Sinsemilla
-hashing on the recipient's device — **24 blocks is about 2 s on a desktop and under 1 s
+hashing on the recipient's device: **24 blocks is about 2 s on a desktop and under 1 s
 on a recent phone, where 120 blocks cost about 10 s** (web/docs/PERF-2026-09-21.md §9 and
 §10). What the cap costs is anonymity-set freshness: an observer reading the anchor of an
 old envelope's sweep learns the transaction was built against a tree state no later than
@@ -539,7 +539,7 @@ standard 34-byte P2PKH output, and the first two logical actions are free of mar
 | 3 | 1 shielded + 1 transparent | 4 | 20,000 zat |
 
 So a **second note costs nothing**: it rides in an action the outputs had already paid
-for. Only the third and beyond add a marginal fee each — which is still far less than
+for. Only the third and beyond add a marginal fee each, which is still far less than
 sweeping them one transaction at a time, where every sweep pays the 10,000 minimum again.
 
 The arithmetic is `ironwood_action_count` and `network_fee_zat` in `src/spend.rs`,
@@ -552,10 +552,10 @@ exactly zero after fees, so a wrong fee is a build error and never a silent over
 
 | Destination | `classify_address` kind | Swept to |
 | --- | --- | --- |
-| unified with an Orchard receiver, `u1…` | `unified_orchard` | an Ironwood output — **yes** |
-| transparent, `t1…` or `t3…` | `transparent` | a transparent output — **yes**, and the amount becomes public |
+| unified with an Orchard receiver, `u1…` | `unified_orchard` | an Ironwood output: **yes** |
+| transparent, `t1…` or `t3…` | `transparent` | a transparent output: **yes**, and the amount becomes public |
 | unified without an Orchard receiver | `unified_no_orchard` | refused |
-| Sapling, `zs1…` | `sapling` | refused — **no** |
+| Sapling, `zs1…` | `sapling` | refused: **no** |
 | anything else, or an address for the other network | `invalid` | refused |
 
 `classify_address` never throws: an unparseable string, a testnet address on mainnet and a
@@ -569,8 +569,8 @@ their money sent somewhere the flow cannot reach.
 `zcash_primitives` builds its own Orchard/Ironwood proving key **inside** `build`, caching
 it in a process-wide `OnceLock` keyed by circuit version
 (`transaction::builder::cached_orchard_proving_key`, which that crate exports as a
-`pub fn`). Left alone, the recipient pays for that key build — about 27 s of
-single-threaded wasm — inside the same call that proves, with no way to tell the two apart
+`pub fn`). Left alone, the recipient pays for that key build (about 27 s of
+single-threaded wasm) inside the same call that proves, with no way to tell the two apart
 on screen.
 
 `warm_proving_key()` forces it early and returns the milliseconds it took. Three ways to
@@ -605,8 +605,8 @@ back for inspection, and `error_code` and `error_message` are `null`.
 ### A fresh wallet for the recipient
 
 `new_wallet(network, birthday)` is for a recipient who has no Zcash address at all: 24
-English BIP-39 words (`bip0039`), seed = `mnemonic.to_seed("")` — the full 64 bytes with
-an **empty passphrase** — then `UnifiedSpendingKey::from_seed`, account 0, and a unified
+English BIP-39 words (`bip0039`), seed = `mnemonic.to_seed("")` (the full 64 bytes with
+an **empty passphrase**), then `UnifiedSpendingKey::from_seed`, account 0, and a unified
 address with Orchard and Sapling receivers (`UnifiedAddressRequest::SHIELDED`).
 
 The empty passphrase and the 64-byte seed are what Zodl (formerly Zashi) and
@@ -660,22 +660,22 @@ const uri = core.payment_uri(address, 10_000n + 100_000n, "Coffee");
 | Export | Signature |
 | --- | --- |
 | `derive` | `(secret_b64url: string, network: "main" \| "test") => { address: string, ufvk: string, diversifier_index: number }` |
-| `generate_secret` | `() => string` — 43 base64url chars from the CSPRNG |
+| `generate_secret` | `() => string`: 43 base64url chars from the CSPRNG |
 | `parse_fragment` | `(fragment: string) => { secret: string, birthday?: number }` |
 | `build_fragment` | `(secret: string, birthday?: number) => string` |
-| `payment_uri` | `(address: string, amount_zat: bigint \| string \| number, memo?: string) => string` — `memo` is the sender's text, base64url'd into the ZIP-321 `memo=` parameter |
-| `memo_byte_length` | `(text: string) => number` — UTF-8 bytes, which is what the 512-byte limit counts |
-| `max_memo_bytes` | `() => number` — 512 |
+| `payment_uri` | `(address: string, amount_zat: bigint \| string \| number, memo?: string) => string`: `memo` is the sender's text, base64url'd into the ZIP-321 `memo=` parameter |
+| `memo_byte_length` | `(text: string) => number`: UTF-8 bytes, which is what the 512-byte limit counts |
+| `max_memo_bytes` | `() => number`: 512 |
 | `zat_to_zec_string` | `(zat: bigint \| string \| number) => string` |
 | `zec_string_to_zat` | `(zec: string) => bigint` |
-| `is_orchard_only` | `(address: string) => boolean` — decodes the address and confirms one receiver, Orchard |
+| `is_orchard_only` | `(address: string) => boolean`: decodes the address and confirms one receiver, Orchard |
 | `open_envelope` | `(secret: string, birthday: number \| undefined, network: "main" \| "test", lightwalletd_url: string, on_progress?: (scanned: number, total: number, event?: ScanEvent) => void) => Promise<Opened>` |
-| `classify_address` | `(address: string, network: "main" \| "test") => { kind: Kind, reason: string \| null }` — never throws on a bad address |
+| `classify_address` | `(address: string, network: "main" \| "test") => { kind: Kind, reason: string \| null }`: never throws on a bad address |
 | `new_wallet` | `(network: "main" \| "test", birthday: number) => { mnemonic: string, address: string, ufvk: string, birthday: number }` |
-| `warm_proving_key` | `() => Promise<number>` — builds the Ironwood proving key now; resolves with the milliseconds it took |
-| `is_threaded` | `() => boolean` — true only in the `multicore` package |
-| `thread_count` | `() => number` — threads in the proving pool; 1 until `initThreadPool` resolves |
-| `initThreadPool` | `(n: number) => Promise<void>` — **`multicore` package only** |
+| `warm_proving_key` | `() => Promise<number>`: builds the Ironwood proving key now; resolves with the milliseconds it took |
+| `is_threaded` | `() => boolean`: true only in the `multicore` package |
+| `thread_count` | `() => number`: threads in the proving pool; 1 until `initThreadPool` resolves |
+| `initThreadPool` | `(n: number) => Promise<void>`: **`multicore` package only** |
 | `sweep_envelope` | see below |
 
 From M4 the web app never calls these on its main thread: they are reached over a
@@ -730,7 +730,7 @@ const wallet = core.new_wallet("main", tipHeight);
 ```
 
 `classify_address` does not throw: see [Where a sweep can send](#where-a-sweep-can-send).
-`new_wallet`'s `mnemonic` is the money — it exists only in the page, and showing it is the
+`new_wallet`'s `mnemonic` is the money: it exists only in the page, and showing it is the
 caller's decision.
 
 ### `sweep_envelope`
@@ -771,7 +771,7 @@ forward. Anything `on_stage` throws is ignored, for the same reason `on_progress
 `notes` is an **array**, and every note in it is spent in the one transaction:
 `amount_to_destination_zat` is their sum minus both fees. A bare
 `{ txid, height, action_index }` object is still accepted and treated as a one-element
-array — backward compatibility for **one release**, so a page built against the M3
+array, for backward compatibility for **one release**, so a page built against the M3
 signature keeps working; new callers pass the array. An empty array is refused, and so is
 the same note twice, before any network work.
 
@@ -800,14 +800,17 @@ a loop.
 ```
 
 Runs `wasm-pack build crates/core --target web --release` into `web/src/wasm/core/`,
-then prints the raw and gzipped size. Requires the `wasm32-unknown-unknown` target,
+then the `multicore` build on nightly into `web/src/wasm/core-mt/` (see **Two wasm
+packages**), and prints the raw and gzipped sizes. Requires the `wasm32-unknown-unknown` target,
 `wasm-pack`, and `clang` (the transparent dependency chain pulls in `secp256k1-sys`,
 which builds C even though this crate never calls it).
 
-The M3 wasm is **2.18 MB raw, 1.03 MB gzipped**, up from a few hundred KB at M2. The
+The M3 wasm was **2.18 MB raw, 1.03 MB gzipped**, up from a few hundred KB at M2; with
+the M5 Solana exit the builds are 2,249,295 bytes (single-thread) and 2,302,997 bytes
+(threaded) raw, about 1.06 and 1.09 MB gzipped (web/docs/M3-VERIFICATION.md §9). The
 Orchard/Ironwood halo2 circuit is most of it; `circuits` also switches on `sapling/circuit`
 (bellman and groth16) because `zcash_primitives` has no feature that selects one without
-the other. Sapling proving *parameters* are a separate matter and are never downloaded —
+the other. Sapling proving *parameters* are a separate matter and are never downloaded:
 see [`NoSaplingProver`](#nosaplingprover).
 
 `tonic-web-wasm-client` and `wasm-bindgen-futures` are scoped to the wasm target, and
@@ -818,8 +821,8 @@ shipped wasm.
 
 `.cargo/config.toml` sets `--cfg getrandom_backend="wasm_js"` for the wasm target;
 `getrandom` 0.3 will not compile for `wasm32-unknown-unknown` without it. There is a
-*second* `getrandom` in the tree — 0.2, reached through `rand` 0.8 by the Orchard circuit
-— which takes its backend from a feature instead, so `crates/core/Cargo.toml` also names
+*second* `getrandom` in the tree (0.2, reached through `rand` 0.8 by the Orchard circuit),
+which takes its backend from a feature instead, so `crates/core/Cargo.toml` also names
 `getrandom = { version = "0.2", features = ["js"] }` for wasm. Neither covers the other.
 The `[package.metadata.wasm-pack.profile.release]` block names the post-MVP wasm features
 rustc emits, which the bundled `wasm-opt` otherwise rejects.
@@ -899,7 +902,7 @@ and fee envelope in `M3-DEST.md`.
 
 The browser test (`web/e2e/m3-core.spec.ts`) times `warm_proving_key`, asserts a second
 call is nearly free, runs the same sweep through the wasm in the **array** form with
-`broadcast: false`, and checks the stage order, the amounts and the raw transaction —
+`broadcast: false`, and checks the stage order, the amounts and the raw transaction,
 including that it is still 9,166 bytes. A second, cheap test asserts the wasm refuses an
 empty array and the same note twice, which is the JS boundary's own array handling. The M2 browser proof
 (`web/e2e/m2-core.spec.ts`) is unchanged.

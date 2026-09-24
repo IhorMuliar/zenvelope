@@ -1,62 +1,55 @@
 # Zenvelope
 
-**Send shielded money as a link. No wallet, no address, no amount on screen.**
+**Send shielded ZEC as a link. The recipient needs no wallet, no install and no address.**
+Live at <https://zenvelope.netlify.app>. MIT. Verified on mainnet (see the README).
 
 ## What it is
-Zenvelope takes the idea behind ZIP-324, Zcash's 2019 draft for
-URI-encapsulated payments, to the open web and to the Ironwood pool. A sender
-funds a link from a shielded ZEC balance. The recipient opens the link in any
-browser and takes the money out. No wallet, no install, no address exchange,
-and the amount is not in the link: it stays hidden from everyone, including the
-recipient, until the envelope is opened. Prior art we build on: zplash (2026,
-ZIP-324 on Sapling with browser proving) and Vizor gift links (2026, recipient
-installs Vizor). See DECISIONS.md.
+A sender funds a link from a Zcash wallet. The recipient opens it in any browser and moves
+the money where they choose. No wallet, no install, no address exchange, and the amount is
+not in the link. Prior art: ZIP-324 (2019 draft), zplash (2026, ZIP-324 on Sapling with
+browser proving), Vizor gift links (2026, recipient installs Vizor) and zecgift (2026,
+recipient supplies a shielded address). What Zenvelope adds: the recipient needs nothing,
+no amount in the link, Ironwood.
 
-## How it works, in one paragraph
-The link contains a secret in the URL fragment. That secret derives a shielded
-Zcash address and its viewing and spending keys. The sender's wallet pays to
-that address. When the recipient opens the link, their browser uses the viewing
-key to find the note and reveal the amount, then uses the spending key to move
-the funds where they choose. The secret never leaves the browser and never
-reaches our server. We cannot see, freeze, or take the money. We are a website
-that hosts the open-source code, nothing more.
+## How it works
+The link carries a 32-byte secret in the URL fragment, which browsers never send to a
+server. The secret derives a unified address with a single Orchard receiver, which receives
+Ironwood notes. The sender pays a single-output ZIP-321 QR from Zodl, Zingo, ZKool2, Vizor or
+Cake; the message travels in the encrypted memo. On open, the recipient's browser scans the
+chain, reveals the amount, checks for spends, then proves and broadcasts the send-on
+transaction in WASM. The site is static: no backend, no analytics, no keys, no custody.
 
-## Where the money can go on open
-1. **Shielded ZEC** to any Zcash address the recipient pastes, or to a fresh
-   in-browser Zcash wallet we generate for them. This is the product.
-2. **USDC or SOL on Solana**, optional, routed through a third-party swap rail
-   the recipient chooses. Shown behind an explicit trust-boundary warning:
-   "This leaves the shielded pool. Here is what you give up." The rail is not
-   ours, and we never hold funds on either side.
+## Where the money can go
+1. Any Zcash unified address the recipient pastes.
+2. A fresh wallet generated in the browser (24 BIP-39 words, restores in Noir and Zodl).
+3. USDC or SOL on Solana through NEAR Intents, a third-party rail, behind a trust-boundary
+   screen that lists what becomes public and every fee. A failed swap refunds to the
+   envelope, so the same link opens again.
 
 ## Group envelopes
-One sender, N recipients, fixed amounts per link. Used for payroll, contractor
-payouts, community distributions, and holiday gifting. Fixed split only, no
-random split, no payment by the recipient to open.
+Up to 50 links at once, fixed amount per link, with a CSV export. The sender's wallet funds
+each link separately. Meant for payroll, contractor payouts, community distributions and
+gifting.
 
-## What we charge
-A flat fee per link. The sender's ZIP-321 URI has a single output, for
-*envelope amount + flat fee*, which keeps it compatible with every sender
-wallet. The fee reaches us as a second output of the sweep transaction when
-the recipient opens the envelope, not as an output of the sender's payment.
-The fee covers hosting and sponsored costs. It is a service fee, not a
-percentage of the amount. Recipients pay nothing extra.
+## Fee
+A flat 0.0003 ZEC per envelope, not a percentage. The sender pays it inside the single
+funding output; it reaches the service address as a second output of the send-on
+transaction. Recipients pay nothing.
 
 ## What we are not
-Not a custodian, not an exchange, not a bridge. No float, no conversion in-house,
-no account, no KYC, no server-side keys. The design is chosen so that no entity
-in the flow is a MiCA crypto-asset service provider or a money transmitter.
+Not a custodian, not an exchange, not a bridge. No float, no in-house conversion, no account,
+no KYC, no server-side keys. The design is chosen so that no entity in the flow is a MiCA
+crypto-asset service provider or a money transmitter.
 
-## Who it is for first
+## Not done yet
+Subresource integrity and reproducible builds; funding a group from one transaction;
+caching the proving key between visits.
+
+## Who it is for
 - ZEC holders paying someone who has no Zcash wallet.
-- Zcash community organizers and NFT mints distributing to many recipients.
-- Holiday and Lunar New Year gifting inside the Zcash community.
-
-## Tracks
-Primary: Colosseum Crypto World's Fair, Zcash track. Also registered: Solana
-track, general awards. Superteam Earn: Ukraine sidetrack, RPC Fast, pitch bounty.
-Later: Zcash coinholder retroactive grant, Superteam grant.
+- Zcash community organizers distributing to many recipients.
+- Gifting inside the Zcash community.
 
 ## Copy rules
-Never use the word "claim" in product copy. It is the top wallet-drainer lure.
-Use "open", "receive", "unwrap".
+The usual drainer lure word is banned on every screen (`web/src/copy/en.test.ts`). Use
+"open", "receive", "unwrap". Never ask for a seed phrase or a wallet connection.
