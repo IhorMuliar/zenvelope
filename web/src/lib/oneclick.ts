@@ -19,14 +19,16 @@
  *   - the minimum is an HTTP 400 whose message is
  *     `Amount is too low for bridge, try at least 132000` — the floor is a
  *     moving ~$2 and is therefore read out of that text, never hard-coded
- *   - an unauthenticated quote silently carries a 25 bps `appFees` entry that
- *     is not ours and that we surface anyway ({@link APP_FEE_BPS})
+ *   - an unauthenticated quote silently carries an `appFees` entry (25 bps when
+ *     measured) that is not ours and that we surface anyway ({@link appFeeBps})
  *   - `amountOut` is already net of `withdrawFee`, so the honest number to show
  *     is the USD spread between `amountInUsd` and `amountOutUsd`
  *   - a real quote answers with a transparent `t1…` deposit address and no
  *     memo, and the server replaces the deadline we ask for with one three days
  *     out
  */
+
+import { solanaExit as copy } from "../copy/en";
 
 /** The live base. There is no test network for this rail. */
 export const ONECLICK_BASE = "https://1click.chaindefuser.com/v0";
@@ -38,17 +40,35 @@ export const ONECLICK_TIMEOUT_MS = 10_000;
 export const ZEC_ASSET_ID = "nep141:zec.omft.near";
 
 /**
- * The house fee an unauthenticated quote carries, in basis points.
+ * The rail's own service fee, in basis points, read out of the quote.
  *
- * It is applied by the rail, it is not ours, and the API does not put it on the
- * screen: the quote response carries it as `quoteRequest.appFees`. We restate it
- * to the recipient as a flat line rather than let it hide inside the spread.
+ * An unauthenticated quote has carried a 25 bps `appFees` entry that is not ours
+ * (measured 2026-09-21), but that is the rail's choice and can change, so the
+ * figure on screen is whatever the quote actually says: the sum of every
+ * `{recipient, fee}` entry, looked for on the response and on its echoed
+ * `quoteRequest`. null when neither carries the field, which is not the same as
+ * zero: an absent field means we do not know.
  */
-export const APP_FEE_BPS = 25;
+export function appFeeBps(response: unknown): number | null {
+  const r = response as { appFees?: unknown; quoteRequest?: { appFees?: unknown } } | null;
+  const list = Array.isArray(r?.appFees)
+    ? r!.appFees
+    : Array.isArray(r?.quoteRequest?.appFees)
+      ? r!.quoteRequest!.appFees
+      : null;
+  if (list === null) return null;
+  let total = 0;
+  for (const entry of list as unknown[]) {
+    const fee = Number((entry as { fee?: unknown } | null)?.fee);
+    if (Number.isFinite(fee) && fee > 0) total += fee;
+  }
+  return total;
+}
 
-/** The one-line disclosure of {@link APP_FEE_BPS}, shown next to the spread. */
-export const APP_FEE_DISCLOSURE =
-  "Includes a 0.25% service fee to the swap provider, charged by the rail and not by us.";
+/** The one-line disclosure of the rail's service fee, shown next to the spread. */
+export function appFeeDisclosure(bps: number | null): string {
+  return copy.feeLine(bps);
+}
 
 /** Slippage we accept, in basis points. 1%. */
 export const SLIPPAGE_BPS = 100;
@@ -299,6 +319,8 @@ export interface OneClickQuoteResponse {
     recipient: string;
     appFees?: OneClickAppFee[];
   };
+  /** Some responses carry the fee list at the top level rather than in the echo. */
+  appFees?: OneClickAppFee[];
   signature: string;
   timestamp: string;
   correlationId?: string;
@@ -413,6 +435,34 @@ export function solanaTxid(status: OneClickStatusResponse): string | null {
   return typeof hash === "string" && hash.trim() !== "" ? hash.trim() : null;
 }
 
+/**
+ * What the rail actually paid out, once it says SUCCESS, as "14.400612 USDC".
+ *
+ * The final `GET /status` carries it in `swapDetails.amountOutFormatted` (and
+ * the raw `swapDetails.amountOut` in the asset's smallest unit): on the live
+ * run of 2026-09-24 that was 14.400612 USDC against 14.384176 quoted
+ * (M5-VERIFICATION §7). null before SUCCESS, and null when the field is absent,
+ * so the screen falls back to the quoted figure rather than inventing one.
+ */
+export function paidOutAmount(status: OneClickStatusResponse | null, asset: SolanaAsset): string | null {
+  if (!status || status.status !== "SUCCESS") return null;
+  const d = status.swapDetails;
+  if (!d) return null;
+  const spec = SOLANA_ASSETS[asset];
+  const formatted = typeof d.amountOutFormatted === "string" ? d.amountOutFormatted.trim() : "";
+  if (formatted !== "" && Number.isFinite(Number(formatted)) && Number(formatted) > 0) {
+    return `${formatted} ${spec.symbol}`;
+  }
+  const raw = typeof d.amountOut === "string" ? d.amountOut.trim() : "";
+  if (/^\d+$/.test(raw) && BigInt(raw) > 0n) {
+    const padded = raw.padStart(spec.decimals + 1, "0");
+    const whole = padded.slice(0, padded.length - spec.decimals);
+    const frac = padded.slice(padded.length - spec.decimals);
+    return `${whole}.${frac} ${spec.symbol}`;
+  }
+  return null;
+}
+
 /* --------------------------------------------------- what it actually costs */
 
 export interface EffectiveCost {
@@ -425,8 +475,8 @@ export interface EffectiveCost {
   spreadPct: string;
   /** The USD the recipient does not get: `amountInUsd - amountOutUsd`. */
   costUsd: number;
-  /** The rail's house fee, restated (see {@link APP_FEE_BPS}). */
-  appFeeBps: number;
+  /** The rail's service fee from the quote's `appFees`, or null when absent. */
+  appFeeBps: number | null;
   disclosure: string;
   /** False when the rail sent USD figures we cannot do arithmetic on. */
   ok: boolean;
@@ -445,13 +495,13 @@ function num(v: unknown): number {
  *
  * `amountOut` is already net of the destination withdrawal fee, so the spread
  * computed here is the whole cost of leaving: the rail's rate, its withdrawal
- * fee and the 25 bps house fee, all in one number. The house fee is restated
+ * fee and the rail's service fee (`appFees`), all in one number. The house fee is restated
  * separately anyway, because a fee folded into a spread is a fee nobody sees.
  *
  * The Zcash miner fee is **not** in here. It is the sweep's, it is shown on the
  * same screen by `sweepAmounts`, and double-counting it would overstate the rail.
  */
-export function effectiveCost(quote: OneClickQuote, appFeeBps = APP_FEE_BPS): EffectiveCost {
+export function effectiveCost(quote: OneClickQuote, feeBps: number | null = null): EffectiveCost {
   const amountInUsd = num(quote.amountInUsd);
   const amountOutUsd = num(quote.amountOutUsd);
   const ok = Number.isFinite(amountInUsd) && Number.isFinite(amountOutUsd) && amountInUsd > 0;
@@ -463,8 +513,8 @@ export function effectiveCost(quote: OneClickQuote, appFeeBps = APP_FEE_BPS): Ef
     spreadBps: ok ? Math.round(spread * 10_000) : Number.NaN,
     spreadPct: ok ? `${(spread * 100).toFixed(2)}%` : "—",
     costUsd: ok ? amountInUsd - amountOutUsd : Number.NaN,
-    appFeeBps,
-    disclosure: APP_FEE_DISCLOSURE,
+    appFeeBps: feeBps,
+    disclosure: appFeeDisclosure(feeBps),
     ok,
   };
 }

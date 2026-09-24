@@ -159,6 +159,18 @@ describe("openReducer", () => {
     expect(openReducer(done, { type: "failed", message: "x" })).toBe(done);
   });
 
+  it("re-runs the open from an opened envelope after a lost race, and only from there", () => {
+    const opened = run([{ type: "parsed" }, { type: "open" }, { type: "result", result: FOUND }]);
+    expect(opened.phase).toBe("opened");
+    const again = openReducer(opened, { type: "recheck" });
+    expect(again.phase).toBe("scanning");
+    expect(again.scanned).toBe(0);
+    // Mid-scan or before the first open it does nothing.
+    const scanning = run([{ type: "parsed" }, { type: "open" }]);
+    expect(openReducer(scanning, { type: "recheck" })).toBe(scanning);
+    expect(openReducer(initialOpenState, { type: "recheck" })).toBe(initialOpenState);
+  });
+
   it("fails retry-ably and retries from a clean progress state", () => {
     const failed = run([
       { type: "parsed" },

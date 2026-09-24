@@ -16,7 +16,7 @@
  * DENY` backs it up), and nothing else.
  */
 
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -155,5 +155,35 @@ describe("the host configuration is committed, not folklore", () => {
   it("holds no secret: the fee address comes from the build environment", () => {
     expect(NETLIFY).not.toMatch(/VITE_FEE_ADDRESS\s*=\s*"u1/);
     expect(HEADERS).not.toContain("u1");
+  });
+});
+
+/**
+ * `style-src 'self'` and `script-src 'self'` allow no inline code, so any that
+ * ships is a console error and a feature that silently does not work. The live
+ * site's CSP errors on 2026-09-24 came from Netlify's injected "Powered by
+ * Netlify" badge (turned off in the project settings, see netlify.toml); this
+ * keeps our own page from adding any.
+ */
+describe("no inline code for the CSP to block", () => {
+  it("index.html has no inline script, no <style> and no style attribute", () => {
+    const scripts = [...INDEX.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)];
+    for (const [, attrs, body] of scripts) {
+      expect(attrs).toMatch(/\bsrc=/);
+      expect(body.trim()).toBe("");
+    }
+    expect(INDEX).not.toMatch(/<style\b/i);
+    expect(INDEX).not.toMatch(/\sstyle=/i);
+    expect(INDEX).not.toMatch(/\son[a-z]+=/i);
+  });
+
+  it("no component sets an inline style", () => {
+    const walk = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+        e.isDirectory() ? walk(resolve(dir, e.name)) : e.name.endsWith(".tsx") ? [resolve(dir, e.name)] : [],
+      );
+    for (const file of walk(resolve(WEB, "src"))) {
+      expect(readFileSync(file, "utf8"), file).not.toMatch(/\bstyle=\{/);
+    }
   });
 });

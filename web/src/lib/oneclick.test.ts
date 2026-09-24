@@ -9,7 +9,9 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  APP_FEE_BPS,
+  appFeeBps,
+  appFeeDisclosure,
+  paidOutAmount,
   ONECLICK_BASE,
   ONECLICK_TIMEOUT_MS,
   OneClickError,
@@ -327,11 +329,12 @@ describe("what it actually costs", () => {
     expect(cost.costUsd).toBeCloseTo(0.3247, 4);
   });
 
-  it("restates the rail's hidden house fee rather than folding it in", () => {
-    const cost = effectiveCost(quote);
-    expect(cost.appFeeBps).toBe(APP_FEE_BPS);
+  it("restates the rail's service fee from the quote's appFees, not a constant", () => {
+    const bps = appFeeBps(DRY_QUOTE);
+    expect(bps).toBe(25);
+    const cost = effectiveCost(quote, bps);
     expect(cost.appFeeBps).toBe(25);
-    expect(cost.disclosure).toMatch(/0\.25% service fee/);
+    expect(cost.disclosure).toMatch(/includes a 0\.25% service fee to the swap provider/);
   });
 
   it("refuses to do arithmetic on figures the rail did not send", () => {
@@ -362,5 +365,60 @@ describe("the figures on screen", () => {
   it("formats dollars to the cent", () => {
     expect(formatUsd(1.668867519)).toBe("$1.67");
     expect(formatUsd(Number.NaN)).toBe("—");
+  });
+});
+
+describe("the rail's service fee, from appFees", () => {
+  it("sums every entry, in basis points", () => {
+    const two = { quoteRequest: { appFees: [{ recipient: "a", fee: 25 }, { recipient: "b", fee: 10 }] } };
+    expect(appFeeBps(two)).toBe(35);
+    expect(appFeeDisclosure(35)).toMatch(/includes a 0\.35% service fee to the swap provider/);
+    expect(appFeeBps({ appFees: [{ recipient: "a", fee: 50 }] })).toBe(50);
+    expect(appFeeBps({ quoteRequest: { appFees: [] } })).toBe(0);
+    expect(appFeeDisclosure(0)).toMatch(/0\.00% service fee/);
+  });
+
+  it("says the fee may be there when the field is absent, never a made-up figure", () => {
+    expect(appFeeBps({ quoteRequest: {} })).toBeNull();
+    expect(appFeeBps(null)).toBeNull();
+    const cost = effectiveCost(DRY_QUOTE.quote as OneClickQuote);
+    expect(cost.appFeeBps).toBeNull();
+    expect(cost.disclosure).toBe("The swap provider may charge a service fee included in the quote.");
+    expect(cost.disclosure).not.toMatch(/0\.25/);
+  });
+});
+
+describe("what the rail actually paid out", () => {
+  // The final GET /status of the live swap on 2026-09-24 (M5-VERIFICATION §7).
+  const LIVE_SUCCESS = {
+    status: "SUCCESS",
+    updatedAt: "2026-09-24T10:38:39.000Z",
+    swapDetails: {
+      amountOut: "14400612",
+      amountOutFormatted: "14.400612",
+      amountOutUsd: "14.397285458628",
+      refundedAmount: "0",
+      refundReason: null,
+      originChainTxHashes: [],
+      destinationChainTxHashes: [{ hash: "2VTVZPoz" }],
+    },
+  };
+
+  it("reads swapDetails.amountOutFormatted after SUCCESS", () => {
+    expect(paidOutAmount(LIVE_SUCCESS, "usdc")).toBe("14.400612 USDC");
+  });
+
+  it("falls back to the raw amountOut in the asset's smallest unit", () => {
+    const raw = { ...LIVE_SUCCESS, swapDetails: { ...LIVE_SUCCESS.swapDetails, amountOutFormatted: null } };
+    expect(paidOutAmount(raw, "usdc")).toBe("14.400612 USDC");
+    const sol = { ...LIVE_SUCCESS, swapDetails: { amountOut: "5000000" } };
+    expect(paidOutAmount(sol, "sol")).toBe("0.005000000 SOL");
+  });
+
+  it("is null before SUCCESS and when the status carries no amount", () => {
+    expect(paidOutAmount({ ...LIVE_SUCCESS, status: "PROCESSING" }, "usdc")).toBeNull();
+    expect(paidOutAmount({ status: "SUCCESS", updatedAt: "", swapDetails: {} }, "usdc")).toBeNull();
+    expect(paidOutAmount({ status: "SUCCESS", updatedAt: "" }, "usdc")).toBeNull();
+    expect(paidOutAmount(null, "usdc")).toBeNull();
   });
 });

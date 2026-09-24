@@ -51,6 +51,12 @@ export interface SendState {
   result: SweepResult | null;
   /** The error line, on the failed screen. */
   message: string | null;
+  /**
+   * True when the network refused the sweep because another transaction had
+   * already spent the same note: someone else with this link got there first.
+   * The failed screen then says so instead of promising the money is still here.
+   */
+  raced: boolean;
 }
 
 export type SendEvent =
@@ -70,6 +76,7 @@ export const initialSendState: SendState = {
   stageAt: {},
   result: null,
   message: null,
+  raced: false,
 };
 
 export const SWEEP_FAILED_COPY =
@@ -93,6 +100,33 @@ export const FUNDS_SAFE_COPY =
  */
 export function showSwapUi(choice: string | null, swap: unknown): boolean {
   return choice === "solana" && swap !== null && swap !== undefined;
+}
+
+/**
+ * Said on the failed screen when the network refused the sweep because the note
+ * was already spent by another transaction (M3-VERIFICATION §11): the envelope
+ * was opened on another device moments earlier. Nothing left this browser.
+ */
+export const RACE_LOST_COPY =
+  "Someone opened this envelope moments ago on another device. Nothing was sent from here.";
+
+/** The button under {@link RACE_LOST_COPY}: it runs the open again. */
+export const RACE_CHECK_BUTTON = "Check the envelope";
+
+/**
+ * The mempool's double-spend refusal, as lightwalletd relays it: error_code -25,
+ * or a message saying the inputs are already spent / "same effects". Matched on
+ * both, because a thrown error carries only the text.
+ */
+export function isRaceLoss(code: number | null | undefined, message: string | null | undefined): boolean {
+  if (code === -25) return true;
+  const text = (message ?? "").toLowerCase();
+  if (/error_code\s*-25\b/.test(text)) return true;
+  return (
+    text.includes("already spent") ||
+    text.includes("already been spent") ||
+    text.includes("same effects")
+  );
 }
 
 /** An error_code of null or 0 is a success. Anything else means nothing moved. */
@@ -162,12 +196,18 @@ export function sendReducer(state: SendState, event: SendEvent): SendState {
             // finish line: the moment its answer arrived.
             stageAt: markStage(state.stageAt, "done", event.at),
           }
-        : { ...state, phase: "failed", result: event.result, message: failure };
+        : {
+            ...state,
+            phase: "failed",
+            result: event.result,
+            message: failure,
+            raced: isRaceLoss(event.result.error_code, event.result.error_message),
+          };
     }
 
     case "failed":
       return state.phase === "sending"
-        ? { ...state, phase: "failed", message: event.message }
+        ? { ...state, phase: "failed", message: event.message, raced: isRaceLoss(null, event.message) }
         : state;
 
     default:

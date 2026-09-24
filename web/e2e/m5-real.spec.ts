@@ -290,7 +290,7 @@ describeReal("M5: the Solana exit against the live 1Click API, dry run", () => {
       // The floor moved under the envelope: the whole path runs, live.
       console.log(`M5 live quote on screen: ${await quoted.innerText()}`);
       await expect(page.getByTestId("swap-amount-out")).toContainText("USDC");
-      await expect(page.getByTestId("swap-fee-line")).toContainText("0.25%");
+      await expect(page.getByTestId("swap-fee-line")).toContainText(/service fee/);
     }
 
     /* ----------------- 4. a real deposit address, and the dry sweep to it */

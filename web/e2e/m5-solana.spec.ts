@@ -159,8 +159,9 @@ function statusBody(status: string, withTxid = false) {
     status,
     updatedAt: "2026-09-21T02:40:00.000Z",
     swapDetails: {
-      amountOut: "1424851",
-      amountOutFormatted: "1.424851",
+      // What the rail says it paid: a little over the quote on SUCCESS, as live.
+      amountOut: withTxid ? "1431002" : "1424851",
+      amountOutFormatted: withTxid ? "1.431002" : "1.424851",
       amountOutUsd: "1.42",
       refundedAmount: "0",
       refundReason: null,
@@ -364,7 +365,7 @@ describeOnMock("M5: the Solana exit", () => {
     await expect(page.getByTestId("swap-quote-refused")).toHaveCount(0);
     await expect(page.getByTestId("swap-get-deposit")).toBeEnabled();
     await expect(page.getByTestId("swap-time")).toHaveText("about 8 minutes");
-    await expect(page.getByTestId("swap-fee-line")).toContainText("0.25% service fee");
+    await expect(page.getByTestId("swap-fee-line")).toContainText("includes a 0.25% service fee to the swap provider");
     await expect(page.getByTestId("swap-not-provider").first()).toContainText(
       "not the swap provider",
     );
@@ -529,6 +530,11 @@ describeOnMock("M5: the Solana exit", () => {
     await expect(row("swap")).toHaveAttribute("data-state", "done");
     await expect(row("payout")).toHaveAttribute("data-state", "done");
     await expect(page.getByTestId("swap-solana-txid")).toContainText("…");
+    // The paid amount from the status, and the quote beside it.
+    await expect(page.getByTestId("swap-tracker-received")).toHaveText("1.431002 USDC");
+    await expect(page.getByTestId("swap-tracker-amount-out")).toHaveText("1.424851 USDC");
+    await expect(page.getByTestId("swap-tracker")).toContainText("Received");
+    await expect(page.getByTestId("swap-tracker")).toContainText("Quoted");
 
     // It asked more than once, and it stopped once there was nothing left to ask.
     expect(rail.statusRequests.length).toBeGreaterThanOrEqual(3);

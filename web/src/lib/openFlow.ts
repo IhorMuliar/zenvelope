@@ -69,7 +69,8 @@ export type OpenEvent =
   | { type: "attempt"; attempt: number }
   | { type: "result"; result: OpenResult }
   | { type: "failed"; message: string }
-  | { type: "retry" };
+  | { type: "retry" }
+  | { type: "recheck" };
 
 export const initialOpenState: OpenState = {
   phase: "reading",
@@ -209,6 +210,12 @@ export function openReducer(state: OpenState, event: OpenEvent): OpenState {
 
     case "retry":
       return state.phase === "empty" || state.phase === "failed" ? { ...SCANNING } : state;
+
+    // "Check the envelope", after a sweep lost the race to another device: the
+    // open runs again from the in-memory secret and lands on whatever the chain
+    // now says, which is "already opened" once the other sweep is mined.
+    case "recheck":
+      return state.phase === "opened" ? { ...SCANNING } : state;
 
     default:
       return state;

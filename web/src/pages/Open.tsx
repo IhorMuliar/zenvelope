@@ -149,6 +149,12 @@ export function Open() {
     void scan();
   };
 
+  /** From the send-on flow, after another device swept this envelope first. */
+  const onCheckAgain = useCallback(() => {
+    dispatch({ type: "recheck" });
+    void scan();
+  }, [scan]);
+
   const badge = isMock ? <MockBadge /> : null;
   const provingFooter = proving ? <ProvingNote note={proving} /> : null;
 
@@ -274,6 +280,7 @@ export function Open() {
         network={link.network}
         envelopeAddress={link.address}
         openMs={openMs}
+        onCheckAgain={onCheckAgain}
       />
     );
   }
@@ -385,6 +392,7 @@ function Opened({
   envelopeAddress,
   openMs,
   checking = null,
+  onCheckAgain,
 }: {
   /** The UNSPENT notes only: these are what the amount shows and SendOn sweeps. */
   notes: FoundNote[];
@@ -408,6 +416,8 @@ function Opened({
    * the same worker thread as the walk and would hold the check up.
    */
   checking?: { scanned: number; total: number } | null;
+  /** Runs the open again; offered after a sweep lost the race to another device. */
+  onCheckAgain?: () => void;
 }) {
   const total = sumZat(notes.map((n) => n.amount_zat));
   const memo = notes.find((n) => n.memo && n.memo.trim() !== "")?.memo ?? null;
@@ -504,6 +514,7 @@ function Opened({
           tipHeight={tipHeight}
           envelopeAddress={envelopeAddress}
           openMs={openMs}
+          onCheckAgain={onCheckAgain}
         />
       )}
 

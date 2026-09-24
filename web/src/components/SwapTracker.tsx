@@ -17,6 +17,7 @@ import { solanaExit as copy } from "../copy/en";
 import {
   formatAssetAmount,
   oneClickStatus,
+  paidOutAmount,
   solanaTxid,
   type OneClickStatusResponse,
 } from "../lib/oneclick";
@@ -63,6 +64,8 @@ export function SwapTracker({ plan, pollMs = statusPollMs() }: Props) {
 
   const rows = swapChecklist(status?.status ?? null);
   const txid = status ? solanaTxid(status) : null;
+  // After SUCCESS the rail says what it actually paid; the quote stays beside it.
+  const received = paidOutAmount(status, plan.asset);
 
   return (
     <div className="card stack" data-testid="swap-tracker">
@@ -89,8 +92,14 @@ export function SwapTracker({ plan, pollMs = statusPollMs() }: Props) {
         {swapStatusLine(status?.status ?? null)}
       </p>
 
+      {received ? (
+        <p className="row receive">
+          <span className="label">{copy.receivedLabel}</span>
+          <strong data-testid="swap-tracker-received">{received}</strong>
+        </p>
+      ) : null}
       <p className="row">
-        <span className="label">{copy.amountOutLabel}</span>
+        <span className="label">{copy.quotedLabel}</span>
         <span data-testid="swap-tracker-amount-out">
           {formatAssetAmount(plan.reservation.quote, plan.asset)}
         </span>

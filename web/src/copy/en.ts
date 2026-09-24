@@ -336,13 +336,23 @@ export const solanaExit = {
   quoteButton: "See what you would get",
   quoteBusy: "Asking the swap service…",
   amountOutLabel: "You would receive",
+  /** On the tracker: what the quote promised. */
+  quotedLabel: "Quoted",
+  /** On the tracker after SUCCESS: what the rail says it actually paid out. */
+  receivedLabel: "Received",
   spreadLabel: "Cost of leaving",
   timeLabel: "Usually takes",
-  /** The 25 bps the rail folds into the price and does not display. Rule: we do. */
-  feeLine:
-    "Includes a 0.25% service fee to the swap provider. It is charged by the rail, it is not ours, and the rail does not show it.",
+  /**
+   * The rail's service fee, summed from the quote's `appFees` in basis points.
+   * The rail folds it into the price and does not display it. Rule: we do. When
+   * the quote does not carry the field, we say it may be there.
+   */
+  feeLine: (bps: number | null): string =>
+    bps === null || !Number.isFinite(bps)
+      ? "The swap provider may charge a service fee included in the quote."
+      : `The quote includes a ${(bps / 100).toFixed(2)}% service fee to the swap provider. It is charged by the rail, it is not ours, and the rail does not show it.`,
   spreadNote:
-    "The cost of leaving is the whole difference between the dollar value going in and the dollar value arriving: the rail's rate, its Solana withdrawal fee and that service fee, in one number. The Zcash network fee is listed separately above.",
+    "The cost of leaving is the whole difference between the dollar value going in and the dollar value arriving: the rail's rate, its Solana withdrawal fee and any service fee, in one number. The Zcash network fee is listed separately above.",
   /** Shown when the amount is under the rail's floor. The floor is read live. */
   minimum: (min: string) =>
     `The swap service will not trade less than ${min} ZEC, and this envelope is under that. Send it on as shielded ZEC instead, or to a Zcash address of your own.`,

@@ -177,9 +177,17 @@ describe("the Solana exit", () => {
     expect(solanaExit.providerSees).toMatch(/does not see this link/i);
   });
 
-  it("surfaces the 0.25% house fee the rail does not display", () => {
-    expect(solanaExit.feeLine).toMatch(/0\.25%/);
-    expect(solanaExit.feeLine).toMatch(/not ours/i);
+  it("surfaces the house fee the quote carries, and hedges when it carries none", () => {
+    expect(solanaExit.feeLine(25)).toMatch(/includes a 0\.25% service fee to the swap provider/);
+    expect(solanaExit.feeLine(25)).toMatch(/not ours/i);
+    expect(solanaExit.feeLine(null)).toBe(
+      "The swap provider may charge a service fee included in the quote.",
+    );
+  });
+
+  it("labels the tracker's figures Quoted and Received", () => {
+    expect(solanaExit.quotedLabel).toBe("Quoted");
+    expect(solanaExit.receivedLabel).toBe("Received");
   });
 
   it("explains the minimum with the live figure in it", () => {

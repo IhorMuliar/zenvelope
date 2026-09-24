@@ -23,6 +23,7 @@ import { classifyDestinationAsync, type ClassifyAsync } from "../lib/destination
 import { formatZec, formatZecAmount } from "../lib/format";
 import {
   OneClickError,
+  appFeeBps,
   effectiveCost,
   formatAssetAmount,
   formatTimeEstimate,
@@ -175,6 +176,7 @@ export function SolanaExit({
             // Kept so the caller can compare it with what we asked for before it
             // sweeps anything to that address (M6).
             quoteRequest: response.quoteRequest,
+            appFees: response.appFees,
           },
         });
       } catch (err) {
@@ -447,7 +449,7 @@ export function SolanaExit({
 
   if (state.phase === "quote" && state.quote && state.asset) {
     const quote = state.quote.quote;
-    const cost = effectiveCost(quote);
+    const cost = effectiveCost(quote, appFeeBps(state.quote));
     const low = belowMinimum(state, amountZat);
     // The cap on the cost of leaving, and the rail's own minAmountOut (M5). A
     // quote that fails either is shown in full and cannot be acted on.
@@ -482,7 +484,7 @@ export function SolanaExit({
         </p>
 
         <p className="fine" data-testid="swap-fee-line">
-          {copy.feeLine}
+          {cost.disclosure}
         </p>
         <p className="fine" data-testid="swap-spread-note">
           {copy.spreadNote}

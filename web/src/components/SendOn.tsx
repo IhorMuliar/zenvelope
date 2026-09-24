@@ -34,9 +34,11 @@ import { DRY_RUN_COPY, isDryRun, rawTxBytes } from "../lib/dryRun";
 import { gatewayList } from "../lib/openFlow";
 import { formatCount, formatZecAmount, truncateMiddle } from "../lib/format";
 import { solanaExit as swapCopy, transparentBoundary as transparentCopy } from "../copy/en";
-import { effectiveCost, formatAssetAmount, formatUsd } from "../lib/oneclick";
+import { appFeeBps, effectiveCost, formatAssetAmount, formatUsd } from "../lib/oneclick";
 import {
   FUNDS_SAFE_COPY,
+  RACE_CHECK_BUTTON,
+  RACE_LOST_COPY,
   SWEEP_FAILED_COPY,
   deviceLine,
   elapsedLabel,
@@ -104,6 +106,12 @@ interface Props {
    * envelope" happened — and shown in the Timing block at the end.
    */
   openMs?: number | null;
+  /**
+   * Runs the open again. Offered only when the network refused the sweep because
+   * another device had already spent the note, so the page can show what the
+   * chain now says instead of a retry that cannot succeed.
+   */
+  onCheckAgain?: () => void;
 }
 
 export function SendOn({
@@ -114,6 +122,7 @@ export function SendOn({
   tipHeight,
   envelopeAddress,
   openMs = null,
+  onCheckAgain,
 }: Props) {
   const [state, dispatch] = useReducer(sendReducer, initialSendState);
   const [choice, setChoice] = useState<Choice>(null);
@@ -552,6 +561,32 @@ export function SendOn({
     );
   }
 
+  if (state.phase === "failed" && state.raced) {
+    return (
+      <div className="card stack">
+        <h2>It did not go through</h2>
+        <p className="error" data-testid="send-raced">
+          {RACE_LOST_COPY}
+        </p>
+        {onCheckAgain ? (
+          <button
+            type="button"
+            className="primary"
+            onClick={onCheckAgain}
+            data-testid="send-check-envelope"
+          >
+            {RACE_CHECK_BUTTON}
+          </button>
+        ) : null}
+        {state.message ? (
+          <p className="fine" data-testid="send-error">
+            {state.message}
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+
   if (state.phase === "failed") {
     return (
       <div className="card stack">
@@ -920,7 +955,7 @@ export function SendOn({
  * the last moment where backing out is still free.
  */
 function SwapReview({ plan }: { plan: SwapPlan }) {
-  const cost = effectiveCost(plan.reservation.quote);
+  const cost = effectiveCost(plan.reservation.quote, appFeeBps(plan.reservation));
   return (
     <>
       <p className="row receive">
@@ -942,7 +977,7 @@ function SwapReview({ plan }: { plan: SwapPlan }) {
         </span>
       </p>
       <p className="fine" data-testid="review-swap-fee">
-        {swapCopy.feeLine}
+        {cost.disclosure}
       </p>
       <p className="fine" data-testid="review-swap-not-provider">
         {swapCopy.notProvider}

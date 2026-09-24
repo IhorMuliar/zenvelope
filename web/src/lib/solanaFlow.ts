@@ -49,6 +49,8 @@ export interface DepositReservation {
    * actually asked for before a single zatoshi moves ({@link checkSwapPlan}).
    */
   quoteRequest: OneClickQuoteResponse["quoteRequest"];
+  /** The rail's service fees, when the response carried them at the top level. */
+  appFees?: OneClickQuoteResponse["appFees"];
 }
 
 export interface SolanaExitState {

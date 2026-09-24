@@ -7,6 +7,13 @@
 # `index.html` carries the same policy as a `<meta>` fallback for any host that
 # reads neither (H2).
 #
+# The "Powered by Netlify" badge must stay OFF for this project (Project
+# configuration > General; API field `built_with_badge_enabled`). Netlify injects
+# it at the edge as a same-origin script that builds an iframe from inline
+# script and style, which our CSP blocks: that was every console CSP error on
+# the live site on 2026-09-24. A script we did not ship has no business running
+# on the page that holds the envelope secret, so it is off, not allowed.
+#
 # Nothing here is a secret. `VITE_FEE_ADDRESS` is set in the host's build
 # environment, never in this file: it decides where the flat fee goes, and the
 # repository has no business knowing it.

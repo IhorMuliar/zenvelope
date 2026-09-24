@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   FUNDS_SAFE_COPY,
+  RACE_LOST_COPY,
+  isRaceLoss,
   browserFamily,
   deviceLine,
   formatSeconds,
@@ -409,5 +411,50 @@ describe("timings", () => {
         "proving: 4 threads · hardwareConcurrency 8 · Chrome on Linux",
       ].join("\n"),
     );
+  });
+});
+
+describe("losing the race to another device", () => {
+  // Verbatim from the concurrent-open run of 2026-09-24 (M3-VERIFICATION §11).
+  const LIVE =
+    "the network rejected the sweep (error_code -25): any transaction with the same effects will be rejected from the mempool until the next chain tip block: transaction rejected because another transaction in the mempool has already spent some of its inputs";
+
+  it("recognises error_code -25 and the node's double-spend wording", () => {
+    expect(isRaceLoss(-25, null)).toBe(true);
+    expect(isRaceLoss(null, LIVE)).toBe(true);
+    expect(isRaceLoss(1, "input has already been spent")).toBe(true);
+    expect(isRaceLoss(1, "Already Spent")).toBe(true);
+    expect(isRaceLoss(7, "the light node rejected the transaction")).toBe(false);
+    expect(isRaceLoss(null, null)).toBe(false);
+    expect(isRaceLoss(-26, "error_code -250")).toBe(false);
+  });
+
+  it("marks a -25 result as raced, and a generic failure as not", () => {
+    const raced = run([
+      ...TO_SENDING,
+      { type: "result", result: { ...BROKEN, error_code: -25, error_message: LIVE }, at: 5000 },
+    ]);
+    expect(raced.phase).toBe("failed");
+    expect(raced.raced).toBe(true);
+
+    const generic = run([...TO_SENDING, { type: "result", result: BROKEN, at: 5000 }]);
+    expect(generic.phase).toBe("failed");
+    expect(generic.raced).toBe(false);
+  });
+
+  it("marks a thrown double-spend error as raced too, and clears it on a new run", () => {
+    const raced = run([...TO_SENDING, { type: "failed", message: LIVE }]);
+    expect(raced.raced).toBe(true);
+    const again = sendReducer(raced, { type: "send", at: 9000 });
+    expect(again.raced).toBe(false);
+    expect(run([...TO_SENDING, { type: "failed", message: "timeout" }]).raced).toBe(false);
+  });
+
+  it("says someone else opened it, and never that the funds are still here", () => {
+    expect(RACE_LOST_COPY).toBe(
+      "Someone opened this envelope moments ago on another device. Nothing was sent from here.",
+    );
+    expect(RACE_LOST_COPY).not.toMatch(/still in the envelope/i);
+    expect(FUNDS_SAFE_COPY).toMatch(/still in the envelope/i);
   });
 });
