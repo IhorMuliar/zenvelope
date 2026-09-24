@@ -118,7 +118,12 @@ pub async fn choose(endpoints: &[String]) -> Result<Chosen, String> {
         all
     };
 
-    match select(Box::pin(select_ok(attempts)), Box::pin(sleep(RACE_BUDGET_MS))).await {
+    match select(
+        Box::pin(select_ok(attempts)),
+        Box::pin(sleep(RACE_BUDGET_MS)),
+    )
+    .await
+    {
         Either::Left((Ok(((endpoint, tip_height), _rest)), _)) => Ok(Chosen {
             label: gateway_label(&endpoint),
             tip_height,
@@ -136,8 +141,8 @@ pub async fn choose(endpoints: &[String]) -> Result<Chosen, String> {
                 .map_err(|e| format!("GetLatestBlock failed: {}", e.message()))?
                 .into_inner()
                 .height;
-            let tip_height =
-                u32::try_from(height).map_err(|_| format!("chain tip height {height} is absurd"))?;
+            let tip_height = u32::try_from(height)
+                .map_err(|_| format!("chain tip height {height} is absurd"))?;
             Ok(Chosen {
                 label: gateway_label(&preferred),
                 tip_height,

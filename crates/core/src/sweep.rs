@@ -345,7 +345,10 @@ where
     let ((tip_height, tip_ms), fetched_txs, (start_tree, frontier_ms), (first_block, block_ms)) =
         futures_util::future::try_join4(tip_call, tx_calls, frontier_call, first_block_call)
             .await?;
-    let tx_ms = fetched_txs.iter().map(|(_, _, ms)| *ms).fold(0.0f64, f64::max);
+    let tx_ms = fetched_txs
+        .iter()
+        .map(|(_, _, ms)| *ms)
+        .fold(0.0f64, f64::max);
     on_stage(
         "witness",
         &format!(
@@ -356,8 +359,10 @@ where
         ),
     );
 
-    let fetched: BTreeMap<String, Vec<u8>> =
-        fetched_txs.into_iter().map(|(id, raw, _)| (id, raw)).collect();
+    let fetched: BTreeMap<String, Vec<u8>> = fetched_txs
+        .into_iter()
+        .map(|(id, raw, _)| (id, raw))
+        .collect();
 
     let ufvk = ufvk_from_secret(&request.secret_b64url, network)?;
     let fvk = ufvk
@@ -399,7 +404,6 @@ where
             .ok_or("the envelope's notes sum to more than u64 can hold")?;
         notes.push(note);
     }
-
 
     // Which notes each block holds, keyed by height so the replay can hand `append_block`
     // exactly the targets that block contains.
@@ -463,7 +467,9 @@ where
         let mut appended_ms = 0.0f64;
         loop {
             let t_wait = now_ms();
-            let Some(block) = stream.next().await else { break };
+            let Some(block) = stream.next().await else {
+                break;
+            };
             let t_got = now_ms();
             waited_ms += t_got - t_wait;
             let block = block.map_err(|e| format!("block stream failed: {}", e.message()))?;

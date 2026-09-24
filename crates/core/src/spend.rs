@@ -1348,7 +1348,10 @@ abandon abandon abandon abandon abandon abandon art";
         sealed
             .append_block(&first, &[target(&[1u8; 32], 0, 0)])
             .unwrap();
-        assert!(sealed.sealed(), "the only slot is filled, so the tree is done");
+        assert!(
+            sealed.sealed(),
+            "the only slot is filled, so the tree is done"
+        );
 
         let mut carried = WitnessScan::new(IronwoodTree::empty(), 0);
         carried.append_block(&first, &[]).unwrap();

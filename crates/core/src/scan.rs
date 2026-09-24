@@ -533,7 +533,9 @@ mod tests {
     #[test]
     fn a_comma_separated_list_keeps_its_order() {
         assert_eq!(
-            normalize_endpoints("https://zjs.zec.rocks/mainnet, https://zcash-mainnet.chainsafe.dev/"),
+            normalize_endpoints(
+                "https://zjs.zec.rocks/mainnet, https://zcash-mainnet.chainsafe.dev/"
+            ),
             Ok(vec![
                 "https://zjs.zec.rocks/mainnet".to_string(),
                 "https://zcash-mainnet.chainsafe.dev".to_string(),
@@ -561,7 +563,10 @@ mod tests {
 
     #[test]
     fn a_gateway_is_named_by_its_host() {
-        assert_eq!(gateway_label("https://zjs.zec.rocks/mainnet"), "zjs.zec.rocks");
+        assert_eq!(
+            gateway_label("https://zjs.zec.rocks/mainnet"),
+            "zjs.zec.rocks"
+        );
         assert_eq!(
             gateway_label("https://zcash-mainnet.chainsafe.dev"),
             "zcash-mainnet.chainsafe.dev"

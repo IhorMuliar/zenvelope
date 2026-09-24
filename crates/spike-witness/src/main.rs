@@ -87,13 +87,16 @@ async fn main() -> Result<()> {
         .connect()
         .await
         .context("connecting to lightwalletd")?;
-    let mut client = CompactTxStreamerClient::new(channel)
-        .max_decoding_message_size(64 * 1024 * 1024);
+    let mut client =
+        CompactTxStreamerClient::new(channel).max_decoding_message_size(64 * 1024 * 1024);
 
     // 1. The frontier as of the block before the note.
     let mut tree = tree_state(&mut client, &mut meter, NOTE_HEIGHT - 1).await?;
     let start_size = tree.size();
-    println!("[1] ironwood tree at {}: {start_size} leaves", NOTE_HEIGHT - 1);
+    println!(
+        "[1] ironwood tree at {}: {start_size} leaves",
+        NOTE_HEIGHT - 1
+    );
     println!("    root {}", hexs(&tree.root()));
 
     // 2. Replay the note's block, appending every ironwood cmx in order.
@@ -142,14 +145,19 @@ async fn main() -> Result<()> {
     );
 
     // 3. Ordering guard: our replay must reproduce the server's own root.
-    let want = tree_state(&mut client, &mut meter, NOTE_HEIGHT).await?.root();
+    let want = tree_state(&mut client, &mut meter, NOTE_HEIGHT)
+        .await?
+        .root();
     let got = tree.root();
     assert_eq!(
         hexs(&got),
         hexs(&want),
         "replayed root at {NOTE_HEIGHT} does not match GetTreeState"
     );
-    println!("[3] OK root at {NOTE_HEIGHT} matches GetTreeState: {}", hexs(&got));
+    println!(
+        "[3] OK root at {NOTE_HEIGHT} matches GetTreeState: {}",
+        hexs(&got)
+    );
 
     // 5. The O(1) variant: anchor at the note's own block, zero further appends.
     for (i, w) in &witnesses {
@@ -206,7 +214,10 @@ async fn main() -> Result<()> {
         hexs(&want_end),
         "replayed root at {end} does not match GetTreeState"
     );
-    println!("[4] OK root at {end} matches GetTreeState: {}", hexs(&want_end));
+    println!(
+        "[4] OK root at {end} matches GetTreeState: {}",
+        hexs(&want_end)
+    );
 
     for (i, w) in &witnesses {
         assert_eq!(
