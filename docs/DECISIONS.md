@@ -343,6 +343,11 @@ predate NU6.3.
 
 **Evidence.** Repo inspection, 2026-09-20.
 
+**Outcome (2026-09-24).** Not what shipped. No WebZjs code was carried over: `crates/core`
+is written directly on `zcash_client_backend` 0.24, `zcash_primitives` 0.30 and `orchard`
+0.15.5, with its own Ironwood scanner and spend builder. WebZjs served as a reference for
+the gRPC-web transport and the COOP/COEP setup only.
+
 ### D8 Proving: in the browser
 
 **Decision.** Prove Ironwood spends in the browser. The baseline builds the proving key

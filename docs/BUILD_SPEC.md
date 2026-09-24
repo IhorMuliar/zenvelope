@@ -11,8 +11,8 @@ Cut from the bottom if time runs out.
 
 ## Architecture
 - **Web app**, static, open source, MIT. Any host. No backend that touches keys.
-- **Zcash in the browser**: WASM light client, a fork of
-  ZcashCommunityGrants/WebZjs (zcash_client_backend 0.24, orchard 0.15.5), talking
+- **Zcash in the browser**: our own WASM core on zcash_client_backend 0.24 and
+  orchard 0.15.5 (WebZjs was a reference, not a fork; see DECISIONS D7), talking
   gRPC-web to https://zjs.zec.rocks/mainnet, failover
   https://zcash-mainnet.chainsafe.dev. Plain zec.rocks:443 is a native gRPC
   endpoint for CLI tools only: no gRPC-web bridge, no CORS, unusable from a
