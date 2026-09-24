@@ -37,3 +37,8 @@ target-mt/
 # (scripts/build-core.sh) rather than invalidating the stable one on every alternation
 target-mt-core/
 package-lock.json
+
+# 2026-09-24 mainnet test envelopes: link secrets, spendable once funded
+TEST-ENVELOPES-2026-09-24.md
+TEST-ENVELOPES-QR.txt
+TEST-ENVELOPES-*.png
