@@ -2,7 +2,8 @@
 
 **Date:** 2026-09-21
 **Milestone:** M5, the optional Solana exit through NEAR Intents 1Click (DECISIONS D10, D14).
-**Nothing was broadcast.** Every run took the `?dry=1` path, `sweep_envelope` was called
+**Update 2026-09-24: a live swap completed end to end; see [section 7](#7-live-swap-verified).**
+Sections 1 to 6 are the 2026-09-21 dry-run record. **In those, nothing was broadcast.** Every run took the `?dry=1` path, `sweep_envelope` was called
 with `broadcast: false`, and no Zcash transaction has ever been handed to lightwalletd.
 The only real side effect of the whole milestone is a transparent deposit address that
 1Click reserved for three days and that nobody paid.
@@ -336,3 +337,147 @@ dry sweep to a live `t1` **9,200 bytes at 25.7 s**, with the live floor still
 **Nothing was broadcast in any of it.** Every sweep ran from `/e?dry=1`, the core's own
 `SweepResult.broadcast` came back `false`, no explorer link was rendered, and the M1
 envelope still holds its 0.0013 ZEC.
+
+---
+
+## 7. Live swap, verified
+
+**Date:** 2026-09-24. **Site:** https://zenvelope.netlify.app (production build, no MOCK
+badge, no `?dry=1`). **Browser:** Playwright's own headless Chromium, 1280x720, video on.
+The owner funded the envelope from Zodl and approved spending it through the Solana exit;
+the destination is the owner's own Solana wallet.
+
+### The envelope
+
+| | |
+| --- | --- |
+| Funded | 0.0103 ZEC (1,030,000 zat), memo "Solana test", Ironwood |
+| Funding tx | `36a9bfbb5a147e87da094b855d9d6cb7248090b2e852915f27f02eac61f2de16` |
+| Mined | block 3,494,469, 10:25:16 UTC |
+| Envelope address | `u1wp5m5urnc0henz5t7krccfceuspfhuavpaxfs365prpzvv8kyk5kecm0440v45jk9rvp3qjlhadfqvv88h2ht354gzfxhve3synrqv5h` |
+| Link opened | `/e#<secret>.3494469` (birthday replaced by the funding height) |
+
+Independent oracle before the run (`zcash-devtool` view-only wallet from the UFVK, birthday
+3,494,440): `total 1030000`, one Ironwood output of 0.0103 ZEC in the tx above.
+
+### On the page (UTC)
+
+| Time | Step |
+| --- | --- |
+| 10:29:53 | page loaded, open tapped |
+| 10:29:55 | reveal: **0.0103 ZEC**, "Solana test" |
+| 10:29:56 | spend check done, send-on controls shown |
+| 10:30:28 | Keys ready (warm 32.7 s) |
+| 10:30:33 | USDC chosen, address pasted ("That is a valid Solana address"), **dry quote** |
+| 10:30:38 | **real quote**, deposit address |
+| 10:30:40 | review, **Send it on** tapped |
+| 10:32:05 | **Sent.** (84.4 s tap to done) |
+
+**Dry quote** (`POST /quote`, `dry: true`, `amount: 985000`):
+
+| amountIn | amountInUsd | amountOut | amountOutUsd | minAmountOut | withdrawFee | spread | time |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 0.00985 ZEC | $14.4582 | 14.392933 USDC | $14.3900 | 14.249003 | 10,089 (0.0101 USDC) | 0.47% · $0.07 | 452 s, "about 8 minutes" |
+
+No minimum was hit: 985,000 zat is far above the rail's floor, so no `swap-minimum` line
+appeared. `refundFee` 32,000 zat. `refundTo` was the envelope's own `u1` (D14).
+
+**Real quote** (`dry: false`): amountOut **14.384176 USDC** ($14.3813), minAmountOut
+14.240334, spread on the review 0.53% · $0.08. Deposit address **`t1MALE…bXKBv6`**
+(transparent, 35 chars, no memo), deadline 2026-09-27T13:30:35Z: we asked for 3 hours and
+the server again set it three days out.
+
+**Review screen:** in the envelope **0.0103 ZEC**, network fee **0.00015 ZEC**, Zenvelope
+fee **0.0003 ZEC**, you receive (amount to the rail) **0.00985 ZEC**, pays out to
+`8UEoEwqeTk…xp47egfndB`.
+
+**Done screen:** "Sent.", 0.00985 ZEC, tx
+`b7b2a81bbbde3b0e17197d581e40f810ef169497431170186eb4382f9d4c6838`,
+[zcashexplorer.app](https://mainnet.zcashexplorer.app/transactions/b7b2a81bbbde3b0e17197d581e40f810ef169497431170186eb4382f9d4c6838),
+"The envelope is now empty."
+
+```
+OPEN/SCAN 1.1 s · KEYS (WARM) 32.7 s · WAITING FOR KEYS 0.0 s · WITNESS 2.6 s
+PROVING 80.7 s · SEND 0.5 s · TOTAL TAP-TO-DONE 84.4 s
+proving: 4 threads · hardwareConcurrency 8 · Chrome on Linux · gateway zjs.zec.rocks
+```
+
+### The swap tracker
+
+| Time (UTC, page saw it) | Rail `updatedAt` | Status |
+| --- | --- | --- |
+| 10:32:05 | 10:30:38 | `PENDING_DEPOSIT` |
+| 10:38:26 | 10:38:19 | `PROCESSING` (deposit 0.00985 ZEC seen, intent `F4wmjnBG…3onJ`) |
+| 10:38:46 | 10:38:39 | **`SUCCESS`**, Solana tx `2VTVZPozrLb9CfcEYM5UNZi3jAYCgKbpFSwu4g4Vwjz2y6uqyX4EkAiAPbUYK1K7MkRyD8qdKaeuUVzQCRkHU9wE` |
+
+Tap to USDC paid out: **7 min 59 s**. The Zcash sweep mined in block 3,494,474 at
+10:34:25, so the rail took about 4 minutes after the block. Final tracker:
+[m5-live.png](m5-live.png).
+
+### Independent confirmation
+
+**Zcash, oracle** (`zcash-devtool`, same view-only wallet, synced to 3,494,479):
+`total 0`; tx `b7b2a81b…4c6838` listed, mined 3,494,474, spending the 0.0103 ZEC note.
+Blockchair decodes the same tx as v6, 9,200 bytes, one transparent output of
+**985,000 zat to `t1MALE…bXKBv6`**. The rest of the 1,030,000 is the 15,000 ZIP-317 fee and
+the **30,000 zat Zenvelope fee** as a shielded output to the owner's Zodl fee address
+(`u1svezq8j…c39`), which a view key on the envelope cannot see into by design; the
+arithmetic closes exactly.
+
+**Solana, public RPC** (`api.mainnet-beta.solana.com`): `getTransaction 2VTVZPoz…HU9wE`,
+slot 450,004,012, block time 10:38:39 UTC, `err: null`. The destination's USDC token
+account (`FCTEDFhj…ivQs`, mint `EPjFWdd5…Dt1v`) went **476.106683 → 490.507295 USDC,
++14.400612**. `getTokenAccountsByOwner` now reads 490.507295.
+
+**1Click, `GET /v0/status?depositAddress=t1MALE…`**, final:
+
+```json
+{
+  "status": "SUCCESS",
+  "updatedAt": "2026-09-24T10:38:39.000Z",
+  "swapDetails": {
+    "depositedAmount": "985000", "depositedAmountUsd": "14.408777000000",
+    "amountIn": "985000", "amountInUsd": "14.408777000000",
+    "amountOut": "14400612", "amountOutFormatted": "14.400612",
+    "amountOutUsd": "14.397285458628",
+    "slippage": -11, "refundedAmount": "0", "refundReason": null,
+    "refundFee": "32000", "withdrawFee": "10087",
+    "intentHashes": ["F4wmjnBGFSrRdHRcJWmkFSLP7kdCaSvXHZS8ojSC3onJ"],
+    "nearTxHashes": ["4Fam5VgpPkhzRcX9ULdxDDPxtUpB5FUCkFbvua4cKRTc",
+                     "FQXRFgFRhPWE321MCCvd5o2Vxa7xfCec5QKNtA2w3KfP"],
+    "originChainTxHashes": [],
+    "destinationChainTxHashes": [{"hash": "2VTVZPozrLb9CfcEYM5UNZi3jAYCgKbpFSwu4g4Vwjz2y6uqyX4EkAiAPbUYK1K7MkRyD8qdKaeuUVzQCRkHU9wE", "explorerUrl": ""}]
+  }
+}
+```
+
+The payout beat the quote: 14.400612 USDC against 14.384176 quoted (slippage −11 bps).
+
+### Effective cost
+
+At the rail's own deposit price, $1,462.82/ZEC (14.408777 / 0.00985):
+
+| | ZEC | USD |
+| --- | --- | --- |
+| Envelope in | 0.0103 | $15.067 |
+| Zcash network fee (ZIP-317, transparent) | 0.00015 | $0.219 |
+| Zenvelope fee | 0.0003 | $0.439 |
+| Rail (rate, withdrawal fee, house fee) | | $0.011 (0.08% of what it received) |
+| **USDC out** | | **14.400612 USDC = $14.397** |
+| **Total cost of leaving** | | **$0.670, 4.45% of the envelope** |
+
+At this size the rail is nearly free; the fixed Zcash-side fees are 97% of the cost.
+
+### Findings
+
+- The rail's house fee is now **20 bps** (`appFees[0].fee: 20`) in every quote today,
+  while the page still says "Includes a 0.25% service fee". `APP_FEE_BPS` needs updating.
+- After `SUCCESS` the tracker still labels the quoted amount "You would receive 14.384176
+  USDC" and keeps the "The ZEC is on its way" lede; the rail's actual `amountOut`
+  (14.400612) is available in the status body.
+- `destinationChainTxHashes[].explorerUrl` is empty, so the tracker shows the Solana txid
+  without a link.
+- The oracle is the envelope's own view key, so it cannot show the outputs of the
+  sweep; the transparent output and the fee arithmetic come from the public chain.
+
+Video: `zenvelope-video/m5-live-solana.webm` / `.mp4` (outside the repo).
