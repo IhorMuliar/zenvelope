@@ -19,12 +19,10 @@
  * every figure below is derived from it. It defaults to the M1 amount, so a run
  * against a refilled envelope needs nothing new.
  *
- * `VITE_FEE_ADDRESS` is optional and has to be set for the **build** when it is set at
- * all, because that is when Vite bakes it into config.ts; it is read here only to know
- * whether to expect the fee line. It cannot be used with the fee envelope itself —
- * 30,000 zatoshi cannot pay a 30,000 zatoshi fee and a miner fee — so the arithmetic
- * below drops that line when the build had no fee address, and the group skips when
- * the envelope cannot cover its fees at all. Every value lives in the private,
+ * Every build takes the flat fee: the production fee address is the default in
+ * config.ts (D13). The fee envelope itself — 30,000 zatoshi cannot pay a 30,000
+ * zatoshi fee and a miner fee — is the too-small case, so the group skips when the
+ * envelope cannot cover its fees at all. Every value lives in the private,
  * gitignored M1-FUND.md and M3-DEST.md, is read from the environment, and the group
  * skips cleanly when one is missing — which is what CI and a fresh checkout see.
  *
@@ -64,8 +62,11 @@ const DOCS = resolve(HERE, "../docs");
 
 const FRAGMENT = process.env.ZENV_M1_FRAGMENT;
 const DESTINATION = process.env.ZENV_M3_DEST_ADDRESS;
-const FEE_ADDRESS = process.env.VITE_FEE_ADDRESS;
-const FEE_ENABLED = (FEE_ADDRESS ?? "").trim() !== "";
+/**
+ * Every build takes the fee now: the production fee address is the default in
+ * src/config.ts (D13), and `VITE_FEE_ADDRESS` can only point it elsewhere.
+ */
+const FEE_ENABLED = true;
 
 /**
  * M4: cap the proving pool, so the same build gives both rows of the timing table.
@@ -337,13 +338,12 @@ async function sweepAndAssert(page: Page, label: string, screenshot?: string): P
 test.describe("M3: a real mainnet sweep through the UI, dry run", () => {
   test.skip(
     !FRAGMENT || !DESTINATION,
-    "ZENV_M1_FRAGMENT and ZENV_M3_DEST_ADDRESS must both be set. VITE_FEE_ADDRESS is " +
-      "optional, and when it is set it must have been set for `npm run build` too",
+    "ZENV_M1_FRAGMENT and ZENV_M3_DEST_ADDRESS must both be set",
   );
   test.skip(
     RECEIVE_ZAT <= 0n,
-    `the envelope (${ENVELOPE}) cannot cover its fees; set ZENV_EXPECT_ZEC, or run ` +
-      "without VITE_FEE_ADDRESS",
+    `the envelope (${ENVELOPE}) cannot cover its fees and shows the too-small message; ` +
+      "a full run needs 0.0005 ZEC or more",
   );
 
   // The proving key and the proof are minutes of single-threaded wasm each.

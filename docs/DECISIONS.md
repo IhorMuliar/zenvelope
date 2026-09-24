@@ -242,6 +242,16 @@ transaction, so a placeholder that looks like an address is worse than no addres
 D5 is unchanged: the fee still rides on the sweep, it is just switched off until it has
 somewhere to go.
 
+**Update 2026-09-24: the fee address is set.** `FEE_ADDRESS` now defaults to the owner's
+public mainnet receive address `u1svezq8…0pa75xpjc39`, checked with the core's own
+`classify_address` on main (kind `unified_orchard`, so the sweep can pay it), and the
+flat 30,000 zatoshi fee is taken as the sweep's second output. `VITE_FEE_ADDRESS` still
+overrides it at build time. An envelope that cannot pay the 10,000 zatoshi network fee
+plus the 30,000 zatoshi flat fee and leave the recipient something (below 0.0005 ZEC,
+rounded up to a typeable amount) is told so on the send-on step — "This envelope is too
+small to send on with the service fee; it needs at least 0.0005 ZEC." — with no
+destination to pick, no key warm-up and nothing proved.
+
 ## 2026-09-20
 
 ### D1 Headline: not "first production ZIP-324"

@@ -65,8 +65,10 @@ const FRAGMENT = `${SECRET}.3490437`;
 const ENVELOPE_ZAT = 130_000n;
 /** ZIP-317 for a transparent destination, which every deposit address is. */
 const TRANSPARENT_FEE_ZAT = 15_000n;
+/** The flat Zenvelope fee, taken now that the production fee address is set. */
+const SERVICE_FEE_ZAT = 30_000n;
 /** What the rail is actually quoted on. */
-const SWAP_INPUT_ZAT = ENVELOPE_ZAT - TRANSPARENT_FEE_ZAT; // 115,000
+const SWAP_INPUT_ZAT = ENVELOPE_ZAT - TRANSPARENT_FEE_ZAT - SERVICE_FEE_ZAT; // 85,000
 
 const SOLANA_ADDRESS = "9XgwdBnkmJzRyQhM3bAkYqekuG9u2w9eJfjCe2T3HyrS";
 /** Right charset, wrong length: 33 bytes, so not a Solana address. */
@@ -106,7 +108,7 @@ function quoteFor(request: Record<string, unknown>, options: QuoteOptions = {}) 
   return {
     quote: {
       amountIn: amount,
-      amountInFormatted: "0.00115",
+      amountInFormatted: "0.00085",
       amountInUsd: "1.737834000000",
       minAmountIn: amount,
       amountOut: "1424851",
@@ -351,7 +353,7 @@ describeOnMock("M5: the Solana exit", () => {
     // The refund goes to the envelope's own unified address by default.
     expect(String(rail.quoteRequests[0].refundTo)).toMatch(/^u1/);
 
-    await expect(page.getByTestId("swap-amount-in")).toContainText("0.00115 ZEC");
+    await expect(page.getByTestId("swap-amount-in")).toContainText("0.00085 ZEC");
     await expect(page.getByTestId("swap-amount-in")).toContainText("$1.74");
     await expect(page.getByTestId("swap-amount-out")).toHaveText("1.424851 USDC");
     await expect(page.getByTestId("swap-amount-out-usd")).toHaveText("$1.68");
@@ -381,7 +383,7 @@ describeOnMock("M5: the Solana exit", () => {
     await page.getByTestId("swap-continue").click();
     await expect(page.getByTestId("review-in-envelope")).toHaveText("0.0013 ZEC");
     await expect(page.getByTestId("review-network-fee")).toHaveText("0.00015 ZEC");
-    await expect(page.getByTestId("review-receive")).toHaveText("0.00115 ZEC");
+    await expect(page.getByTestId("review-receive")).toHaveText("0.00085 ZEC");
     await expect(page.getByTestId("review-swap-out")).toHaveText("1.424851 USDC");
     await expect(page.getByTestId("review-swap-spread")).toContainText("3.33%");
     await expect(page.getByTestId("review-warning")).toContainText("visible on-chain");
@@ -715,7 +717,7 @@ describeOnMock("M5: the Solana exit", () => {
 
     // No swap on the review screen: not the amount out, not the spread, not the
     // payout address.
-    await expect(page.getByTestId("review-receive")).toHaveText("0.0012 ZEC");
+    await expect(page.getByTestId("review-receive")).toHaveText("0.0009 ZEC");
     await expect(page.getByTestId("review-swap-out")).toHaveCount(0);
     await expect(page.getByTestId("review-swap-spread")).toHaveCount(0);
     await expect(page.getByTestId("review-swap-recipient")).toHaveCount(0);

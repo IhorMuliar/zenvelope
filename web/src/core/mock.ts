@@ -194,6 +194,14 @@ export const MOCK_NOTE = {
   action_index: 1,
 } as const;
 
+/**
+ * One secret the MOCK treats as a 0.0003 ZEC envelope — the size of the real fee
+ * envelope — so the "too small to send on" screen can be driven end to end.
+ * It is the 32 bytes of "tiny" four times over.
+ */
+export const MOCK_TINY_SECRET = "dGlueXRpbnl0aW55dGlueXRpbnl0aW55dGlueXRpbnk";
+export const MOCK_TINY_ZAT = "30000";
+
 export async function openEnvelope(
   secret_b64url: string,
   birthday: number | undefined,
@@ -216,10 +224,12 @@ export async function openEnvelope(
       if (tick >= ticks) {
         clearInterval(timer);
         on_progress?.(total, total);
+        const amount_zat =
+          secret_b64url === MOCK_TINY_SECRET ? MOCK_TINY_ZAT : MOCK_NOTE.amount_zat;
         resolve({
           found: true,
-          notes: [{ ...MOCK_NOTE }],
-          total_zat: MOCK_NOTE.amount_zat,
+          notes: [{ ...MOCK_NOTE, amount_zat }],
+          total_zat: amount_zat,
           tip_height: MOCK_TIP_HEIGHT,
           birthday: MOCK_TIP_HEIGHT - total + 1,
           birthday_defaulted: birthday === undefined,

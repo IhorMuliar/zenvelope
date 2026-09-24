@@ -67,6 +67,15 @@ describe("feeBreakdown", () => {
     expect(b.total).toBe("0.0103");
   });
 
+  it("asks the sender for 0.0013 ZEC for a 0.001 envelope", () => {
+    const b = feeBreakdown(100000n);
+    expect(b.total).toBe("0.0013");
+    expect(breakdownLines(b)).toEqual([
+      "Envelope 0.001 ZEC + service fee 0.0003 ZEC",
+      "= 0.0013 ZEC",
+    ]);
+  });
+
   it("formats whole ZEC without a decimal part", () => {
     const b = feeBreakdown(100000000n);
     expect(b.envelope).toBe("1");

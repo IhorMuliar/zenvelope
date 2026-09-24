@@ -24,22 +24,19 @@ export const MIN_ENVELOPE_ZAT = 10000n;
 export const MAX_MEMO_BYTES = 512;
 
 /**
- * Where the flat fee goes, as the second output of the sweep (DECISIONS D5).
+ * Where the flat fee goes, as the second output of the sweep (DECISIONS D5, D13).
  *
- * Placeholder. It is deliberately **empty** until a real Zenvelope address
- * exists: a made-up unified address would make every mainnet sweep fail, and a
- * sweep is the recipient's money. While it is empty the open flow passes
- * `fee_zat: "0"`, builds no fee output, and shows no fee line. Filling it in is
- * the only change needed to start taking the fee.
+ * The owner's public mainnet receive address. Checked with the core's own
+ * `classify_address` on 2026-09-24: kind `unified_orchard` on main, so the sweep
+ * can pay it. Emptying it turns the fee off again: the open flow then passes
+ * `fee_zat: "0"`, builds no fee output, and shows no fee line.
  */
-const FEE_ADDRESS_DEFAULT = "";
+const FEE_ADDRESS_DEFAULT =
+  "u1svezq8jyzpmj8lura30u4yxukhgd084u0559x8umqksznywr0jxu20jj7ntwgg9whmc9ecnandguv4n0he6l0uducr30kp7j44trufjrcflgdaje9qfvuk9havhapnpwku2d5df48vwy742tv7h84etjtn06axheat0fe0pa75xpjc39";
 
 /**
- * `VITE_FEE_ADDRESS` overrides the constant at build time.
- *
- * The verification run needs a real fee envelope on the second output, and that
- * address lives in a private, gitignored file. An env var keeps it out of the
- * repository while still letting the whole two-output sweep be proved. Unset, or
+ * `VITE_FEE_ADDRESS` overrides the constant at build time, so a test build can
+ * send the fee somewhere else (a private verification address, say). Unset, or
  * set to nothing, and the constant above wins — which is what every ordinary
  * build sees.
  */
@@ -58,7 +55,7 @@ export const FEE_ADDRESS = feeAddressFromEnv();
 /** True when a fee is actually charged. Everything fee-shaped keys off this. */
 export const FEE_ENABLED = FEE_ADDRESS.trim() !== "";
 
-/** The fee in zatoshi that the sweep is asked for: 0 while there is no fee address. */
+/** The fee in zatoshi that the sweep is asked for: 0 only if there is no fee address. */
 export const SWEEP_FEE_ZAT = FEE_ENABLED ? FLAT_FEE_ZAT : 0n;
 
 /**

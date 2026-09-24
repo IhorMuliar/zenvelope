@@ -24,7 +24,7 @@ import {
   explorerTxUrl,
 } from "../config";
 import type { FoundNote, LoadedCore, Network, NewWallet } from "../core/types";
-import { sweepAmounts } from "../lib/amount";
+import { sweepAmounts, tooSmallMessage } from "../lib/amount";
 import {
   classifyDestinationAsync,
   emptyDestination,
@@ -162,11 +162,26 @@ export function SendOn({
    */
   const dryRun = useMemo(() => isDryRun(), []);
 
+  // Every note in the envelope, added up: one sweep spends the lot.
+  const inEnvelopeZat = useMemo(
+    () => notes.reduce((sum, n) => sum + BigInt(n.amount_zat), 0n),
+    [notes],
+  );
+
+  /**
+   * The cheapest sweep there is — a shielded destination — with the service fee.
+   * If even that leaves the recipient nothing, no destination can help, so the
+   * screen says so at once and nothing is warmed, built or proved.
+   */
+  const cheapest = sweepAmounts(inEnvelopeZat, "unified_orchard", SWEEP_FEE_ZAT, notes.length);
+  const tooSmall = !cheapest.ok;
+
   /**
    * The proving key starts building the moment the envelope is found, before the
    * recipient has chosen anything, so most of the wait happens while they read.
    */
   useEffect(() => {
+    if (tooSmall) return;
     let alive = true;
     const startedAt = Date.now();
     core
@@ -186,13 +201,7 @@ export function SendOn({
     return () => {
       alive = false;
     };
-  }, [core]);
-
-  // Every note in the envelope, added up: one sweep spends the lot.
-  const inEnvelopeZat = useMemo(
-    () => notes.reduce((sum, n) => sum + BigInt(n.amount_zat), 0n),
-    [notes],
-  );
+  }, [core, tooSmall]);
 
   // The generated wallet's own address goes through the same classifier as a pasted
   // one: nothing is trusted just because this page made it.
@@ -289,6 +298,9 @@ export function SendOn({
   /* ------------------------------------------------------------- the sweep */
 
   const send = useCallback(async () => {
+    // Belt and braces: the screens never offer a sweep the envelope cannot pay
+    // for, and this refuses one anyway, before the secret is even read.
+    if (!amounts.ok) return;
     const id = ++runId.current;
     const secret = getSecret();
     if (secret === null || secret === "") {
@@ -326,7 +338,7 @@ export function SendOn({
         dispatch({ type: "failed", message: message ? message : SWEEP_FAILED_COPY });
       }
     }
-  }, [core, getSecret, network, notes, destination, dryRun]);
+  }, [core, getSecret, network, notes, destination, dryRun, amounts.ok]);
 
   /* --------------------------------------------- keep the screen and the tab */
 
@@ -392,6 +404,22 @@ export function SendOn({
   }, []);
 
   /* ------------------------------------------------------------- the screens */
+
+  // Too small for any destination: one card, the reason, and nothing to press.
+  if (tooSmall && state.phase === "choose") {
+    return (
+      <div className="card stack">
+        <h2>Where should it go?</h2>
+        <p className="error" data-testid="too-small">
+          {tooSmallMessage(cheapest)}
+        </p>
+        <p className="row">
+          <span className="label">In the envelope</span>
+          <span data-testid="too-small-in-envelope">{formatZecAmount(inEnvelopeZat)}</span>
+        </p>
+      </div>
+    );
+  }
 
   if (state.phase === "sending") {
     const rows = stageChecklist(state);
@@ -583,9 +611,15 @@ export function SendOn({
             {active.message}
           </p>
         ) : null}
-        <button type="button" className="primary" onClick={() => void send()} data-testid="send-it-on">
-          Send it on
-        </button>
+        {amounts.ok ? (
+          <button type="button" className="primary" onClick={() => void send()} data-testid="send-it-on">
+            Send it on
+          </button>
+        ) : (
+          <p className="error" data-testid="too-small">
+            {tooSmallMessage(amounts)}
+          </p>
+        )}
         <p className="fine" data-testid="send-timing">
           {SEND_TIMING_COPY}
         </p>
@@ -854,8 +888,7 @@ export function SendOn({
 
       {active && !amounts.ok ? (
         <p className="error" data-testid="too-small">
-          There is not enough in this envelope to cover the network fee of{" "}
-          {formatZecAmount(amounts.networkFeeZat)}.
+          {tooSmallMessage(amounts)}
         </p>
       ) : null}
 

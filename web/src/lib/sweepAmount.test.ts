@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { networkFeeFor, sweepAmounts } from "./amount";
+import { minimumEnvelopeZat, networkFeeFor, sweepAmounts, tooSmallMessage } from "./amount";
 import { formatZecAmount } from "./format";
 import {
   FLAT_FEE_ZAT,
@@ -13,6 +13,7 @@ import {
   NETWORK_FEE_ZAT,
   SWEEP_FEE_ZAT,
   FEE_ENABLED,
+  FEE_ADDRESS,
 } from "../config";
 import { MOCK_NOTE } from "../core/mock";
 
@@ -83,12 +84,21 @@ describe("what the recipient receives", () => {
     expect(shielded.receiveZat - transparent.receiveZat).toBe(5000n);
   });
 
-  it("charges no fee while there is no fee address", () => {
-    expect(FEE_ENABLED).toBe(false);
-    expect(SWEEP_FEE_ZAT).toBe(0n);
+  it("charges the flat fee by default now that a fee address is set", () => {
+    expect(FEE_ADDRESS.startsWith("u1")).toBe(true);
+    expect(FEE_ENABLED).toBe(true);
+    expect(SWEEP_FEE_ZAT).toBe(30000n);
+    // 0.0013 - 0.0001 network fee - 0.0003 service fee = 0.0009
     const a = sweepAmounts(BigInt(MOCK_NOTE.amount_zat), "unified_orchard");
-    expect(a.serviceFeeZat).toBe(0n);
-    expect(a.receiveZat).toBe(120000n);
+    expect(a.serviceFeeZat).toBe(30000n);
+    expect(a.receiveZat).toBe(90000n);
+    expect(formatZecAmount(a.receiveZat)).toBe("0.0009 ZEC");
+  });
+
+  it("quotes a Solana exit on the envelope less both fees and the transparent miner fee", () => {
+    // What the rail is paid: 0.0013 - 0.00015 - 0.0003 = 0.00085
+    const a = sweepAmounts(130000n, "transparent");
+    expect(a.receiveZat).toBe(85000n);
   });
 
   it("never lets a negative fee add money", () => {
@@ -123,6 +133,36 @@ describe("when the envelope is too small", () => {
     const a = sweepAmounts(30000n, "unified_orchard", FLAT_FEE_ZAT);
     expect(a.ok).toBe(false);
     expect(a.shortfallZat).toBe(10001n);
+  });
+
+  it("refuses the 0.0003 fee envelope with the service fee, without throwing", () => {
+    const a = sweepAmounts(30000n, "unified_orchard");
+    expect(a.ok).toBe(false);
+    expect(a.receiveZat).toBe(0n);
+    expect(tooSmallMessage(a)).toBe(
+      "This envelope is too small to send on with the service fee; it needs at least 0.0005 ZEC.",
+    );
+  });
+
+  it("refuses exactly the fees, and accepts one zatoshi more", () => {
+    expect(sweepAmounts(40000n, "unified_orchard").ok).toBe(false);
+    const a = sweepAmounts(40001n, "unified_orchard");
+    expect(a.ok).toBe(true);
+    expect(a.receiveZat).toBe(1n);
+  });
+
+  it("rounds the stated minimum up to a typeable 0.0001 ZEC", () => {
+    expect(minimumEnvelopeZat(sweepAmounts(0n, "unified_orchard"))).toBe(50000n);
+    expect(minimumEnvelopeZat(sweepAmounts(0n, "transparent"))).toBe(50000n);
+    expect(minimumEnvelopeZat(sweepAmounts(0n, "unified_orchard", 0n))).toBe(20000n);
+    // Three notes cost 15,000 zat of miner fee.
+    expect(minimumEnvelopeZat(sweepAmounts(0n, "unified_orchard", FLAT_FEE_ZAT, 3))).toBe(50000n);
+  });
+
+  it("names only the network fee when no service fee is charged", () => {
+    expect(tooSmallMessage(sweepAmounts(9000n, "unified_orchard", 0n))).toBe(
+      "This envelope is too small to send on: it needs at least 0.0002 ZEC to cover the network fee of 0.0001 ZEC.",
+    );
   });
 });
 

@@ -139,3 +139,30 @@ export function sweepAmounts(
     shortfallZat: receive > 0n ? 0n : -receive + 1n,
   };
 }
+
+/**
+ * The smallest envelope worth sending on at these fees, rounded **up** to the next
+ * 0.0001 ZEC so the number on screen is one a sender can actually type.
+ *
+ * The exact floor is one zatoshi more than the fees (the recipient has to receive
+ * something), but "0.00040001 ZEC" helps nobody. At the shielded 10,000 zat miner
+ * fee and the 30,000 zat flat fee this is 50,000 zat, 0.0005 ZEC; the transparent
+ * 15,000 zat fee rounds to the same.
+ */
+export function minimumEnvelopeZat(a: Pick<SweepAmounts, "networkFeeZat" | "serviceFeeZat">): bigint {
+  const floor = a.networkFeeZat + a.serviceFeeZat + 1n;
+  const step = 10000n;
+  return ((floor + step - 1n) / step) * step;
+}
+
+/**
+ * What the send-on screen says when the envelope cannot pay its own way. Said
+ * before any destination is needed and before anything is proved.
+ */
+export function tooSmallMessage(a: SweepAmounts): string {
+  const min = zatToZecString(minimumEnvelopeZat(a));
+  if (a.serviceFeeZat > 0n) {
+    return `This envelope is too small to send on with the service fee; it needs at least ${min} ZEC.`;
+  }
+  return `This envelope is too small to send on: it needs at least ${min} ZEC to cover the network fee of ${zatToZecString(a.networkFeeZat)} ZEC.`;
+}

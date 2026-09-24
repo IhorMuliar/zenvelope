@@ -261,6 +261,22 @@ describeOnMock("M4: group envelopes (M6 preview)", () => {
     await expectNothingStored(page);
   });
 
+  test("asks 0.0013 ZEC for a 0.001 envelope: the envelope plus the service fee", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await page.getByTestId("amount").fill("0.001");
+    await expect(page.getByTestId("preview-total")).toHaveText(
+      "You will send 0.0013 ZEC: 0.001 ZEC in the envelope plus a 0.0003 ZEC service fee.",
+    );
+    await page.getByTestId("create").click();
+    await expect(page.getByTestId("breakdown")).toContainText(
+      "Envelope 0.001 ZEC + service fee 0.0003 ZEC",
+    );
+    await expect(page.getByTestId("breakdown")).toContainText("= 0.0013 ZEC");
+    await expect(page.getByTestId("payment-uri")).toContainText("?amount=0.0013");
+  });
+
   test("refuses a group larger than fifty", async ({ page }) => {
     await page.goto("/");
     await page.getByTestId("amount").fill("0.01");

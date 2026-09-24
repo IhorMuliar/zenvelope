@@ -39,6 +39,9 @@ const DOCS = resolve(HERE, "../docs");
 
 /** Any valid secret: 43 base64url chars, plus a birthday height. */
 const SECRET = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
+
+/** The MOCK's 0.0003 ZEC envelope (src/core/mock.ts MOCK_TINY_SECRET): too small to send on. */
+const TINY_SECRET = "dGlueXRpbnl0aW55dGlueXRpbnl0aW55dGlueXRpbnk";
 const FRAGMENT = `${SECRET}.3490437`;
 
 /** The fixed mainnet vector from crates/core/TEST_VECTORS.md. */
@@ -118,9 +121,9 @@ describeOnMock("M3: sending the envelope on", () => {
     await page.getByTestId("to-review").click();
     await expect(page.getByTestId("review-in-envelope")).toHaveText("0.0013 ZEC");
     await expect(page.getByTestId("review-network-fee")).toHaveText("0.0001 ZEC");
-    await expect(page.getByTestId("review-receive")).toHaveText("0.0012 ZEC");
-    // No fee address is configured yet, so there is no Zenvelope fee line.
-    await expect(page.getByTestId("review-service-fee")).toHaveCount(0);
+    // The production fee address is set, so the flat 0.0003 ZEC fee is its own line.
+    await expect(page.getByTestId("review-service-fee")).toHaveText("0.0003 ZEC");
+    await expect(page.getByTestId("review-receive")).toHaveText("0.0009 ZEC");
     await expect(page.getByTestId("review-destination")).toHaveText(truncated(VECTOR_UA));
     await expect(page.getByTestId("send-timing")).toHaveText(
       "This takes about 1 to 2 minutes on a laptop and longer on a phone. Keep this tab open.",
@@ -165,7 +168,7 @@ describeOnMock("M3: sending the envelope on", () => {
 
     // 6. Sent: the txid, the copy button, the explorer link, and the empty envelope.
     await expect(page.getByTestId("sent-heading")).toHaveText("Sent.");
-    await expect(page.getByTestId("sent-amount")).toHaveText("0.0012 ZEC");
+    await expect(page.getByTestId("sent-amount")).toHaveText("0.0009 ZEC");
     await expect(page.getByTestId("sent-txid")).toHaveText(/^[0-9a-f]{10}\u2026[0-9a-f]{10}$/);
     await expect(page.getByTestId("explorer-link")).toHaveAttribute(
       "href",
@@ -260,7 +263,7 @@ describeOnMock("M3: sending the envelope on", () => {
 
     // The wallet it generated is a destination like any other.
     await page.getByTestId("to-review").click();
-    await expect(page.getByTestId("review-receive")).toHaveText("0.0012 ZEC");
+    await expect(page.getByTestId("review-receive")).toHaveText("0.0009 ZEC");
     await expect(page.getByTestId("review-destination")).toHaveText(/^u1mock.{6}\u2026.{12}$/);
 
     // The mnemonic is on the screen and nowhere else.
@@ -323,7 +326,7 @@ describeOnMock("M3: sending the envelope on", () => {
 
     // The higher ZIP-317 fee follows the destination onto the review screen.
     await expect(page.getByTestId("review-network-fee")).toHaveText("0.00015 ZEC");
-    await expect(page.getByTestId("review-receive")).toHaveText("0.00115 ZEC");
+    await expect(page.getByTestId("review-receive")).toHaveText("0.00085 ZEC");
     await expect(page.getByTestId("review-warning")).toContainText("visible on-chain");
     await noDrainerCopy(page);
   });
@@ -335,7 +338,7 @@ describeOnMock("M3: sending the envelope on", () => {
     await page.getByTestId("dest-input").fill(VECTOR_UA);
     await page.getByTestId("to-review").click();
     await expect(page.getByTestId("transparent-boundary")).toHaveCount(0);
-    await expect(page.getByTestId("review-receive")).toHaveText("0.0012 ZEC");
+    await expect(page.getByTestId("review-receive")).toHaveText("0.0009 ZEC");
   });
 
   /**
@@ -352,6 +355,29 @@ describeOnMock("M3: sending the envelope on", () => {
     // A wrong-network address is named as one, whatever it starts with.
     await page.getByTestId("dest-input").fill("nonsense-for-this-network");
     await expect(page.getByTestId("dest-reason")).toContainText("network");
+    await noDrainerCopy(page);
+  });
+
+  /**
+   * The 0.0003 ZEC fee envelope cannot pay a 0.0001 network fee and a 0.0003
+   * service fee. It says so on the send-on step, offers no destination and no
+   * "Send it on", warms no keys, and nothing throws.
+   */
+  test("says an envelope is too small to send on with the service fee", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (e) => errors.push(e.message));
+    await page.goto(`/e#${TINY_SECRET}.3490437`);
+    await page.getByTestId("open-envelope").click();
+    await expect(page.getByTestId("amount")).toHaveText("0.0003 ZEC");
+    await expect(page.getByTestId("too-small")).toHaveText(
+      "This envelope is too small to send on with the service fee; it needs at least 0.0005 ZEC.",
+    );
+    await expect(page.getByTestId("dest-address")).toHaveCount(0);
+    await expect(page.getByTestId("send-it-on")).toHaveCount(0);
+    await expect(page.getByTestId("warm-status")).toHaveCount(0);
+    await expect(page.getByTestId("sending")).toHaveCount(0);
+    await page.screenshot({ path: resolve(DOCS, "m3-too-small.png"), fullPage: true });
+    expect(errors).toEqual([]);
     await noDrainerCopy(page);
   });
 });

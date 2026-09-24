@@ -74,15 +74,15 @@ const ENVELOPE = asZec(ENVELOPE_ZAT);
  * The flat Zenvelope fee is only charged when the build had a fee address, so what
  * the rail would be quoted depends on the build this run is driving:
  *
- *   envelope - 15,000 transparent ZIP-317            (no fee address)
- *   envelope - 15,000 transparent ZIP-317 - 30,000   (VITE_FEE_ADDRESS set)
+ *   envelope - 15,000 transparent ZIP-317 - 30,000 flat fee
  *
  * It is the same arithmetic `sweepAmounts(..., "transparent", ...)` does for the
  * quote, so asserting it here is asserting that the review screen and the rail were
  * shown the same number. Every envelope we have is under the rail's floor today,
  * which is the point of the run: the product refuses and says why.
  */
-const FEE_ENABLED = (process.env.VITE_FEE_ADDRESS ?? "").trim() !== "";
+/** Every build takes the fee now: the production fee address is the default (D13). */
+const FEE_ENABLED = true;
 const TRANSPARENT_FEE_ZAT = 15_000n;
 const SERVICE_FEE_ZAT = FEE_ENABLED ? 30_000n : 0n;
 const SWAP_INPUT_ZAT = ENVELOPE_ZAT - TRANSPARENT_FEE_ZAT - SERVICE_FEE_ZAT;

@@ -227,9 +227,12 @@ third is the Solana exit, below.
 zatoshi: envelope − miner fee − flat fee = what the recipient receives. The
 miner fee is 0.0001 ZEC (ZIP-317, two actions) or 0.00015 ZEC when the
 destination is transparent. The flat Zenvelope fee comes from `FLAT_FEE_ZAT` and
-`FEE_ADDRESS` in `src/config.ts`; `FEE_ADDRESS` is **empty** until a real one
-exists, so the sweep is asked for `fee_zat "0"`, builds no fee output, and the
-review screen shows no fee line.
+`FEE_ADDRESS` in `src/config.ts`. `FEE_ADDRESS` is the production fee address
+(DECISIONS D13), so the sweep is asked for `fee_zat "30000"`, builds the fee as a
+second output, and the review screen shows a "Zenvelope fee" line. An envelope
+that cannot cover both fees and leave something over — under 0.0005 ZEC — is
+told so the moment it opens (`tooSmallMessage`), and nothing is warmed or proved.
+`VITE_FEE_ADDRESS` overrides the address at build time.
 
 **While it runs.** The four stages are a checklist with an elapsed clock. A
 screen wake lock is requested for the duration and every failure of it is
@@ -399,10 +402,11 @@ fixture is the **fee envelope** that same sweep paid — 0.0003 ZEC, unspent, it
 link secret in the private `M3-DEST.md`. So `ZENV_M1_FRAGMENT` takes that
 envelope's fragment and `ZENV_EXPECT_ZEC` says what to expect:
 `e2e/m2-open.spec.ts`, `e2e/m3-real.spec.ts` and `e2e/m5-real.spec.ts` all derive
-every figure from it and default to the M1 amount. `VITE_FEE_ADDRESS` cannot be
-set for a run against the fee envelope — 30,000 zatoshi cannot pay a 30,000
-zatoshi flat fee and a miner fee — so those runs simply have no fee line, and the
-specs assert its absence rather than its value.
+every figure from it and default to the M1 amount. With the production fee
+address set, the fee envelope is the **too-small** case — 30,000 zatoshi cannot
+pay a 30,000 zatoshi flat fee and a miner fee — so a real run against it shows
+the too-small message on the send-on step and proves nothing; a full real sweep
+needs an envelope of 0.0005 ZEC or more.
 
 `e2e/m2-core.spec.ts` drives the built wasm directly on a bare isolated page and
 checks the note against the zcash-devtool oracle. Same environment variable, same
@@ -521,8 +525,8 @@ access token from **User settings → Applications → Personal access tokens**.
 Nothing about it belongs in git.
 
 ```sh
-# 1. Build both WASM packages and the app. Do NOT set VITE_FEE_ADDRESS:
-#    the flat fee stays off until a real fee address exists (D13).
+# 1. Build both WASM packages and the app. Leave VITE_FEE_ADDRESS unset: the
+#    production fee address is the default in src/config.ts (D13).
 ./scripts/build-core.sh
 cd web && npm ci && npm run build && cd ..
 
