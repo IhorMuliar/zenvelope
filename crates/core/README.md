@@ -229,6 +229,46 @@ NU6.3 added a second Orchard-shaped pool, and the difference is not in the wire 
 separate `ironwood` feature to switch on, which is why zcash-devtool detects Ironwood
 with the same feature set.
 
+### Spent detection
+
+A note on chain is not money in the envelope: once someone sweeps it, the note is still
+there and trial decryption still finds it. Before this, a swept envelope opened to its
+old amount and the recipient only found out at broadcast, after half a minute of proving.
+So the scan also checks whether each note it found has been spent, in the same walk.
+
+- **The nullifier is derived the way the sweep derives it.** A compact action holds the
+  first 52 bytes of the note plaintext, which is the whole note (version, diversifier,
+  value, rseed), and the note's `rho` is that action's own nullifier field. So the compact
+  pass rebuilds the full `orchard::Note` and calls `note.nullifier(&fvk)` with the link's
+  Orchard full viewing key (`scan::note_nullifier`). That is the call orchard's builder
+  makes inside `add_ironwood_spend(fvk, note, path)`, so the nullifier the scan watches is
+  the one a sweep of that note reveals. The unit test
+  `the_scan_derives_the_nullifier_the_sweep_reveals` checks exactly that: it funds a
+  synthetic Ironwood note to the envelope, compact-decrypts it, spends it with orchard's
+  builder and compares the builder's action nullifier with the scan's.
+- **Every action is compared against that set.** `ironwood_actions[].nullifier` for an
+  Ironwood note, `actions[].nullifier` for an Orchard note (`SpendWatch`, keyed by
+  nullifier, one hash lookup per action). Nothing is looked at until the first note is
+  found.
+- **The parallel path stays correct.** Each chunk of `SCAN_CHUNK_BLOCKS` is decrypted in
+  parallel first, its new nullifiers are added to the watch set on the driving thread,
+  and then the same chunk is checked in parallel for spends. The matches are merged in
+  chain order and the set carries over to later chunks, so a note funded and swept in the
+  same chunk and a note swept thousands of blocks later are both caught. Workers only
+  read the set, so no locks.
+- **The full-transaction pass agrees or the open fails.** `notes_from_transaction`
+  derives each note's nullifier again from the fully decrypted note; one that the compact
+  pass never watched is an error, not a silent "unspent".
+
+What comes back: each note carries `spent`, `spent_txid`, `spent_height` and
+`spent_time` (that block's time from its compact header, unix seconds). `total_zat` now
+counts **unspent notes only**, `spent_zat` counts the rest, `found` still means "ever
+received anything", and `all_spent` means found and nothing left. The scan walks from the
+birthday to the tip, so a spend is seen as long as it is at or below the tip the scan
+reached. Cost: no extra round trip, since the blocks are already being streamed; see
+[web/docs/M2-VERIFICATION.md](../../web/docs/M2-VERIFICATION.md), "Spent detection", for
+the measurement.
+
 ### Memory footprint
 
 The scan holds one compact block at a time plus a set of hits, and nothing else. There is
@@ -631,7 +671,8 @@ declares, including `birthday`, `birthday_defaulted` and `scanned_blocks`.
 
 ```ts
 interface Opened {
-  found: boolean;
+  found: boolean;            // ever received anything, spent or not
+  all_spent: boolean;        // found, and every note already spent
   notes: Array<{
     amount_zat: string;      // zatoshi, decimal string: never an f64
     memo: string | null;     // text memos only; empty and non-text memos are null
@@ -639,8 +680,13 @@ interface Opened {
     txid: string;            // big-endian, as block explorers print it
     pool: "ironwood" | "orchard" | "sapling";
     action_index: number;    // which action in that pool's list is ours; M3 needs it
+    spent: boolean;          // its nullifier was seen on chain
+    spent_txid: string | null;
+    spent_height: number | null;
+    spent_time: number | null; // unix seconds, from the spending block's header
   }>;
-  total_zat: string;
+  total_zat: string;         // unspent notes only
+  spent_zat: string;         // spent notes
   tip_height: number;
   birthday: number;          // the height the scan actually started at
   birthday_defaulted: boolean; // true when `birthday` was undefined and tip-10000 was used

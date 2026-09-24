@@ -29,6 +29,7 @@ import { expect, test } from "@playwright/test";
 import { readdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { sweptM1Fragment } from "./fixtures";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DIST_ASSETS = resolve(HERE, "../dist/assets");
@@ -54,6 +55,9 @@ const ORACLE = {
   height: 3_490_472,
   txid: "281e9f7bffa5bffc8ee1287cc6e245cc59eee302727ea9d93c7f8e5a99341d43",
   pool: "ironwood",
+  // The M3 sweep that emptied it, broadcast by hand on 2026-09-21.
+  spent_txid: "ba0f91cfe7ca33dd269b692bf80027df2681a321215e90ab28c2a56260fa2aad",
+  spent_height: 3_491_056,
 };
 
 interface OpenedNote {
@@ -62,10 +66,15 @@ interface OpenedNote {
   height: number;
   txid: string;
   pool: string;
+  spent: boolean;
+  spent_txid: string | null;
+  spent_height: number | null;
 }
 
 interface Opened {
   found: boolean;
+  all_spent: boolean;
+  spent_zat: string;
   notes: OpenedNote[];
   total_zat: string;
   tip_height: number;
@@ -115,7 +124,7 @@ function glueUrl(): string {
   return `/assets/${file}`;
 }
 
-const FRAGMENT = process.env.ZENV_M1_FRAGMENT;
+const FRAGMENT = process.env.ZENV_M1_FRAGMENT || sweptM1Fragment();
 
 test.describe("M2: opening a funded envelope in the browser", () => {
   test.skip(
@@ -196,7 +205,14 @@ test.describe("M2: opening a funded envelope in the browser", () => {
     expect(note.txid).toBe(ORACLE.txid);
     expect(note.pool).toBe(ORACLE.pool);
 
-    expect(result.total_zat).toBe(ORACLE.amount_zat);
+    // Spent detection: the M1 envelope was swept on 2026-09-21, so the note is
+    // found, marked spent by the sweep transaction, and the envelope holds nothing.
+    expect(note.spent).toBe(true);
+    expect(note.spent_txid).toBe(ORACLE.spent_txid);
+    expect(note.spent_height).toBe(ORACLE.spent_height);
+    expect(result.all_spent).toBe(true);
+    expect(result.total_zat).toBe("0");
+    expect(result.spent_zat).toBe(ORACLE.amount_zat);
     expect(result.birthday).toBe(birthday);
     expect(result.birthday_defaulted).toBe(false);
     expect(result.tip_height).toBeGreaterThanOrEqual(ORACLE.height);

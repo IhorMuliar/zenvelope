@@ -203,3 +203,65 @@ mv src/wasm /tmp/wasm-stash && npm run e2e; mv /tmp/wasm-stash src/wasm
 Both paths were run for this document: with the wasm present, 6 passed and the 3 MOCK
 flow tests skipped; with it absent, the 3 MOCK flow tests passed and the 6 real-core
 tests skipped.
+
+## 6. Spent detection
+
+Added 2026-09-24. Until then the scan never looked at nullifiers, so an envelope that had
+already been swept still opened to its old amount, took a destination, proved for half a
+minute, and only failed at broadcast. The M1 envelope is the case in point: funded with
+130,000 zatoshi at block 3,490,472 and swept in
+`ba0f91cfe7ca33dd269b692bf80027df2681a321215e90ab28c2a56260fa2aad` at block 3,491,056.
+
+**How it works.** The compact pass rebuilds each note it decrypts (52 bytes of plaintext
+are the whole note; `rho` is the action's nullifier field) and derives its nullifier with
+the link's Orchard full viewing key, `Note::nullifier(fvk)`, the same call orchard's
+builder makes when the sweep spends it. It then compares every `ironwood_actions[]`
+nullifier (and `actions[]` for an Orchard note) from the blocks it is already walking,
+from the note's block to the tip. Each chunk is decrypted in parallel, its nullifiers are
+added to the watch set, then the chunk is checked in parallel for spends; the set carries
+over to later chunks. Details in [crates/core/README.md](../../crates/core/README.md),
+"Spent detection".
+
+**What the page does.** All notes spent: a distinct screen, "This envelope was already
+opened", with the spend's block and date, its txid, an explorer link, what the envelope
+held, and no amount and no send-on controls. Some spent: the envelope opens with the
+unspent amount only, SendOn is handed only the unspent notes, and a line says how much
+was already moved on. Copy lives in `src/copy/en.ts` (`alreadyOpened`), under the same
+audit as the rest.
+
+**Tests.**
+
+| | |
+| --- | --- |
+| Rust | `scan::tests::spent::*` (10): the scan's nullifier equals the one orchard's builder puts in the spending action for a synthetic Ironwood note; a spend in the same chunk and in a later chunk is seen; a nullifier in the wrong pool's list is not; totals count unspent notes only; a note the walk never watched is an error |
+| vitest | `openFlow.test.ts`: the reducer's `spent` state, partial spends, the latest-spend and date helpers, and the MOCK's spent variants |
+| MOCK e2e | `e2e/spent-mock.spec.ts`: a secret starting `spentAll` opens to the already-opened screen, `spentOne` to 0.0003 ZEC plus the line about the rest (markers documented in `src/core/mock.ts`) |
+| real e2e | `e2e/spent-real.spec.ts`, own chromium on port 4261: the M1 envelope shows "already opened", block 3,491,056, txid `ba0f91cf…`; the fee envelope still opens with 0.0003 ZEC and the send-on flow |
+| real core | `e2e/m2-core.spec.ts` now asserts the M1 note comes back `spent: true` with the sweep's txid and height, `all_spent: true`, `total_zat: "0"`, `spent_zat: "130000"` |
+
+**Measured**, 2026-09-24, desktop chromium, the threaded package, the fee envelope
+(birthday 3,490,472, about 3,800 blocks to the tip at 3,494,2xx), tap to amount, three
+opens each on the same build of the page with only the wasm swapped:
+
+| wasm | open 1 | open 2 | open 3 | median |
+| --- | --- | --- | --- | --- |
+| before (main `dde7368`) | 41.6 s | 46.0 s | 50.3 s | 46.0 s |
+| with spent detection | 43.3 s | 40.9 s | 55.0 s | 43.3 s |
+
+The difference is inside the run-to-run spread of the public gateway. That is what the
+design predicts: no extra request, the blocks are already in memory, the watch set is
+empty until the first note, and after it the check is one hash lookup per action. The M1
+envelope reached its already-opened screen in 51.6 s over the same span of chain.
+
+```sh
+./scripts/build-core.sh && cd web && npm run build
+ZENV_FIXTURE_DIR=/path/to/private/dir ZENVELOPE_E2E_PORT=4261 ZENV_TIMING_RUNS=3 \
+  npx playwright test e2e/spent-real.spec.ts
+```
+
+`ZENV_FIXTURE_DIR` names the directory holding the private M1-FUND.md and M3-DEST.md; the
+fragments are read out of them at run time and never printed (`e2e/fixtures.ts`).
+`ZENV_SWEPT_FRAGMENT` and `ZENV_FEE_FRAGMENT` override them. Nothing is broadcast: the
+page is loaded with `?dry=1` and neither test reaches a sweep.
+
+![Already opened, real core](spent-already-opened-real.png)

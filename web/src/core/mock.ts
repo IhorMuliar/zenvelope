@@ -192,7 +192,98 @@ export const MOCK_NOTE = {
   // The real M1 note sits at Ironwood action 1: the sending wallet took its change in
   // action 0 of the same bundle.
   action_index: 1,
+  spent: false,
+  spent_txid: null,
+  spent_height: null,
+  spent_time: null,
 } as const;
+
+/**
+ * Spent variants, for exercising the "already opened" screens without a chain.
+ *
+ * The mock reads no chain, so it cannot know whether a note was swept. Instead a
+ * link opts in with a documented marker at the START OF THE SECRET (the secret is
+ * any 43 base64url characters, so a marker there is still a valid fragment):
+ *
+ *   `spentAll…`  the one note is already spent: the "already opened" screen.
+ *   `spentOne…`  two notes, the 0.0013 ZEC one spent and a 0.0003 ZEC one
+ *                still there: the envelope opens with a line about the rest.
+ *
+ * Any other secret behaves exactly as before: one unspent note.
+ *
+ * The spend facts are the real M1 sweep's, so the mock screen and the real one
+ * read the same. MOCK_SPENT_TIP is past that block, because a scan cannot see a
+ * spend above its own tip.
+ */
+export const MOCK_SPENT_ALL_MARKER = "spentAll";
+export const MOCK_SPENT_ONE_MARKER = "spentOne";
+export const MOCK_SPENT = {
+  txid: "ba0f91cfe7ca33dd269b692bf80027df2681a321215e90ab28c2a56260fa2aad",
+  height: 3491056,
+  /** 2026-09-21 20:00:00 UTC, a stand-in close to the real block's time. */
+  time: 1790020800,
+} as const;
+export const MOCK_SPENT_TIP = 3491100;
+/** The note that is still there in the `spentOne` variant. */
+export const MOCK_LEFT_NOTE = {
+  amount_zat: "30000",
+  memo: null,
+  height: 3491056,
+  txid: MOCK_SPENT.txid,
+  pool: "ironwood",
+  action_index: 1,
+  spent: false,
+  spent_txid: null,
+  spent_height: null,
+  spent_time: null,
+} as const;
+
+type MockVariant = "unspent" | "spentAll" | "spentOne";
+
+function mockVariant(secret: string): MockVariant {
+  if (secret.startsWith(MOCK_SPENT_ALL_MARKER)) return "spentAll";
+  if (secret.startsWith(MOCK_SPENT_ONE_MARKER)) return "spentOne";
+  return "unspent";
+}
+
+function mockResult(variant: MockVariant, birthday: number | undefined, total: number): OpenResult {
+  const spentNote = {
+    ...MOCK_NOTE,
+    spent: true,
+    spent_txid: MOCK_SPENT.txid,
+    spent_height: MOCK_SPENT.height,
+    spent_time: MOCK_SPENT.time,
+  };
+  const tip = variant === "unspent" ? MOCK_TIP_HEIGHT : MOCK_SPENT_TIP;
+  const base = {
+    found: true,
+    tip_height: tip,
+    birthday: tip - total + 1,
+    birthday_defaulted: birthday === undefined,
+    scanned_blocks: total,
+    gateway: MOCK_GATEWAY,
+  };
+  switch (variant) {
+    case "spentAll":
+      return { ...base, all_spent: true, notes: [spentNote], total_zat: "0", spent_zat: MOCK_NOTE.amount_zat };
+    case "spentOne":
+      return {
+        ...base,
+        all_spent: false,
+        notes: [spentNote, { ...MOCK_LEFT_NOTE }],
+        total_zat: MOCK_LEFT_NOTE.amount_zat,
+        spent_zat: MOCK_NOTE.amount_zat,
+      };
+    default:
+      return {
+        ...base,
+        all_spent: false,
+        notes: [{ ...MOCK_NOTE }],
+        total_zat: MOCK_NOTE.amount_zat,
+        spent_zat: "0",
+      };
+  }
+}
 
 export async function openEnvelope(
   secret_b64url: string,
@@ -203,10 +294,9 @@ export async function openEnvelope(
 ): Promise<OpenResult> {
   // Derive first, so a bad secret fails the same way the real core would.
   derive(secret_b64url, network);
-  const total =
-    birthday !== undefined && birthday < MOCK_TIP_HEIGHT
-      ? MOCK_TIP_HEIGHT - birthday + 1
-      : MOCK_DEFAULT_SPAN;
+  const variant = mockVariant(secret_b64url);
+  const tip = variant === "unspent" ? MOCK_TIP_HEIGHT : MOCK_SPENT_TIP;
+  const total = birthday !== undefined && birthday < tip ? tip - birthday + 1 : MOCK_DEFAULT_SPAN;
   const ticks = Math.round(MOCK_SCAN_MS / MOCK_TICK_MS);
 
   return new Promise((resolve) => {
@@ -216,16 +306,7 @@ export async function openEnvelope(
       if (tick >= ticks) {
         clearInterval(timer);
         on_progress?.(total, total);
-        resolve({
-          found: true,
-          notes: [{ ...MOCK_NOTE }],
-          total_zat: MOCK_NOTE.amount_zat,
-          tip_height: MOCK_TIP_HEIGHT,
-          birthday: MOCK_TIP_HEIGHT - total + 1,
-          birthday_defaulted: birthday === undefined,
-          scanned_blocks: total,
-          gateway: MOCK_GATEWAY,
-        });
+        resolve(mockResult(variant, birthday, total));
         return;
       }
       // The span is unknown for the first few ticks: total 0 keeps the bar
