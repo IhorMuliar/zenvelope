@@ -49,3 +49,6 @@ TEST-B-DEST.md
 # local tool state
 web/.netlify/
 web/.playwright-cli/
+
+# hackathon and outreach working notes: tracks, form answers, scripts, checklists
+docs/submission/
