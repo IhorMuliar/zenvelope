@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1480 512" width="1480" height="512">
+  <title>Zenvelope</title>
+  <rect width="1480" height="512" rx="112" fill="#12120f"/>
+  <defs><clipPath id="b"><rect x="80" y="144" width="352" height="240" rx="32"/></clipPath></defs>
+  <rect x="80" y="144" width="352" height="240" rx="32" fill="#f2efe6"/>
+  <g clip-path="url(#b)" stroke="#12120f" stroke-width="16" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M60 404 L256 268 L452 404" fill="none" opacity="0.18"/>
+    <path d="M60 128 L256 282 L452 128" fill="#f2efe6"/>
+  </g>
+  <circle cx="256" cy="282" r="54" fill="#e0b64a" stroke="#12120f" stroke-width="12"/>
+  <circle cx="256" cy="282" r="28" fill="none" stroke="#12120f" stroke-width="8" opacity="0.35"/>
+  <text x="520" y="318" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="176" font-weight="700" letter-spacing="-4" fill="#f2efe6">Zenvelope</text>
+</svg>
