@@ -16,7 +16,12 @@ enforced by tests; `/how` teaches four checks that need no trust in us.
 
 **3. What if the link leaks?** Whoever holds it can open it — it is a bearer instrument
 and we say so. But the amount is not in the link, so a leak discloses nothing until
-someone spends it, and a link is one address, so a leak costs that envelope only.
+someone spends it, and a link is one address, so a leak costs that envelope only. If two
+people open the same link at once, the network settles it: we tested it on mainnet on
+2026-09-24 with two browsers sending at nearly the same moment. One sweep landed; the other
+was refused by the network ("another transaction in the mempool has already spent some of
+its inputs") and said so, and the money arrived once. Anyone opening it after that sees
+"This envelope was already opened" with the transaction.
 
 **4. Why Zcash and not Solana-native?** The hidden amount is the point, and only a
 shielded pool gives it: on Solana the amount and both parties are public the moment the

@@ -42,3 +42,6 @@ package-lock.json
 TEST-ENVELOPES-2026-09-24.md
 TEST-ENVELOPES-QR.txt
 TEST-ENVELOPES-*.png
+
+# concurrent test destination: mnemonic, spendable
+TEST-B-DEST.md

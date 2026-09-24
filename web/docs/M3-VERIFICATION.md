@@ -485,3 +485,106 @@ The words are the money and stay in the gitignored `M3-DEST.md`; nothing here re
 
 **M3 is done.** A link, on mainnet, opened in a browser and swept to its recipient with
 the proof built in that browser. Nothing in the path held the money.
+
+## 11. Concurrent open, verified, 2026-09-24
+
+Question: two browsers hold the same link, both open it and both tap "Send it on". What
+happens? Answer, on mainnet: **exactly one sweep lands, the other is refused by the
+network and says so, and the money arrives once.**
+
+Setup. Test envelope B, funded by the owner from Zodl with 0.0013 ZEC (memo "Concurrent
+test"): tx `71f76d53ab0c53083dcc37fe96be20a10d293d7faebbc026d59126b7643c8760`, block
+**3,494,472**, one Ironwood note of 130,000 zat. Two independent Playwright browser
+contexts (A and B, Playwright's own headless chromium, 1280×720, video on) loaded the
+**live** site `https://zenvelope.netlify.app/e#<secret>.3494472` with no `?dry=1`.
+Context A chose "A new wallet in this browser"; context B pasted **the same address**
+through "A Zcash address", so a double spend would have shown up as 180,000 zat at one
+destination. A tapped "Send it on"; B tapped it 2.4 s later.
+
+### Timeline (UTC, from the driver's log)
+
+| Moment | A | B |
+| --- | --- | --- |
+| final link loaded | 10:30:02.97 | 10:30:03.14 |
+| "Open envelope" tapped | 10:30:05.36 | 10:30:05.83 |
+| `0.0013 ZEC` revealed | 10:30:08.06 | 10:30:08.45 |
+| spent check done, not spent | 10:30:08.20 | 10:30:08.75 |
+| "Keys ready" | 10:30:37.64 | 10:30:37.87 |
+| review: 0.0013 in, 0.0001 network fee, 0.0003 service fee, **receive 0.0009 ZEC**, same destination | 10:30:38.96 | 10:30:39.01 |
+| **"Send it on" tapped** | **10:30:39.10** | **10:30:41.51** |
+| `witness` done | 10:30:41.26 (2.0 s) | 10:30:44.03 (2.5 s) |
+| `keys` done | 10:30:41.49 | 10:30:44.31 |
+| `proving` done | 10:32:10.45 (89.0 s) | 10:32:11.87 (87.6 s) |
+| `broadcast` result | **10:32:10.97 — `Sent.`** | **10:32:12.22 — error screen** |
+
+Proving took ~88 s in each context instead of the ~13 s of §9 because the two contexts
+proved at the same time on the same machine and shared its cores; that is the test
+harness, not the product.
+
+### What the winner saw (A)
+
+`Sent.`, `0.0009 ZEC`, explorer link to
+`28b4018346579cb33265f4b2d27c14404a7a230c1dcc103a3831026b5355ed8b`, and
+`The envelope is now empty.` Screenshot: [concurrent-A.png](concurrent-A.png).
+
+### What the loser saw (B)
+
+Heading `It did not go through`, then, verbatim:
+
+```
+the network rejected the sweep (error_code -25): any transaction with the same effects will be rejected from the mempool until the next chain tip block: transaction rejected because another transaction in the mempool has already spent some of its inputs
+```
+
+and, under the buttons:
+
+```
+The funds are still in the envelope. Nothing moved, and this link still works.
+```
+
+Screenshot: [concurrent-B.png](concurrent-B.png). Videos (not in the repo):
+`/root/Projects/web3-sweep/zenvelope-video/concurrent-A.webm` and `concurrent-B.webm`.
+
+The rejection is lightwalletd relaying the node's mempool rule: B's transaction reveals
+the same nullifier as A's, which was already in the mempool 1.25 s earlier. B's
+transaction was never accepted anywhere; nothing about it reached the chain.
+
+**A copy gap this found.** The `FUNDS_SAFE_COPY` line is true for B's own attempt
+(B moved nothing) but misleading here: the money is *not* still in the envelope, A took
+it, and "this link still works" is only true until A's transaction is mined. The rejection
+text is the honest part. A conflict rejection (`error_code -25`, "already spent") deserves
+its own copy, e.g. "Someone else with this link sent it on a moment ago", rather than the
+generic retry screen. Not changed in this run.
+
+Both contexts ended with `localStorage` and `sessionStorage` `{}`.
+
+### Afterwards: a fresh browser on the same link
+
+At 10:35:23 UTC (block 3,494,474 mined at 10:34:25), a third, fresh context opened the
+same final link and tapped "Open envelope". 2.2 s later:
+
+```
+This envelope was already opened
+Someone with this link already moved the money on, so there is nothing left in it to send.
+Opened in block 3,494,474, on 24 September 2026.
+MOVED ON IN 28b40183…5355ed8b
+It held 0.0013 ZEC.
+```
+
+with the explorer link to the winning txid and no destination buttons. Screenshot:
+[concurrent-after.png](concurrent-after.png).
+
+### The oracle
+
+`zcash-devtool`, `zecrocks` servers, none of Zenvelope's code.
+
+| Wallet | How | Result |
+| --- | --- | --- |
+| envelope B `tools/wallets/testB` | `init-fvk` from the envelope's UFVK, birthday 3,494,440 | `list-tx`: funding `71f76d53…3c8760` at 3,494,472 and **`28b40183…5355ed8b` at 3,494,474**, nothing else; `{"total":0}` at tip 3,494,475 — the note is spent, once |
+| destination `tools/wallets/testB-dest` | `restore-mnemonic` from A's 24 words, birthday 3,494,473 | one transaction, `28b40183…5355ed8b` at 3,494,474, output 0, **Ironwood, 90,000 zat**; `{"total":90000}` |
+
+130,000 in, 90,000 to the destination, 30,000 to the service fee, 10,000 to the miners,
+and one spend. B's transaction appears nowhere.
+
+The driver is a one-shot that spends a real envelope and is not committed, like §9's. The
+envelope's secret and the destination's words stay in the gitignored
+`TEST-ENVELOPES-2026-09-24.md` and `TEST-B-DEST.md`.
