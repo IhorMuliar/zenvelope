@@ -78,10 +78,10 @@ const WARM_ESTIMATE = "~30 s";
  * single call, so a sweep tapped before "Keys ready" waits for the rest of it before it
  * can start; saying "Starting…" through that was the screen's only untrue line.
  */
-export const PREPARING_KEYS_COPY = "Finishing the keys this sweep needs…";
+export const PREPARING_KEYS_COPY = "Getting the keys ready to send…";
 
 export const SEND_TIMING_COPY =
-  "This takes about 1 to 2 minutes on a laptop and longer on a phone. Keep this tab open.";
+  "This takes a few seconds to a minute. Keep this tab open.";
 
 export const RESTORE_COPY = "Restore in Zodl or Zingo with these words and this birthday height";
 
@@ -662,7 +662,7 @@ export function SendOn({
   if (state.phase === "review" && active) {
     return (
       <div className="card stack">
-        <h2>Check this over</h2>
+        <h2>Check before you send</h2>
         <p className="row">
           <span className="label">In the envelope</span>
           <span data-testid="review-in-envelope">{formatZecAmount(amounts.inEnvelopeZat)}</span>

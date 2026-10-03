@@ -131,7 +131,7 @@ describeOnMock("M3: sending the envelope on", () => {
     await expect(page.getByTestId("review-receive")).toHaveText("0.0009 ZEC");
     await expect(page.getByTestId("review-destination")).toHaveText(truncated(VECTOR_UA));
     await expect(page.getByTestId("send-timing")).toHaveText(
-      "This takes about 1 to 2 minutes on a laptop and longer on a phone. Keep this tab open.",
+      "This takes a few seconds to a minute. Keep this tab open.",
     );
     await noDrainerCopy(page);
 

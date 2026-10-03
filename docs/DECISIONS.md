@@ -303,7 +303,9 @@ CORS headers, so a browser cannot use it directly.
 **Why.** NU7 activates on testnet on 2026-10-06, inside the hackathon window, which
 would break a testnet build mid-build. Mainnet NU7 is 2026-11-05, after submissions
 close, so mainnet is the stable target for the whole project. NU7 introduces no new
-transaction format, so nothing in our flow changes at activation.
+transaction format. It does cut block time from 75 s to 25 s, so two block-count
+constants (`DEFAULT_BIRTHDAY_LOOKBACK` in scan.rs, `ANCHOR_WALK_CAP` in sweep.rs) must be
+re-derived before mainnet activation.
 
 **Evidence.** <https://forum.zcashcommunity.com/t/nu7-timeline/57655>
 

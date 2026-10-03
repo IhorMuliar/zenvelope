@@ -211,7 +211,7 @@ export function Open() {
             {link.address}
           </code>
           <p className="hint">
-            The sender paid this address. It is derived from your link, here in this browser.
+            The sender paid this address. Your browser worked it out from the link.
             {link.birthday !== undefined ? ` Birthday height ${link.birthday}.` : ""}
             {link.network === "test" ? " Testnet." : ""}
           </p>
@@ -239,7 +239,7 @@ export function Open() {
         </p>
         <p className="fine">
           {sealed.scanningHint}
-          {state.attempt > 0 ? " The main Zcash node did not answer, so we moved to the backup." : ""}
+          {state.attempt > 0 ? " The main Zcash server did not answer, so we switched to the backup." : ""}
         </p>
       </section>
     );
@@ -311,8 +311,8 @@ export function Open() {
       <div className="card stack">
         <CopyField label="Waiting for" value={link.address} testId="waiting-address" />
         <p className="hint">
-          This is the address the envelope is paid to. Send it to whoever gave you this link
-          so they can check they paid the right place.
+          This is the envelope's address. Send it to whoever gave you the link, so they can
+          check they paid the right place.
           {link.birthday !== undefined ? ` Scanned from block ${formatCount(link.birthday)}.` : ""}
         </p>
       </div>
