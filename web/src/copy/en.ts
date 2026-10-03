@@ -778,6 +778,26 @@ export const spendCheck = {
   sendOnButton: "Checking…",
 };
 
+/* -------------------------------------------------- the note and the envelope */
+
+/**
+ * The words printed on the paper objects: the banknote, the postmark and the
+ * tear strip. They are print, not interface, which is why the microtext and
+ * the postmark ring are in capitals.
+ */
+export const noteCopy = {
+  issuer: "Zenvelope shielded note",
+  unit: "ZEC",
+  memoLabel: "Memo",
+  microtext: "SHIELDED ZCASH NOTE   ",
+  postmarkRing: "ZENVELOPE  SHIELDED  POST  ",
+  postmarkSent: "SENT",
+  sealedLabel: "A sealed envelope",
+  openLabel: "An open envelope with a note inside",
+  emptyLabel: "An empty envelope",
+  pullHint: "Tap Open, or pull it along the strip.",
+} as const;
+
 export function allStrings(): string[] {
   const out: string[] = [];
   const walk = (v: unknown): void => {
@@ -809,6 +829,7 @@ export function allStrings(): string[] {
     alreadyOpened,
     spendCheck,
     watch,
+    noteCopy,
     NEVER_ASK,
     ONLY_ASK,
   });

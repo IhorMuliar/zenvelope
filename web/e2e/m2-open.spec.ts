@@ -144,7 +144,9 @@ describeOnMock("M2: opening an envelope", () => {
     await expect(page.getByTestId("amount")).toHaveText("0.0013 ZEC");
     await expect(page.getByTestId("from")).toHaveText("From Ihor");
     await expect(page.getByTestId("memo")).toHaveText("Happy birthday, Olena. Coffee is on me.");
-    // The name comes before the amount on the page.
+    // The name comes before the amount on the page: measured once the note
+    // has finished rising out of the envelope, not mid-flight.
+    await expect(page.getByTestId("envelope")).toHaveAttribute("data-settled", "true");
     const fromBox = await page.getByTestId("from").boundingBox();
     const amountBox = await page.getByTestId("amount").boundingBox();
     expect(fromBox!.y).toBeLessThan(amountBox!.y);

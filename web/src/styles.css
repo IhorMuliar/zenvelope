@@ -1,46 +1,133 @@
-/* Mobile first. No framework. Dark and light from prefers-color-scheme. */
+/*
+ * Zenvelope: The Note.
+ *
+ * Mobile first, no framework. The page is quiet paper and ink; the boldness is
+ * spent on two physical objects, the envelope and the banknote inside it.
+ * Those stay light paper in dark mode too: only the page around them goes dark.
+ */
+
+/* ------------------------------------------------------------------ fonts */
+
+/* Self-hosted (CSP: font-src 'self'), Latin subset, SIL OFL 1.1: see public/fonts. */
+@font-face {
+  font-family: "Bona Nova";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/bona-nova-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Bona Nova";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/bona-nova-400-italic.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Bona Nova";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/bona-nova-700.woff2") format("woff2");
+}
+/* One variable file covers 400, 500 and 600. */
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 100 700;
+  font-display: swap;
+  src: url("/fonts/ibm-plex-sans-var.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/ibm-plex-mono-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/ibm-plex-mono-500.woff2") format("woff2");
+}
+
+/* ----------------------------------------------------------------- tokens */
 
 :root {
-  /* Sealed Letter: paper, ink, a gold seal. */
-  --bg: #fbf7ef;
-  --surface: #ffffff;
+  /* The page. */
+  --bg: #f7f2e7;
+  --surface: #fffdf8;
+  --surface-sunk: #f2ecdf;
   --text: #231f20;
-  --muted: #6b635a;
-  --line: #e6dcc8;
+  --muted: #655d54;
+  --line: #ddd2bb;
+  --line-strong: #c9bb9d;
   --accent: #231f20;
-  --accent-text: #fbf7ef;
-  --link: #8a5a00;
-  --seal: #f4b728;
-  --seal-deep: #cf8a00;
-  --envelope: #ede3cf;
-  --envelope-line: #d9cbb0;
-  --paper: #ffffff;
-  --warn-bg: #fbf0d9;
-  --warn-text: #6b4c06;
+  --accent-text: #f7f2e7;
+  --link: #25344d;
+  --focus: #f4b728;
+  --warn-bg: #f6ead0;
+  --warn-text: #5f4305;
   --error: #a3260f;
   --radius: 12px;
+  --card-shadow: 0 1px 0 #fff inset, 0 1px 2px rgba(60, 40, 10, 0.06),
+    0 18px 40px -28px rgba(60, 40, 10, 0.35);
+
+  /* The objects. Not redefined in dark mode: paper is paper. */
+  --ink: #231f20;
+  --paper: #f7f2e7;
+  --note: #efe5cc;
+  --note-hi: #f6eed8;
+  --note-lo: #e3d6b5;
+  --engrave: #25344d;
+  --serial: #7a2e22;
+  --tint: #7d8d9b;
+  --gold: #f4b728;
+  --gold-hi: #ffe08a;
+  --gold-deep: #b9820a;
+  --env: #e9dcc0;
+  --env-shade: #dccca9;
+  --env-slit: #c9b78f;
+  --obj-shadow: 0 2px 3px rgba(60, 40, 10, 0.08), 0 24px 48px -26px rgba(60, 40, 10, 0.45);
+  --note-shadow: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 1px 1px rgba(40, 30, 10, 0.12),
+    0 6px 14px -6px rgba(40, 30, 10, 0.25), 0 22px 40px -18px rgba(40, 30, 10, 0.35);
+
+  --display: "Bona Nova", Georgia, "Times New Roman", serif;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* The security tint inside the envelope: an inline SVG tile, no request. */
+  --tint-tile: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='46' height='46'%3E%3Cg fill='none' stroke='%237d8d9b' stroke-width='.7'%3E%3Cpath d='M0 11 q11.5 -9 23 0 t23 0'/%3E%3Cpath d='M0 34 q11.5 -9 23 0 t23 0'/%3E%3Cpath d='M11.5 0 q-9 11.5 0 23 t0 23'/%3E%3Cpath d='M34.5 0 q-9 11.5 0 23 t0 23'/%3E%3C/g%3E%3C/svg%3E");
+
+  color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #171412;
-    --surface: #221e1b;
-    --text: #f3ede2;
-    --muted: #a89f92;
-    --line: #3a332c;
-    --accent: #f4b728;
-    --accent-text: #231f20;
-    --link: #f4c04e;
-    --seal: #f4b728;
-    --seal-deep: #cf8a00;
-    --envelope: #e3d6bc;
-    --envelope-line: #c4b38f;
-    --paper: #fbf7ef;
-    --warn-bg: #2b2414;
+    --bg: #16130f;
+    --surface: #211d18;
+    --surface-sunk: #1b1814;
+    --text: #f1ebdf;
+    --muted: #b0a698;
+    --line: #3a332b;
+    --line-strong: #514739;
+    --accent: #f1ebdf;
+    --accent-text: #1b1714;
+    --link: #f0cf7e;
+    --warn-bg: #2d2515;
     --warn-text: #f0d79a;
-    --error: #ff9478;
+    --error: #ff9a80;
+    --card-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 18px 40px -28px rgba(0, 0, 0, 0.8);
+    --obj-shadow: 0 2px 3px rgba(0, 0, 0, 0.35), 0 28px 56px -24px rgba(0, 0, 0, 0.85);
+    --note-shadow: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 1px 1px rgba(0, 0, 0, 0.3),
+      0 8px 18px -6px rgba(0, 0, 0, 0.45), 0 26px 44px -18px rgba(0, 0, 0, 0.7);
+    color-scheme: dark;
   }
 }
+
+/* ------------------------------------------------------------------- base */
 
 * {
   box-sizing: border-box;
@@ -52,67 +139,47 @@ body {
   padding: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
-    sans-serif;
+  font-family: var(--body);
   font-size: 17px;
   line-height: 1.5;
   -webkit-text-size-adjust: 100%;
-}
-
-.shell {
-  max-width: 44rem;
-  margin: 0 auto;
-  padding: 1rem 1rem 3rem;
-}
-
-.site-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.5rem 0 1.5rem;
-  flex-wrap: wrap;
-}
-
-.wordmark {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-weight: 700;
-  font-size: 1.15rem;
-  letter-spacing: -0.01em;
-  text-decoration: none;
-  color: var(--text);
-}
-
-.wordmark .logo {
-  width: 28px;
-  height: 28px;
-  border-radius: 7px;
-  display: block;
-}
-
-nav {
-  display: flex;
-  gap: 1rem;
-  font-size: 0.92rem;
+  text-rendering: optimizeLegibility;
 }
 
 a {
   color: var(--link);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--display);
+  font-weight: 700;
+  margin: 0;
+  text-wrap: balance;
+  font-variant-numeric: lining-nums;
 }
 
 h1 {
-  font-size: 1.55rem;
-  line-height: 1.25;
-  letter-spacing: -0.02em;
-  margin: 0;
+  font-size: clamp(2rem, 6vw, 2.6rem);
+  line-height: 1.06;
+  letter-spacing: -0.01em;
 }
 
 h2 {
-  font-size: 1.02rem;
+  font-size: 1.4rem;
+  line-height: 1.15;
+}
+
+h3 {
+  font-size: 1.1rem;
+  line-height: 1.2;
+}
+
+p {
   margin: 0;
-  letter-spacing: -0.01em;
 }
 
 .lede {
@@ -126,17 +193,157 @@ h2 {
   gap: 1rem;
 }
 
-.card {
+.stack.tight {
+  gap: 0.5rem;
+}
+
+.center-text {
+  text-align: center;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.mono {
+  font-family: var(--mono);
+}
+
+/* ----------------------------------------------------------------- shell */
+
+.shell {
+  max-width: 68rem;
+  margin: 0 auto;
+  padding: 1rem 1rem 3rem;
+}
+
+main > section {
+  max-width: 40rem;
+  margin-inline: auto;
+}
+
+main > section.landing,
+main > section.wizard {
+  max-width: none;
+}
+
+.site-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1.25rem;
+  padding: 0.5rem 0 1.75rem;
+  flex-wrap: wrap;
+}
+
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 1.4rem;
+  text-decoration: none;
+  color: var(--text);
+}
+
+.wordmark .logo {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  display: block;
+}
+
+nav {
+  display: flex;
+  gap: 1.1rem;
+  font-size: 0.95rem;
+}
+
+nav a {
+  color: var(--text);
+}
+
+.site-footer {
+  margin-top: 4rem;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--line);
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.site-footer a {
+  color: var(--muted);
+}
+
+.footer-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0;
+}
+
+@media (min-width: 40rem) {
+  .shell {
+    padding: 1.75rem 1.5rem 4rem;
+  }
+  .footer-lines {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 0.2rem 1.25rem;
+  }
+}
+
+/* -------------------------------------------------------------- controls */
+
+input:focus-visible,
+button:focus-visible,
+a:focus-visible,
+summary:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+h1[tabindex="-1"]:focus {
+  outline: none;
+}
+
+input {
+  font: inherit;
+  font-size: 1rem;
+  padding: 0.7rem 0.85rem;
+  color: var(--text);
   background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 1rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+}
+
+input[type="text"],
+input:not([type]) {
+  width: 100%;
+}
+
+input::placeholder {
+  color: var(--muted);
+  opacity: 0.75;
+}
+
+input[aria-invalid="true"] {
+  border-color: var(--error);
 }
 
 .field {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.4rem;
   border: 0;
   padding: 0;
   margin: 0;
@@ -161,37 +368,21 @@ legend {
   padding: 0;
 }
 
+/* A field name, in plain case: these are labels, not eyebrows. */
 .label {
-  font-size: 0.8rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  font-size: 0.85rem;
+  font-weight: 500;
   color: var(--muted);
 }
 
-input[type="text"],
-input:not([type]) {
-  width: 100%;
-}
-
-input {
-  font: inherit;
-  padding: 0.65rem 0.7rem;
+.label.strong {
+  font-size: 0.92rem;
+  font-weight: 600;
   color: var(--text);
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 9px;
-}
-
-input:focus-visible,
-button:focus-visible,
-a:focus-visible,
-summary:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
 }
 
 .hint {
-  font-size: 0.85rem;
+  font-size: 0.875rem;
   color: var(--muted);
   margin: 0;
 }
@@ -203,7 +394,7 @@ summary:focus-visible {
 }
 
 .error {
-  font-size: 0.88rem;
+  font-size: 0.9rem;
   color: var(--error);
   margin: 0;
 }
@@ -211,18 +402,19 @@ summary:focus-visible {
 .warn {
   background: var(--warn-bg);
   color: var(--warn-text);
-  border-radius: 9px;
-  padding: 0.6rem 0.7rem;
-  font-size: 0.9rem;
+  border-left: 3px solid var(--gold-deep);
+  border-radius: 4px 10px 10px 4px;
+  padding: 0.65rem 0.8rem;
+  font-size: 0.92rem;
   margin: 0;
 }
 
 .badge {
-  border: 1px dashed var(--seal-deep);
+  border: 1px dashed var(--gold-deep);
   color: var(--warn-text);
   background: var(--warn-bg);
-  border-radius: 9px;
-  padding: 0.6rem 0.7rem;
+  border-radius: 10px;
+  padding: 0.6rem 0.75rem;
   font-size: 0.85rem;
   margin: 0;
 }
@@ -230,35 +422,152 @@ summary:focus-visible {
 button {
   font: inherit;
   cursor: pointer;
-  border-radius: 9px;
-  border: 1px solid var(--line);
-  background: var(--surface);
+  border-radius: 10px;
+  border: 1px solid var(--line-strong);
+  background: transparent;
   color: var(--text);
-  padding: 0.5rem 0.8rem;
+  padding: 0.5rem 0.85rem;
+  transition: transform 0.1s ease, background-color 0.15s ease, border-color 0.15s ease;
 }
 
-button.primary {
+button:active:not([disabled]),
+a.button:active {
+  transform: translateY(1px);
+}
+
+button.primary,
+a.button.primary {
   background: var(--accent);
   color: var(--accent-text);
-  border-color: var(--accent);
+  border: 1px solid var(--accent);
   font-weight: 600;
-  padding: 0.8rem 1rem;
+  font-size: 1.02rem;
+  padding: 0.95rem 1.1rem;
+  border-radius: 12px;
   width: 100%;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.12), 0 10px 22px -16px rgba(35, 31, 32, 0.7);
+}
+
+button.primary:hover:not([disabled]),
+a.button.primary:hover {
+  background: color-mix(in srgb, var(--accent) 88%, var(--bg));
 }
 
 button.primary[disabled] {
-  opacity: 0.6;
-  cursor: progress;
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+button.secondary,
+a.button.secondary {
+  background: transparent;
+  color: var(--text);
+  border: 1.5px solid var(--text);
+  font-weight: 600;
+  padding: 0.8rem 1rem;
+  border-radius: 12px;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+button.secondary:hover,
+a.button.secondary:hover {
+  background: var(--surface-sunk);
 }
 
 button.ghost {
-  font-size: 0.85rem;
-  padding: 0.35rem 0.6rem;
+  font-size: 0.875rem;
+  padding: 0.4rem 0.7rem;
+  border-color: var(--line);
+  color: var(--text);
+}
+
+button.ghost:hover {
+  border-color: var(--text);
 }
 
 button.wide {
   width: 100%;
-  padding: 0.7rem;
+  padding: 0.75rem;
+}
+
+a.button {
+  display: block;
+  text-align: center;
+  text-decoration: none;
+}
+
+.button-row {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.button-row > * {
+  flex: 1 1 8rem;
+}
+
+.text-button {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--link);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  font-size: inherit;
+  border-radius: 2px;
+}
+
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  font-size: 0.95rem;
+}
+
+.check input {
+  flex: 0 0 auto;
+  width: 1.15rem;
+  height: 1.15rem;
+  margin-top: 0.15rem;
+  accent-color: var(--ink);
+}
+
+@media (prefers-color-scheme: dark) {
+  .check input {
+    accent-color: var(--gold);
+  }
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 1.1rem;
+  box-shadow: var(--card-shadow);
+}
+
+@media (min-width: 40rem) {
+  .card {
+    padding: 1.4rem;
+  }
+}
+
+.value {
+  display: block;
+  background: var(--surface-sunk);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+code.value,
+.value.mono {
+  font-family: var(--mono);
 }
 
 .copy-field {
@@ -274,18 +583,10 @@ button.wide {
   gap: 0.5rem;
 }
 
-.value {
-  display: block;
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  padding: 0.6rem 0.7rem;
-  font-size: 0.82rem;
-  overflow-wrap: anywhere;
-}
-
-.mono {
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+.copy-btn {
+  margin-top: 0.3rem;
+  font-size: 0.72rem;
+  padding: 0.2rem 0.45rem;
 }
 
 .qr {
@@ -297,72 +598,376 @@ button.wide {
   width: 232px;
   height: 232px;
   max-width: 100%;
-  border-radius: 9px;
+  border-radius: 10px;
   background: #fff;
-}
-
-.breakdown {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.15rem;
-  margin: 0;
-  font-size: 0.95rem;
-}
-
-.breakdown span:last-child {
-  font-weight: 700;
+  padding: 6px;
+  box-shadow: 0 0 0 1px var(--line);
 }
 
 details summary {
   cursor: pointer;
-  font-size: 0.85rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+  border-radius: 4px;
+}
+
+details.extras {
+  border-top: 1px solid var(--line);
+  padding-top: 0.8rem;
+}
+
+details.extras[open] > summary {
+  margin-bottom: 0.7rem;
+}
+
+.row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 0;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.numbers {
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+/* ---------------------------------------------------------------- landing */
+
+.landing {
+  display: flex;
+  flex-direction: column;
+  gap: 3.5rem;
+}
+
+.landing-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.75rem;
+  align-items: center;
+}
+
+.landing-object {
+  width: 100%;
+  max-width: 26rem;
+  margin: 0 auto;
+}
+
+.landing-copy {
+  gap: 1.25rem;
+  width: 100%;
+  max-width: 34rem;
+  margin: 0 auto;
+}
+
+.landing-copy .lede {
+  font-size: 1.05rem;
+}
+
+.form-card {
+  border-radius: 18px;
+  padding: 1.3rem;
+  gap: 1.15rem;
+}
+
+.amount-box {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  border-bottom: 2px solid var(--text);
+  padding-bottom: 0.2rem;
+}
+
+.amount-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 2.6rem;
+  line-height: 1.1;
+  font-variant-numeric: lining-nums;
+  padding: 0.1rem 0;
+}
+
+.amount-input:focus-visible {
+  outline: none;
+}
+
+.amount-box:focus-within {
+  border-bottom-color: var(--gold-deep);
+  box-shadow: 0 2px 0 var(--gold-deep);
+}
+
+.amount-unit {
+  font-family: var(--display);
+  font-style: italic;
+  font-size: 1.25rem;
   color: var(--muted);
 }
 
-.steps {
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding-top: 0.35rem;
+}
+
+.chip {
+  border-radius: 999px;
+  padding: 0.35rem 0.95rem;
+  font-size: 0.95rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  border: 1px solid var(--line-strong);
+  min-height: 2.5rem;
+}
+
+.chip:hover {
+  border-color: var(--text);
+}
+
+.chip[aria-pressed="true"] {
+  border-color: var(--text);
+  background: var(--text);
+  color: var(--bg);
+}
+
+.group-ask {
+  text-align: center;
+}
+
+.landing-more {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2.25rem;
+  padding-top: 2.25rem;
+  border-top: 1px solid var(--line);
+}
+
+.landing-more h2 {
+  font-size: 1.35rem;
+}
+
+.numbered {
   list-style: none;
-  counter-reset: step;
-  padding: 0;
+  counter-reset: num;
   margin: 0;
+  padding: 0;
   display: flex;
   flex-direction: column;
+  gap: 0.65rem;
+}
+
+.numbered li {
+  counter-increment: num;
+  display: flex;
+  align-items: baseline;
   gap: 0.75rem;
 }
 
-.steps li {
-  counter-increment: step;
+.numbered li::before {
+  content: counter(num);
+  font-variant-numeric: lining-nums;
+  flex: 0 0 1.1rem;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 1.2rem;
+  line-height: 1;
+  color: var(--gold-deep);
+  text-align: right;
+}
+
+@media (prefers-color-scheme: dark) {
+  .numbered li::before {
+    color: var(--gold);
+  }
+}
+
+.numbered.small {
+  font-size: 0.92rem;
+  gap: 0.4rem;
+}
+
+.numbered.small li::before {
+  font-size: 1rem;
+}
+
+@media (min-width: 54rem) {
+  .landing {
+    gap: 4.5rem;
+  }
+  .landing-hero {
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+    gap: 3.5rem;
+  }
+  .landing-object {
+    max-width: 28rem;
+  }
+  .landing-copy {
+    margin: 0;
+  }
+  .landing-more {
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+    gap: 3.5rem;
+  }
+}
+
+/* ----------------------------------------------------------------- wizard */
+
+.wizard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2rem;
+  max-width: 40rem;
+  margin-inline: auto;
+}
+
+main > section.wizard {
+  max-width: 40rem;
+}
+
+.wizard-main {
+  gap: 1.1rem;
+}
+
+@media (min-width: 58rem) {
+  main > section.wizard {
+    max-width: 62rem;
+    grid-template-columns: minmax(0, 1fr) 21rem;
+    gap: 3.5rem;
+    align-items: start;
+  }
+  .wizard .preview {
+    position: sticky;
+    top: 1.5rem;
+  }
+}
+
+/* Step n of 3, and a quiet three-part rule under it. */
+.step-of {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.step-of::after {
+  content: "";
+  display: block;
+  width: 7.5rem;
+  height: 3px;
+  border-radius: 3px;
+  background: linear-gradient(
+      90deg,
+      var(--gold-deep) 0 calc(var(--s, 1) * 33.333%),
+      var(--line) calc(var(--s, 1) * 33.333%)
+    );
+}
+
+.wizard[data-step="2"] .step-of::after {
+  --s: 2;
+}
+.wizard[data-step="3"] .step-of::after {
+  --s: 3;
+}
+.wizard[data-step="3"] .step-of {
+  align-items: center;
+}
+
+.link-full {
+  border-style: dashed;
+  border-color: var(--line-strong);
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  user-select: all;
+}
+
+.pay-qr {
+  align-items: center;
+}
+
+.receipt {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--line);
+}
+
+.receipt .row {
+  padding: 0.65rem 0;
+  border-bottom: 1px solid var(--line);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.receipt .row.total {
+  border-bottom: 0;
+  border-top: 1px solid var(--text);
+  margin-top: -1px;
+  align-items: baseline;
+}
+
+.receipt .row.total strong {
+  font-family: var(--display);
+  font-variant-numeric: lining-nums proportional-nums;
+  font-size: 1.3rem;
+}
+
+.status-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 0.85rem 1rem;
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
 }
 
-.steps li h2::before {
-  content: counter(step) ". ";
-  color: var(--link);
+.status-line {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
 }
 
-.site-footer {
-  margin-top: 2.5rem;
-  padding-top: 1rem;
-  border-top: 1px solid var(--line);
-  font-size: 0.8rem;
+.dot {
+  flex: 0 0 0.6rem;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 999px;
+  background: var(--gold);
+  animation: zv-breathe 1.6s ease-in-out infinite;
+}
+
+/* What the recipient will see: the note, captioned. */
+.preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  width: 100%;
+  max-width: 24rem;
+  margin: 0 auto;
+}
+
+.preview-label {
+  font-size: 0.9rem;
+  font-weight: 500;
   color: var(--muted);
 }
 
-@media (min-width: 40rem) {
-  h1 {
-    font-size: 1.9rem;
-  }
-  .shell {
-    padding: 2rem 1.5rem 4rem;
-  }
-  .card {
-    padding: 1.25rem;
-  }
+.take-back {
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--line);
+  align-items: flex-start;
 }
 
-/* ---------------------------------------------------------------- open flow */
+/* ------------------------------------------------------------- open flow */
 
 .stack.center {
   align-items: center;
@@ -373,124 +978,12 @@ details summary {
   max-width: 22rem;
 }
 
-/* The envelope illustration: inline SVG, no image request, page colours. */
-.envelope {
-  width: min(16rem, 70vw);
-  margin: 0.5rem auto;
+.open-sealed .env-stage {
+  margin-block: 0.5rem 0.25rem;
 }
 
-.envelope svg {
-  display: block;
-  width: 100%;
-  height: auto;
-  overflow: visible;
-}
-
-.env-body {
-  fill: var(--envelope);
-  stroke: var(--seal-deep);
-  stroke-width: 3;
-}
-
-.env-pocket {
-  fill: none;
-  stroke: var(--envelope-line);
-  stroke-width: 3;
-  stroke-linejoin: round;
-  stroke-linecap: round;
-}
-
-.env-flap {
-  fill: var(--seal);
-  stroke: var(--seal-deep);
-  stroke-width: 3;
-  stroke-linejoin: round;
-  transform-box: fill-box;
-  transform-origin: top center;
-}
-
-.env-note {
-  opacity: 0;
-  transform-box: fill-box;
-  transform-origin: center;
-}
-
-.env-note rect {
-  fill: var(--paper);
-  stroke: var(--envelope-line);
-  stroke-width: 3;
-}
-
-.env-note path {
-  fill: none;
-  stroke: var(--envelope-line);
-  stroke-width: 5;
-  stroke-linecap: round;
-}
-
-@keyframes zv-flap {
-  from {
-    transform: scaleY(1);
-  }
-  to {
-    transform: scaleY(-1);
-  }
-}
-
-@keyframes zv-note {
-  from {
-    opacity: 0;
-    transform: translateY(0);
-  }
-  40% {
-    opacity: 1;
-  }
-  to {
-    opacity: 1;
-    transform: translateY(-46px);
-  }
-}
-
-@keyframes zv-rise {
-  from {
-    opacity: 0;
-    transform: translateY(0.6rem);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes zv-breathe {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.5;
-  }
-}
-
-@keyframes zv-slide {
-  from {
-    background-position: 130% 0;
-  }
-  to {
-    background-position: -30% 0;
-  }
-}
-
-.envelope.is-open .env-flap {
-  animation: zv-flap 600ms cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
-}
-
-.envelope.is-open .env-note {
-  animation: zv-note 750ms 320ms cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
-}
-
-.envelope.is-busy .env-flap {
-  animation: zv-breathe 1.8s ease-in-out infinite;
+.pull-hint {
+  margin-top: -0.25rem;
 }
 
 .sealed-details {
@@ -511,22 +1004,15 @@ details summary {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.5rem;
-}
-
-.unwrap-amount {
-  margin: 0;
-  font-size: 2.1rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  animation: zv-rise 500ms 720ms both;
+  gap: 0.6rem;
+  text-align: center;
 }
 
 /* Scan progress. Indeterminate until the scanner knows the span. */
 progress.scan-bar {
   width: 100%;
   max-width: 22rem;
-  height: 10px;
+  height: 6px;
   border: 0;
   border-radius: 999px;
   background: var(--line);
@@ -541,12 +1027,12 @@ progress.scan-bar::-webkit-progress-bar {
 }
 
 progress.scan-bar::-webkit-progress-value {
-  background: var(--seal);
+  background: var(--gold-deep);
   border-radius: 999px;
 }
 
 progress.scan-bar::-moz-progress-bar {
-  background: var(--seal);
+  background: var(--gold-deep);
   border-radius: 999px;
 }
 
@@ -555,50 +1041,62 @@ progress.scan-bar:indeterminate::-webkit-progress-bar {
   background-image: linear-gradient(
     90deg,
     var(--line) 0 35%,
-    var(--seal) 35% 65%,
+    var(--gold-deep) 35% 65%,
     var(--line) 65% 100%
   );
   background-size: 260% 100%;
   animation: zv-slide 1.3s linear infinite;
 }
 
-.row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 1rem;
+/* A message too long for the note's two lines, written out in full. */
+.letter {
   margin: 0;
+  background: var(--note-hi);
+  color: var(--engrave);
+  border-radius: 6px;
+  padding: 1rem 1.15rem;
+  box-shadow: var(--note-shadow);
 }
 
-/* The Timing block on the done screen: a quiet, monospaced receipt of what this
-   device actually spent, under the money and above nothing. */
-.timing {
-  gap: 0.35rem;
-  padding-top: 0.9rem;
-  border-top: 1px solid var(--line);
-}
-
-.timing-heading {
-  margin: 0;
-  font-size: 0.78rem;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-  color: var(--muted);
-}
-
-.timing .row {
-  font-size: 0.9rem;
-  font-variant-numeric: tabular-nums;
-}
-
-.timing .copy-btn {
-  align-self: flex-start;
+.letter .memo {
+  font-family: var(--display);
+  font-style: italic;
+  font-size: 1.15rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .memo {
   margin: 0;
-  font-size: 1.05rem;
   overflow-wrap: anywhere;
+}
+
+.compact-amount {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.7rem;
+  padding: 0.7rem 1rem;
+  border-radius: 10px;
+  background: var(--note);
+  color: var(--engrave);
+  box-shadow: 0 1px 2px rgba(40, 30, 10, 0.15);
+}
+
+.compact-amount .hint {
+  color: #4f5a6b;
+}
+
+.compact-amount strong {
+  font-family: var(--display);
+  font-size: 1.35rem;
+  font-variant-numeric: lining-nums;
+}
+
+.screen-title {
+  font-size: 1.6rem;
 }
 
 .notes {
@@ -610,13 +1108,24 @@ progress.scan-bar:indeterminate::-webkit-progress-bar {
   gap: 0.9rem;
 }
 
+/* ------------------------------------------------- destinations and send */
+
+/* The destinations: one ledger, ruled, not a stack of identical cards. */
 .next-steps {
   list-style: none;
   padding: 0;
   margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+  overflow: hidden;
+  box-shadow: var(--card-shadow);
+}
+
+.next-steps > li + li {
+  border-top: 1px solid var(--line);
 }
 
 .next-steps button {
@@ -626,9 +1135,39 @@ progress.scan-bar:indeterminate::-webkit-progress-bar {
   gap: 0.25rem;
   width: 100%;
   text-align: left;
-  padding: 0.8rem;
-  background: var(--bg);
+  padding: 1rem 1.1rem 1rem 1.25rem;
+  background: transparent;
   color: var(--text);
+  border: 0;
+  border-radius: 0;
+  position: relative;
+}
+
+.next-steps button:hover:not([disabled]) {
+  background: var(--surface-sunk);
+}
+
+.next-steps button:active:not([disabled]) {
+  transform: none;
+}
+
+.next-steps button[aria-pressed="true"] {
+  background: var(--surface-sunk);
+}
+
+.next-steps button[aria-pressed="true"]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.75rem;
+  bottom: 0.75rem;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--gold-deep);
+}
+
+.next-steps button:focus-visible {
+  outline-offset: -3px;
 }
 
 .next-steps button[disabled] {
@@ -640,75 +1179,30 @@ progress.scan-bar:indeterminate::-webkit-progress-bar {
   font-weight: 600;
 }
 
+.chooser .next-title {
+  font-family: var(--display);
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
 .soon {
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
+  font-size: 0.8rem;
   color: var(--muted);
 }
 
-/* Reduced motion: the same end state, reached instantly. The selectors match the
-   animated ones class for class, so they win without !important. */
-@media (prefers-reduced-motion: reduce) {
-  .envelope.is-open .env-flap,
-  .envelope.is-busy .env-flap,
-  .envelope.is-open .env-note,
-  .unwrap .unwrap-amount,
-  progress.scan-bar:indeterminate,
-  progress.scan-bar:indeterminate::-webkit-progress-bar {
-    animation: none;
-  }
-  .envelope.is-open .env-flap {
-    transform: scaleY(-1);
-  }
-  .envelope.is-open .env-note {
-    opacity: 1;
-    transform: translateY(-46px);
-  }
-  .unwrap .unwrap-amount {
-    opacity: 1;
-    transform: none;
-  }
-  progress.scan-bar:indeterminate,
-  progress.scan-bar:indeterminate::-webkit-progress-bar {
-    background-position: 50% 0;
-  }
-}
-
-/* ------------------------------------------------------------ M3: send it on */
-
-.next-steps button[aria-pressed="true"] {
-  border-color: var(--accent);
-  background: var(--surface);
-}
-
 .dest-panel {
-  padding: 0.75rem 0.2rem 0.2rem;
+  padding: 0 1.1rem 1.1rem 1.25rem;
   gap: 0.6rem;
 }
 
 .dest-panel input[type="text"] {
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-family: var(--mono);
   font-size: 0.85rem;
-}
-
-.check {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.92rem;
-}
-
-.check input {
-  width: 1.1rem;
-  height: 1.1rem;
-  accent-color: var(--accent);
 }
 
 /* The 24 words. Two columns on a phone, four when there is room. */
 .words {
   list-style: none;
-  counter-reset: none;
   margin: 0;
   padding: 0;
   display: grid;
@@ -720,7 +1214,7 @@ progress.scan-bar:indeterminate::-webkit-progress-bar {
   display: flex;
   align-items: baseline;
   gap: 0.45rem;
-  background: var(--bg);
+  background: var(--surface-sunk);
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 0.3rem 0.5rem;
@@ -731,16 +1225,25 @@ progress.scan-bar:indeterminate::-webkit-progress-bar {
   color: var(--muted);
   min-width: 1.1rem;
   text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .word {
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-family: var(--mono);
   font-size: 0.85rem;
   overflow-wrap: anywhere;
 }
 
+@media (min-width: 34rem) {
+  .words {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
 .row.receive strong {
-  font-size: 1.15rem;
+  font-family: var(--display);
+  font-variant-numeric: lining-nums proportional-nums;
+  font-size: 1.3rem;
 }
 
 .stage-list {
@@ -768,15 +1271,14 @@ progress.scan-bar:indeterminate::-webkit-progress-bar {
   color: var(--text);
 }
 
-/* The swap tracker's fourth state: a stage that will not happen, because the
-   rail refunded or failed. Neither ticked nor still running. */
+/* A stage that will not happen, because the rail refunded or failed. */
 .stage-list li[data-state="stopped"] {
   color: var(--muted);
   text-decoration: line-through;
 }
 
 .stage-mark {
-  color: var(--link);
+  color: var(--gold-deep);
   min-width: 1rem;
 }
 
@@ -784,60 +1286,114 @@ progress.scan-bar:indeterminate::-webkit-progress-bar {
   animation: zv-breathe 1.4s ease-in-out infinite;
 }
 
-/* Its own style, not the unwrap's: that one fades in on a delay, which is
-   right for the reveal and wrong for a screen the recipient is already on. */
+.sent-card > .env-stage {
+  margin: 0.25rem auto 0.25rem 0;
+}
+
 .sent-amount {
   margin: 0;
-  font-size: 1.6rem;
+  font-family: var(--display);
+  font-size: 2.2rem;
   font-weight: 700;
-  letter-spacing: -0.02em;
+  line-height: 1.05;
+  font-variant-numeric: lining-nums;
 }
 
-@media (min-width: 34rem) {
-  .words {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
+.done-where {
+  color: var(--text);
+  font-weight: 600;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .stage-list li[data-state="active"] .stage-mark {
-    animation: none;
-  }
+/* The Timing block on the done screen: a quiet receipt of what this device spent. */
+.timing {
+  gap: 0.35rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--line);
 }
 
-/* ----------------------------------------- M4: landing, safety, group table */
-
-h3 {
-  font-size: 0.95rem;
+.timing-heading {
   margin: 0;
-  letter-spacing: -0.01em;
+  font-family: var(--body);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
 }
 
-/* The "we never hold funds" strip: sender's wallet, the chain, their browser.
-   One column on a phone, three where there is room. */
+.timing .row {
+  font-size: 0.9rem;
+}
+
+.timing .copy-btn {
+  align-self: flex-start;
+}
+
+.breakdown {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.breakdown span:last-child {
+  font-weight: 700;
+}
+
+/* ------------------------------------------------------ /how and safety */
+
+.steps {
+  list-style: none;
+  counter-reset: step;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+}
+
+/* Numbered entries with a rule, not a run of identical boxes. */
+.steps li,
+.steps li.card {
+  counter-increment: step;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  background: none;
+  border: 0;
+  border-left: 2px solid var(--line);
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0.1rem 0 0.1rem 1rem;
+}
+
+.steps li h2::before,
+.steps li h3::before {
+  content: counter(step) " ";
+  color: var(--gold-deep);
+  margin-right: 0.15rem;
+}
+
 .strip {
   list-style: none;
-  counter-reset: place;
   margin: 0;
   padding: 0;
   display: grid;
   grid-template-columns: 1fr;
-  gap: 0.6rem;
+  gap: 0.75rem;
 }
 
 .strip li {
-  counter-increment: place;
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
 }
 
-.strip li h3::before {
-  content: counter(place) ". ";
-  color: var(--link);
+.strip li.card {
+  box-shadow: none;
+  background: var(--surface-sunk);
 }
 
-/* Two fields side by side where there is room: amount, then how many. */
 .two-up {
   display: flex;
   flex-direction: column;
@@ -848,19 +1404,11 @@ h3 {
   width: 100%;
 }
 
-/* The safety half of /how gets a rule above it, so it reads as its own page. */
 .safety {
   margin-top: 1rem;
-  padding-top: 1.25rem;
+  padding-top: 1.5rem;
   border-top: 1px solid var(--line);
 }
-
-.steps li h3::before {
-  content: counter(step) ". ";
-  color: var(--link);
-}
-
-/* ------------------------------------------------------------ trust boundary */
 
 .give-up {
   list-style: none;
@@ -868,7 +1416,7 @@ h3 {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.7rem;
+  gap: 0.75rem;
 }
 
 .give-up li {
@@ -878,11 +1426,11 @@ h3 {
 }
 
 .give-up strong {
-  font-size: 0.95rem;
+  font-size: 0.97rem;
 }
 
 .give-up span {
-  font-size: 0.88rem;
+  font-size: 0.9rem;
   color: var(--muted);
 }
 
@@ -890,11 +1438,24 @@ h3 {
   padding-top: 0.2rem;
 }
 
-/* ------------------------------------------------------------- group table */
+@media (min-width: 40rem) {
+  .strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .two-up {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+  .two-up .field:first-child {
+    flex: 1 1 auto;
+  }
+  .count-field {
+    flex: 0 0 9rem;
+  }
+}
 
-/* A table of long strings on a phone: it scrolls sideways rather than being
-   squeezed into unreadable columns, and the CSV is offered right above it for
-   anyone who would rather not scroll at all. */
+/* ------------------------------------------------------------ group table */
+
 .table-scroll {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
@@ -906,8 +1467,6 @@ h3 {
 .group-table {
   border-collapse: collapse;
   width: 100%;
-  /* Wide enough to stay readable, narrow enough to fit the shell on a laptop
-     without clipping. Below that the wrapper scrolls sideways. */
   min-width: 30rem;
   table-layout: auto;
   font-size: 0.85rem;
@@ -929,16 +1488,14 @@ h3 {
 
 .group-table thead th {
   border-top: 0;
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  font-size: 0.8rem;
   color: var(--muted);
   font-weight: 600;
   white-space: nowrap;
 }
 
 .group-table tbody tr:nth-child(even) {
-  background: var(--bg);
+  background: var(--surface-sunk);
 }
 
 .col-index {
@@ -954,441 +1511,589 @@ h3 {
 
 .group-table .cell {
   display: block;
+  font-family: var(--mono);
   font-size: 0.72rem;
   line-height: 1.35;
   overflow-wrap: anywhere;
   max-width: 11rem;
 }
 
-.copy-btn {
-  margin-top: 0.3rem;
+.proving-note {
   font-size: 0.72rem;
-  padding: 0.2rem 0.45rem;
+  opacity: 0.7;
 }
 
-/* ------------------------------------------------------------------ footer */
+/* =================================================================== */
+/*                         THE ENVELOPE                                 */
+/* =================================================================== */
 
-.footer-lines {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
+/*
+ * One stage, three sizes. `has-rise` keeps room above the envelope for the
+ * note to rise into, so opening never moves the page under the reader.
+ */
+.env-stage {
+  --env-w: 22.5rem;
+  position: relative;
+  width: 100%;
+  max-width: var(--env-w);
+  margin-inline: auto;
+}
+
+.env-hero {
+  --env-w: 28rem;
+}
+
+.env-small {
+  --env-w: 10.5rem;
+}
+
+/* The room is a pseudo-element: its percentage padding is then taken from the
+   stage's own width, not from whatever column the stage sits in. */
+.env-stage.has-rise::before,
+.env-stage.is-open::before {
+  content: "";
+  display: block;
+  padding-top: 41%;
+}
+
+.env {
+  position: relative;
+  aspect-ratio: 1.69;
+  perspective: 1100px;
+}
+
+.env-back {
+  position: absolute;
+  inset: 0;
+  border-radius: 10px;
+  background: var(--env-shade);
+  overflow: hidden;
+  box-shadow: var(--obj-shadow);
+}
+
+.env-back::after,
+.env-flap-inside::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: var(--tint-tile);
+  background-size: 46px 46px;
+  opacity: 0.55;
+}
+
+.env-small .env-back::after,
+.env-small .env-flap-inside::after {
+  background-size: 23px 23px;
+}
+
+/* The front pocket: the envelope's body, with the V cut where the flap sits. */
+.env-front {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  border-radius: 10px;
+  background: linear-gradient(180deg, transparent 0 30%, rgba(0, 0, 0, 0.04)), var(--env);
+  clip-path: polygon(0 2%, 50% 64%, 100% 2%, 100% 100%, 0 100%);
+  box-shadow: inset 0 0 0 1px rgba(80, 60, 20, 0.12);
+}
+
+.env-front::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.35), transparent 40%);
+}
+
+/* The flap. Closing: waits for the note to go in. Opening: goes first. */
+.env-flap {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 67%;
+  z-index: 5;
+  pointer-events: none;
+  transform-origin: top center;
+  transform-style: preserve-3d;
+  transform: rotateX(0deg);
+  transition:
+    transform 0.4s cubic-bezier(0.5, 0, 0.2, 1) 0.35s,
+    z-index 0s linear 0.35s;
+}
+
+.env-flap-face,
+.env-flap-inside {
+  position: absolute;
+  inset: 0;
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.env-flap-face {
+  background: linear-gradient(180deg, #e6d8ba, #efe3c8 70%, #f3e9d2);
+}
+
+/* Turned over on its own axis, so its triangle is drawn upside down to land
+   the right way round in the flap's plane: base on the hinge, tip at the seal. */
+.env-flap-inside {
+  clip-path: polygon(0 100%, 100% 100%, 50% 0);
+  transform: rotateX(180deg);
+  background: var(--env-shade);
+  overflow: hidden;
+}
+
+.env-stage.is-open .env-flap {
+  transform: rotateX(178deg);
+  z-index: 1;
+  transition:
+    transform 0.55s cubic-bezier(0.5, 0, 0.2, 1),
+    z-index 0s linear 0.25s;
+}
+
+/* The note, inside the pocket. Opening: it rises once the flap is up. */
+.env-note {
+  position: absolute;
+  left: 6%;
+  right: 6%;
+  top: 8%;
+  z-index: 2;
+  transform: translateY(0);
+  transition: transform 0.45s cubic-bezier(0.5, 0, 0.3, 1);
+}
+
+.env-stage.is-open .env-note {
+  transform: translateY(-96%);
+  transition: transform 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.3s;
+}
+
+/* The seal: stamps last when closing, lifts first when opening. */
+.env-seal {
+  position: absolute;
+  left: 50%;
+  top: 58%;
+  width: 14%;
+  aspect-ratio: 1;
+  translate: -50% -50%;
+  z-index: 6;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, var(--gold-hi), var(--gold) 45%, var(--gold-deep) 100%);
+  box-shadow: 0 2px 0 #8a6006, 0 6px 14px -4px rgba(90, 60, 0, 0.5),
+    inset 0 0 0 3px rgba(255, 255, 255, 0.18);
+  display: grid;
+  place-items: center;
+  color: #5c3f02;
+  transform: scale(1);
+  opacity: 1;
+  transition:
+    transform 0.32s cubic-bezier(0.3, 1.6, 0.5, 1) 0.72s,
+    opacity 0.12s linear 0.72s;
+}
+
+.env-seal svg {
+  width: 58%;
+  height: auto;
+  opacity: 0.8;
+}
+
+.env-stage.is-open .env-seal {
+  transform: scale(1.6);
+  opacity: 0;
+  transition:
+    transform 0.2s ease-in,
+    opacity 0.15s linear;
+}
+
+.env-stage.is-busy .env-seal {
+  animation: zv-seal-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes zv-seal-pulse {
+  0%,
+  100% {
+    box-shadow: 0 2px 0 #8a6006, 0 6px 14px -4px rgba(90, 60, 0, 0.5),
+      0 0 0 0 rgba(244, 183, 40, 0.55);
+  }
+  50% {
+    box-shadow: 0 2px 0 #8a6006, 0 6px 14px -4px rgba(90, 60, 0, 0.5),
+      0 0 0 12px rgba(244, 183, 40, 0);
+  }
+}
+
+/* The postmark, inked onto the front. */
+.postmark {
+  position: absolute;
+  z-index: 6;
+  right: 6%;
+  bottom: 9%;
+  width: 22%;
+  height: auto;
+  color: var(--engrave);
+  transform: rotate(-12deg);
+  opacity: 0.72;
+  mix-blend-mode: multiply;
+  pointer-events: none;
+}
+
+.postmark-ring {
+  font-family: var(--mono);
+  font-size: 8.6px;
+  letter-spacing: 2px;
+}
+
+.postmark-day {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.postmark-year {
+  font-family: var(--display);
+  font-size: 11px;
+}
+
+.env-small .postmark {
+  width: 34%;
+  right: 5%;
+}
+
+.env-small .env-seal {
+  width: 18%;
+}
+
+/* The tear strip and its tab, which is the Open button. */
+.tear {
+  --p: 0;
+  --tab-w: 6.75rem;
+  position: absolute;
+  z-index: 7;
+  left: 4%;
+  right: 4%;
+  top: 5%;
+  height: 2.75rem;
+}
+
+.tear-perf {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  border-top: 2px dashed rgba(90, 70, 30, 0.45);
+}
+
+.tear-done,
+.tear.is-torn::before {
+  position: absolute;
+  left: 0;
+  top: calc(50% - 3px);
+  height: 6px;
+  width: calc(var(--p) * 100%);
+  background: var(--env-slit);
+  border-radius: 3px;
+  box-shadow: inset 0 1px 1px rgba(60, 40, 10, 0.3);
+}
+
+.tear.is-torn::before {
+  content: "";
+  width: 100%;
+}
+
+.tear-tab {
+  position: absolute;
+  top: 0;
+  left: calc(var(--p) * (100% - var(--tab-w)));
+  width: var(--tab-w);
+  height: 2.75rem;
+  padding: 0 0.9rem 0 0.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  border: 0;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--paper);
+  font: 600 1rem/1 var(--body);
+  white-space: nowrap;
+  cursor: grab;
+  touch-action: pan-y;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2), 0 8px 16px -8px rgba(35, 31, 32, 0.8);
+  transition: left 0.3s cubic-bezier(0.3, 1.3, 0.5, 1), transform 0.1s ease;
+}
+
+.tear[data-drag] .tear-tab {
+  transition: none;
+  cursor: grabbing;
+}
+
+.tear-tab:hover {
+  background: #3a3334;
+}
+
+.tear-tab:focus-visible {
+  outline: 3px solid var(--gold);
+  outline-offset: 2px;
+}
+
+/* Three ridges: something to take hold of. */
+.tear-grip {
+  width: 9px;
+  height: 14px;
+  background: linear-gradient(
+    90deg,
+    currentColor 0 1.5px,
+    transparent 1.5px 3.75px,
+    currentColor 3.75px 5.25px,
+    transparent 5.25px 7.5px,
+    currentColor 7.5px 9px
+  );
+  opacity: 0.6;
+}
+
+.env-stage.is-open .tear {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* =================================================================== */
+/*                            THE NOTE                                  */
+/* =================================================================== */
+
+/* Everything inside is sized in container units: one note, any size. */
+.note {
+  container-type: inline-size;
+  perspective: 900px;
+  width: 100%;
+}
+
+.note-card {
+  position: relative;
+  text-align: left;
+  aspect-ratio: 2.05;
+  border-radius: 1.9cqi;
+  overflow: hidden;
+  color: var(--engrave);
+  background: radial-gradient(120% 90% at 30% 50%, var(--note-hi), var(--note) 60%, var(--note-lo));
+  box-shadow: var(--note-shadow);
+  transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+  transition: transform 0.25s ease-out;
+}
+
+.note-card p {
   margin: 0;
 }
 
-@media (min-width: 40rem) {
-  .strip {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+.note-pattern {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.note-microtext {
+  font-family: var(--mono);
+  font-size: 3.4px;
+  letter-spacing: 0.6px;
+  opacity: 0.7;
+}
+
+.note-frame {
+  position: absolute;
+  inset: 1.7cqi;
+  border: 1.2px solid rgba(37, 52, 77, 0.55);
+  border-radius: 1.2cqi;
+}
+
+.note-frame::after {
+  content: "";
+  position: absolute;
+  inset: 0.7cqi;
+  border: 0.6px solid rgba(37, 52, 77, 0.35);
+  border-radius: 0.7cqi;
+}
+
+/* The foil strip: its sheen follows the pointer or the phone. */
+.note-foil {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 38.5%;
+  width: 6%;
+  background:
+    repeating-linear-gradient(90deg, transparent 0 3px, rgba(255, 255, 255, 0.25) 3px 4px),
+    linear-gradient(
+      calc(110deg + var(--fx, 0) * 1deg),
+      #c9962a,
+      #fbe7a1 30%,
+      #d7a33b 45%,
+      #fff3c4 55%,
+      #b98a1f 75%,
+      #e9c868
+    );
+  background-size: 100% 100%, 100% 260%;
+  background-position: 0 0, 0 calc(var(--my, 50) * 1%);
+  mix-blend-mode: multiply;
+  opacity: 0.9;
+}
+
+.note-glare {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    circle at calc(var(--mx, 50) * 1%) calc(var(--my, 50) * 1%),
+    rgba(255, 255, 255, 0.55),
+    transparent 45%
+  );
+  mix-blend-mode: soft-light;
+  pointer-events: none;
+}
+
+.note-from {
+  position: absolute;
+  left: 48%;
+  right: 6%;
+  top: 9.5%;
+  text-align: right;
+  font-family: var(--display);
+  font-style: italic;
+  font-size: 3.7cqi;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.note-denom {
+  position: absolute;
+  right: 6%;
+  top: 15%;
+  max-width: 47%;
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 1cqi;
+  font-family: var(--display);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.note-from + .note-denom {
+  top: 19%;
+}
+
+.note-denom b {
+  font-weight: 700;
+  font-size: min(15cqi, calc(35cqi / var(--ems, 2.2)));
+  font-variant-numeric: lining-nums;
+  letter-spacing: -0.01em;
+}
+
+.note-denom span {
+  font-size: 4.1cqi;
+  font-style: italic;
+}
+
+.note.is-placeholder .note-denom b {
+  opacity: 0.38;
+}
+
+.note-memo {
+  position: absolute;
+  left: 48%;
+  right: 6%;
+  bottom: 25%;
+  font-family: var(--display);
+  font-style: italic;
+  font-size: 4.2cqi;
+  line-height: 1.2;
+  padding-bottom: 0.6cqi;
+  border-bottom: 0.8px solid rgba(37, 52, 77, 0.5);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  min-height: calc(4.2cqi * 1.2 + 0.6cqi);
+}
+
+.note-memo-label {
+  font-family: var(--mono);
+  font-style: normal;
+  font-weight: 500;
+  font-size: 2.2cqi;
+  letter-spacing: 0.04em;
+  margin-right: 1.2cqi;
+  opacity: 0.7;
+}
+
+.note-memo.is-empty .note-memo-text {
+  opacity: 0.5;
+}
+
+.note-serial {
+  position: absolute;
+  left: 5%;
+  bottom: 7.5%;
+  font-family: var(--mono);
+  font-weight: 500;
+  font-size: 2.5cqi;
+  letter-spacing: 0.12em;
+  color: var(--serial);
+}
+
+.note-issuer {
+  position: absolute;
+  right: 6%;
+  bottom: 8.5%;
+  font-family: var(--display);
+  font-style: italic;
+  font-size: 2.7cqi;
+  opacity: 0.8;
+}
+
+/* The note as the wizard's preview: no envelope round it, a slight angle. */
+.preview .note-card {
+  transform: rotate(-1deg) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+}
+
+/* ------------------------------------------------------------- keyframes */
+
+@keyframes zv-breathe {
+  0%,
+  100% {
+    opacity: 1;
   }
-  .two-up {
-    flex-direction: row;
-    align-items: flex-start;
+  50% {
+    opacity: 0.45;
   }
-  .two-up .field:first-child {
-    flex: 1 1 auto;
+}
+
+@keyframes zv-slide {
+  from {
+    background-position: 130% 0;
   }
-  .count-field {
-    flex: 0 0 9rem;
-  }
-  .footer-lines {
-    flex-direction: row;
-    flex-wrap: wrap;
-    gap: 0.2rem 1rem;
+  to {
+    background-position: -30% 0;
   }
 }
 
 /*
- * The core worker's own footer note: which of the two wasm packages is proving.
- * Deliberately the quietest thing on the page -- it explains a slow sweep, it does not
- * ask for anything.
+ * Reduced motion: every state is reached at once. No tilt (the hook does not
+ * run), no slide, no stamp, no pulse.
  */
-.proving-note {
-  font-size: 0.72rem;
-  letter-spacing: 0.04em;
-  opacity: 0.65;
-}
-
-/* ----------------------------------------------------- 2026-10 UX redesign */
-
-/* Visually hidden, still read out: the open page's h1 sits behind the amount. */
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-
-.stack.tight {
-  gap: 0.5rem;
-}
-
-.center-text {
-  text-align: center;
-}
-
-.label.strong {
-  text-transform: none;
-  letter-spacing: 0;
-  font-size: 0.92rem;
-  font-weight: 600;
-  color: var(--text);
-}
-
-h1[tabindex="-1"]:focus {
-  outline: none;
-}
-
-/* Buttons. One primary per screen; secondary is the outlined kind. */
-button.secondary,
-a.button.secondary {
-  background: var(--surface);
-  color: var(--text);
-  border: 1.5px solid var(--text);
-  font-weight: 600;
-  padding: 0.75rem 1rem;
-  flex: 1 1 0;
-  min-width: 0;
-}
-
-a.button {
-  display: block;
-  text-align: center;
-  text-decoration: none;
-  border-radius: 9px;
-}
-
-a.button.primary {
-  background: var(--accent);
-  color: var(--accent-text);
-  border: 1px solid var(--accent);
-  font-weight: 600;
-  padding: 0.8rem 1rem;
-}
-
-.button-row {
-  display: flex;
-  gap: 0.6rem;
-  flex-wrap: wrap;
-}
-
-.button-row > * {
-  flex: 1 1 8rem;
-}
-
-.text-button {
-  background: none;
-  border: 0;
-  padding: 0;
-  color: var(--link);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  font-size: inherit;
-}
-
-/* Landing: the form card is the page. */
-.amount-box {
-  display: flex;
-  align-items: center;
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 0 0.9rem 0 0;
-}
-
-.amount-box:focus-within {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-.amount-input {
-  flex: 1 1 auto;
-  min-width: 0;
-  border: 0;
-  background: transparent;
-  font-size: 2rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  padding: 0.6rem 0.9rem;
-}
-
-.amount-input:focus-visible {
-  outline: none;
-}
-
-.amount-unit {
-  font-size: 1.05rem;
-  color: var(--muted);
-}
-
-.chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  padding-top: 0.25rem;
-}
-
-.chip {
-  border-radius: 999px;
-  padding: 0.4rem 0.9rem;
-  font-size: 0.95rem;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  min-height: 2.5rem;
-}
-
-.chip[aria-pressed="true"] {
-  border-color: var(--seal-deep);
-  background: var(--warn-bg);
-  font-weight: 600;
-}
-
-.group-ask {
-  text-align: center;
-}
-
-.numbered {
-  list-style: none;
-  counter-reset: num;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.55rem;
-}
-
-.numbered li {
-  counter-increment: num;
-  display: flex;
-  align-items: flex-start;
-  gap: 0.7rem;
-}
-
-.numbered li::before {
-  content: counter(num);
-  flex: 0 0 1.6rem;
-  height: 1.6rem;
-  border-radius: 999px;
-  background: var(--seal);
-  color: #231f20;
-  font-weight: 700;
-  font-size: 0.85rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.numbered.small {
-  font-size: 0.92rem;
-  gap: 0.4rem;
-}
-
-.numbered.small li::before {
-  flex-basis: 1.35rem;
-  height: 1.35rem;
-  font-size: 0.75rem;
-}
-
-.landing > section + section {
-  padding-top: 1rem;
-  border-top: 1px solid var(--line);
-}
-
-/* The sender's wizard. */
-.step-of {
-  margin: 0;
-  font-size: 0.88rem;
-  color: var(--muted);
-}
-
-.wizard .envelope {
-  width: min(10rem, 50vw);
-}
-
-.link-full {
-  border-style: dashed;
-  border-color: var(--seal-deep);
-  font-size: 0.85rem;
-  line-height: 1.45;
-  user-select: all;
-}
-
-.pay-qr {
-  align-items: center;
-}
-
-.receipt {
-  display: flex;
-  flex-direction: column;
-}
-
-.receipt .row {
-  padding: 0.6rem 0;
-  border-bottom: 1px solid var(--line);
-  font-variant-numeric: tabular-nums;
-}
-
-.receipt .row.total {
-  font-weight: 700;
-}
-
-.status-card {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 0.8rem 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.status-line {
-  margin: 0;
-  display: flex;
-  align-items: baseline;
-  gap: 0.6rem;
-}
-
-.dot {
-  flex: 0 0 0.7rem;
-  width: 0.7rem;
-  height: 0.7rem;
-  border-radius: 999px;
-  background: var(--seal);
-  animation: zv-breathe 1.6s ease-in-out infinite;
-}
-
-details.extras {
-  border-top: 1px solid var(--line);
-  padding-top: 0.75rem;
-}
-
-details.extras > summary {
-  font-size: 0.92rem;
-}
-
-details.extras[open] > summary {
-  margin-bottom: 0.6rem;
-}
-
-/* What the recipient will see, on every step of the wizard. */
-.preview {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  padding: 0.9rem 1rem;
-  border-radius: var(--radius);
-  background: var(--envelope);
-  border: 1px solid var(--envelope-line);
-  color: #231f20;
-}
-
-.preview-label {
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-  color: #6b635a;
-}
-
-.preview-from {
-  font-size: 0.9rem;
-  color: #6b635a;
-}
-
-.preview-amount {
-  font-size: 1.3rem;
-  letter-spacing: -0.01em;
-}
-
-.preview-note {
-  font-style: italic;
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-}
-
-.preview-note.is-empty {
-  font-style: normal;
-  color: #6b635a;
-  font-size: 0.88rem;
-}
-
-.take-back {
-  padding-top: 0.75rem;
-  border-top: 1px solid var(--line);
-  align-items: flex-start;
-}
-
-/* The open page. */
-.unwrap-from {
-  margin: 0;
-  color: var(--muted);
-  font-size: 1rem;
-}
-
-.note-card {
-  margin: 0;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 0.9rem 1rem;
-}
-
-.note-card .memo {
-  font-style: italic;
-  white-space: pre-wrap;
-}
-
-.compact-amount {
-  margin: 0;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.25rem 0.6rem;
-  padding: 0.6rem 0.9rem;
-  border-radius: var(--radius);
-  background: var(--envelope);
-  color: #231f20;
-}
-
-.compact-amount .hint {
-  color: #6b635a;
-}
-
-.screen-title {
-  font-size: 1.4rem;
-  letter-spacing: -0.02em;
-}
-
-.chooser .next-steps button {
-  background: var(--surface);
-  border-radius: var(--radius);
-  padding: 0.95rem 1rem;
-}
-
-.chooser .next-title {
-  font-size: 1.05rem;
-}
-
-.numbers {
-  font-variant-numeric: tabular-nums;
-  color: var(--text);
-}
-
-.done-where {
-  color: var(--text);
-  font-weight: 600;
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .dot {
-    animation: none;
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+    animation: none !important;
+    scroll-behavior: auto !important;
   }
-}
-
-/* The note slides up out of the open envelope; leave it room above. */
-.unwrap .envelope.is-open {
-  margin-top: 2.5rem;
+  progress.scan-bar:indeterminate,
+  progress.scan-bar:indeterminate::-webkit-progress-bar {
+    background-position: 50% 0;
+  }
 }

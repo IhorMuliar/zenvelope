@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { LIGHTWALLETD, LIGHTWALLETD_FALLBACK, explorerTxUrl } from "../config";
-import { alreadyOpened, revealed, sealed, spendCheck } from "../copy/en";
+import { alreadyOpened, noteCopy, revealed, sealed, spendCheck } from "../copy/en";
 import { loadCore, provingNote } from "../core";
 import type { FoundNote, LoadedCore, Network } from "../core/types";
 import {
@@ -17,7 +17,8 @@ import {
   stripSecretFromUrl,
   unspentNotes,
 } from "../lib/openFlow";
-import { formatCount, formatZecAmount, poolLabel, sumZat, truncateTxid } from "../lib/format";
+import { formatCount, formatZec, formatZecAmount, poolLabel, sumZat, truncateTxid } from "../lib/format";
+import { seedForAddress } from "../lib/guilloche";
 import { parseMemo } from "../lib/memo";
 import { CopyField } from "../components/CopyField";
 import { Envelope } from "../components/Envelope";
@@ -183,13 +184,15 @@ export function Open() {
 
   if (state.phase === "sealed") {
     return (
-      <section className="stack center">
+      <section className="stack center open-sealed">
         <h1>{sealed.title}</h1>
         {badge}
-        <Envelope />
-        <button type="button" className="primary" onClick={onOpen} data-testid="open-envelope">
-          {sealed.open}
-        </button>
+        <Envelope
+          state="sealed"
+          postmark="today"
+          tear={{ onOpen, label: sealed.open, testId: "open-envelope" }}
+        />
+        <p className="hint pull-hint">{noteCopy.pullHint}</p>
         <p className="hint" data-testid="open-fineprint">
           {sealed.reassure}
         </p>
@@ -224,7 +227,7 @@ export function Open() {
       <section className="stack center">
         <h1 data-testid="scanning">{sealed.scanningTitle}</h1>
         {badge}
-        <Envelope busy />
+        <Envelope state="sealed" busy torn postmark="today" />
         <progress
           className="scan-bar"
           max={state.total > 0 ? state.total : undefined}
@@ -348,7 +351,7 @@ function AlreadyOpened({
       <h1>{alreadyOpened.title}</h1>
       {badge}
       <div className="unwrap">
-        <Envelope open />
+        <Envelope state="open" size="small" postmark="sent" />
       </div>
       <div className="card stack">
         <p className="lede">{alreadyOpened.lede}</p>
@@ -509,15 +512,20 @@ function Opened({
         </p>
       ) : (
         <div className="unwrap">
-          <Envelope open />
-          {from ? (
-            <p className="unwrap-from" data-testid="from">
-              {revealed.from(from)}
-            </p>
-          ) : null}
-          <p className="unwrap-amount" data-testid="amount">
-            {formatZecAmount(total)}
-          </p>
+          <Envelope
+            state="open"
+            revealOnMount
+            rise
+            size="hero"
+            note={{
+              amount: formatZec(total),
+              memo: note ?? "",
+              from: from ?? "",
+              seed: seedForAddress(envelopeAddress),
+              tilt: true,
+              testIds: { amount: "amount", from: "from", memo: note ? "memo" : undefined },
+            }}
+          />
           {checking ? (
             <p className="hint" aria-live="polite" data-testid="spend-check">
               {checking.total > 0
@@ -533,11 +541,12 @@ function Opened({
         </div>
       )}
 
-      {!receiving && note ? (
-        <blockquote className="note-card">
-          <p className="memo" data-testid="memo">
-            {note}
-          </p>
+      {/* The note prints two lines of the message. A longer one is written out
+          in full here too; the note's own memo line already carries every word
+          for a screen reader, so this copy is for the eye only. */}
+      {!receiving && note && note.length > LONG_MEMO ? (
+        <blockquote className="letter" aria-hidden="true">
+          <p className="memo">{note}</p>
         </blockquote>
       ) : null}
 
@@ -566,6 +575,9 @@ function Opened({
     </section>
   );
 }
+
+/** Past this many characters the message no longer fits the note's two lines. */
+const LONG_MEMO = 64;
 
 function Row({ label, value, testId }: { label: string; value: string; testId?: string }) {
   return (

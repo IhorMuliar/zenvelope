@@ -32,6 +32,8 @@ import { ShareButton, canShare } from "../components/ShareButton";
 import { group as groupCopy, landing, single as singleCopy, watch as watchCopy } from "../copy/en";
 import { gatewayList } from "../lib/openFlow";
 import { zatToZecString } from "../core/mock";
+import { randomSeed, seedForAddress } from "../lib/guilloche";
+import { prefersReducedMotion } from "../lib/motion";
 import {
   createPaymentWatch,
   finalLink,
@@ -88,6 +90,10 @@ export function Create({ navigate }: CreateProps = {}) {
   const [madeSoFar, setMadeSoFar] = useState<[number, number] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<Created | null>(null);
+  /** The seal animation on the landing object, played while the envelope is made. */
+  const [sealing, setSealing] = useState(false);
+  /** No envelope exists yet, so the landing note is printed from a random seed. */
+  const [landingSeed] = useState(randomSeed);
 
   const testnetUnlocked = useMemo(
     () => new URLSearchParams(window.location.search).get("net") === "test",
@@ -135,6 +141,12 @@ export function Create({ navigate }: CreateProps = {}) {
     }
     setBusy(true);
     setMadeSoFar(c.count > 1 ? [0, c.count] : null);
+    // The note slides in, the flap closes, the seal stamps: about a second,
+    // played while the core works, and skipped when motion is reduced.
+    setSealing(true);
+    const sealed = prefersReducedMotion()
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => window.setTimeout(resolve, SEAL_MS));
     try {
       const loaded = core ?? (await loadCore());
       if (!core) setCore(loaded);
@@ -160,6 +172,7 @@ export function Create({ navigate }: CreateProps = {}) {
         c.count > 1 ? (made, total) => setMadeSoFar([made, total]) : undefined,
       );
 
+      await sealed;
       setCreated({
         rows,
         breakdown: feeBreakdown(v.zat, FLAT_FEE_ZAT),
@@ -172,6 +185,7 @@ export function Create({ navigate }: CreateProps = {}) {
       });
       window.scrollTo?.(0, 0);
     } catch (err) {
+      setSealing(false);
       setError((err as Error).message || "Could not create the envelope.");
     } finally {
       setBusy(false);
@@ -181,6 +195,7 @@ export function Create({ navigate }: CreateProps = {}) {
 
   const reset = () => {
     setCreated(null);
+    setSealing(false);
     setAmount("");
     setCount("1");
     setGroupOpen(false);
@@ -206,8 +221,28 @@ export function Create({ navigate }: CreateProps = {}) {
       ? landing.submit
       : landing.submitMany;
 
+  const typed = amount.trim();
+  const noteAmount = /^\d{1,9}(\.\d{0,8})?$/.test(typed) ? typed : "";
+
   return (
-    <section className="stack landing">
+    <section className="landing">
+      <div className="landing-hero">
+      <div className="landing-object">
+        <Envelope
+          state={sealing ? "sealed" : "open"}
+          rise
+          size="hero"
+          note={{
+            amount: noteAmount || landing.presets[0],
+            memo: message,
+            from,
+            seed: landingSeed,
+            tilt: true,
+            className: noteAmount ? "" : "is-placeholder",
+          }}
+        />
+      </div>
+      <div className="stack landing-copy">
       <div className="stack tight">
         <h1>{landing.headline}</h1>
         <p className="lede" data-testid="landing-subline">
@@ -216,7 +251,7 @@ export function Create({ navigate }: CreateProps = {}) {
       </div>
       {core?.isMock ? <MockBadge /> : null}
 
-      <form className="card stack" onSubmit={onSubmit} aria-label="Make an envelope">
+      <form className="card form-card stack" onSubmit={onSubmit} aria-label="Make an envelope">
         <div className="field">
           <label className="label strong" htmlFor="zv-amount">
             {landing.amountLabel}
@@ -389,7 +424,10 @@ export function Create({ navigate }: CreateProps = {}) {
           </button>
         </p>
       </form>
+      </div>
+      </div>
 
+      <div className="landing-more">
       <section className="stack tight" data-testid="how-steps" aria-labelledby="zv-how">
         <h2 id="zv-how">{landing.howTitle}</h2>
         <ol className="numbered">
@@ -418,9 +456,13 @@ export function Create({ navigate }: CreateProps = {}) {
           {landing.neverAsk}
         </p>
       </section>
+      </div>
     </section>
   );
 }
+
+/** How long the landing seal plays before step 1, in milliseconds. */
+const SEAL_MS = 1050;
 
 function MockBadge() {
   return (
@@ -621,7 +663,19 @@ function SingleResult({
 
   const b = created.breakdown;
   const preview = (
-    <EnvelopePreview amount={b.envelope} message={created.message} from={created.from} />
+    <EnvelopePreview
+      amount={b.envelope}
+      message={created.message}
+      from={created.from}
+      seed={seedForAddress(envelope.address)}
+    />
+  );
+  /** Each step: the step itself, and beside it (below it on a phone) the note. */
+  const layout = (n: 1 | 2 | 3, main: React.ReactNode) => (
+    <section className="wizard" data-testid="wizard" data-step={n}>
+      <div className="stack wizard-main">{main}</div>
+      {preview}
+    </section>
   );
   const badge = isMock ? <MockBadge /> : null;
   const stepOf = (
@@ -631,8 +685,9 @@ function SingleResult({
   );
 
   if (step === 1) {
-    return (
-      <section className="stack wizard" data-testid="wizard" data-step="1">
+    return layout(
+      1,
+      <>
         {stepOf}
         <h1 ref={heading} tabIndex={-1}>
           {singleCopy.saveTitle}
@@ -689,8 +744,7 @@ function SingleResult({
             {singleCopy.savedBlocked}
           </p>
         ) : null}
-        {preview}
-      </section>
+      </>,
     );
   }
 
@@ -704,8 +758,9 @@ function SingleResult({
         {singleCopy.openWallet}
       </a>
     );
-    return (
-      <section className="stack wizard" data-testid="wizard" data-step="2">
+    return layout(
+      2,
+      <>
         {stepOf}
         <h1 ref={heading} tabIndex={-1}>
           {singleCopy.payTitle(b.total)}
@@ -779,8 +834,6 @@ function SingleResult({
           </div>
         </details>
 
-        {preview}
-
         <div className="button-row">
           <button type="button" className="ghost" onClick={() => setStep(1)} data-testid="pay-back">
             {singleCopy.back}
@@ -794,14 +847,15 @@ function SingleResult({
             {singleCopy.paidSkip}
           </button>
         </div>
-      </section>
+      </>,
     );
   }
 
-  return (
-    <section className="stack wizard" data-testid="wizard" data-step="3">
+  return layout(
+    3,
+    <>
       {stepOf}
-      <Envelope />
+      <Envelope state="sealed" size="small" postmark="today" />
       <h1 ref={heading} tabIndex={-1} className="center-text" data-testid="send-title">
         {paid ? singleCopy.sendTitlePaid : singleCopy.sendTitle}
       </h1>
@@ -867,8 +921,6 @@ function SingleResult({
         {envelope.link}
       </code>
 
-      {preview}
-
       <div className="stack tight take-back">
         <button
           type="button"
@@ -897,7 +949,7 @@ function SingleResult({
       <button type="button" className="ghost wide" onClick={onReset} data-testid="again">
         {singleCopy.again}
       </button>
-    </section>
+    </>,
   );
 }
 

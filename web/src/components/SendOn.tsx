@@ -13,6 +13,7 @@
  * React state, and it is gone when the tab is.
  */
 
+import { Envelope } from "./Envelope";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import {
   EXPLORER_NAME,
@@ -509,7 +510,8 @@ export function SendOn({
     });
     return (
       <>
-        <div className="card stack">
+        <div className="card stack sent-card">
+          {dry ? null : <Envelope state="open" size="small" postmark="sent" />}
           <h2 data-testid="sent-heading">{dry ? "Dry run complete." : "Sent."}</h2>
           <p className="sent-amount" data-testid="sent-amount">
             {formatZecAmount(received)}
