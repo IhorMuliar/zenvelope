@@ -375,16 +375,19 @@ fn throw(message: impl AsRef<str>) -> JsValue {
 }
 
 /// The JS-visible result of [`derive`].
-#[wasm_bindgen(getter_with_clone)]
+#[wasm_bindgen]
 pub struct DerivedAddress {
+    #[wasm_bindgen(getter_with_clone)]
     pub address: String,
+    #[wasm_bindgen(getter_with_clone)]
     pub ufvk: String,
     pub diversifier_index: f64,
 }
 
 /// The JS-visible result of [`parse_fragment`](parse_fragment_js).
-#[wasm_bindgen(getter_with_clone)]
+#[wasm_bindgen]
 pub struct ParsedFragment {
+    #[wasm_bindgen(getter_with_clone)]
     pub secret: String,
     pub birthday: Option<u32>,
 }
@@ -503,11 +506,14 @@ pub fn classify_address_js(address: &str, network: &str) -> Result<AddressClassi
 }
 
 /// The JS-visible result of [`new_wallet`](new_wallet_js).
-#[wasm_bindgen(getter_with_clone)]
+#[wasm_bindgen]
 pub struct NewWallet {
     /// 24 English BIP-39 words. This is the money: it is never sent anywhere.
+    #[wasm_bindgen(getter_with_clone)]
     pub mnemonic: String,
+    #[wasm_bindgen(getter_with_clone)]
     pub address: String,
+    #[wasm_bindgen(getter_with_clone)]
     pub ufvk: String,
     pub birthday: u32,
 }
