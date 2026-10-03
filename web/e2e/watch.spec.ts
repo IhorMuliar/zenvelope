@@ -11,9 +11,10 @@
  * scans in the core worker run on real time.
  *
  * What it proves:
- *   - single: "Waiting for your payment", two empty looks, then "Paid: … at block
- *     H" and a final link ending `.H`, with the original link kept and marked
- *     slower to open;
+ *   - single: "Waiting for your payment", two empty looks, then the wizard moves
+ *     to step 3 by itself with "Paid. Now send it." and the block it arrived
+ *     in. The one link shown is the one the sender saved: there is no second,
+ *     "final" link on the single-envelope screens any more;
  *   - group: every row gets `paid_height` and `final_link` in the table and in a
  *     re-downloaded CSV, which before the payments had both columns empty;
  *   - nothing stored, no secret in any request, never the drainer word.
@@ -100,7 +101,7 @@ async function expectClean(page: Page, requests: string[], secrets: string[]) {
 }
 
 describeOnMock("payment watch on the create page", () => {
-  test("one envelope: waits, then hands out the final link", async ({ page }) => {
+  test("one envelope: waits, then moves on to sharing the saved link", async ({ page }) => {
     await page.clock.install();
     const requests = await pinTip(page);
     await page.goto("/");
@@ -109,7 +110,11 @@ describeOnMock("payment watch on the create page", () => {
 
     const original = (await page.getByTestId("envelope-link").innerText()).trim();
     expect(original).toMatch(new RegExp(`/e#[A-Za-z0-9_-]{43}\\.${TIP}$`));
-    await expect(page.getByTestId("watch-waiting")).toHaveText("Waiting for your payment");
+    await page.getByTestId("saved-link").check();
+    await page.getByTestId("to-pay").click();
+    await expect(page.getByTestId("watch-waiting")).toHaveText(
+      "Waiting for your payment. Usually about a minute.",
+    );
     await expect(page.getByTestId("watch-status")).toContainText("First look in about 30 seconds");
 
     await nextRound(page, 30_000, 1);
@@ -118,20 +123,20 @@ describeOnMock("payment watch on the create page", () => {
     await expect(page.getByTestId("watch-card")).toHaveAttribute("data-paid", "no");
     await nextRound(page, 45_000, 3);
 
+    // The payment moves the wizard on to step 3 by itself.
+    await expect(page.getByTestId("step-of")).toHaveText("Step 3 of 3");
+    await expect(page.getByTestId("send-title")).toHaveText("Paid. Now send it.");
     await expect(page.getByTestId("watch-paid")).toHaveText(
-      `Paid: 0.0013 ZEC arrived at block ${PAID_HEIGHT}`,
+      `0.0013 ZEC arrived in block ${PAID_HEIGHT}.`,
     );
-    const final = (await page.getByTestId("final-link").innerText()).trim();
     const secret = original.split("#")[1].split(".")[0];
-    expect(final).toBe(original.replace(`.${TIP}`, `.${PAID_HEIGHT}`));
-    expect(final.endsWith(`#${secret}.${PAID_HEIGHT}`)).toBe(true);
-    // The original is still there, still the same string, and marked slower.
-    await expect(page.getByTestId("envelope-link")).toHaveText(original);
-    await expect(page.getByText("Original link: still works, slower to open")).toBeVisible();
-    await expect(page.getByTestId("original-slower")).toContainText(`block ${TIP}`);
-    // The optional QR of the final link.
-    await page.getByTestId("final-qr").locator("summary").click();
-    await expect(page.getByTestId("final-qr").locator("canvas")).toBeVisible();
+    // One link only: the one that was saved, unchanged. No "final" link beside it.
+    await expect(page.getByTestId("share-link")).toHaveText(original);
+    await expect(page.getByTestId("final-link")).toHaveCount(0);
+    await expect(page.getByTestId("original-slower")).toHaveCount(0);
+    // The in-person QR, of that same link.
+    await page.getByTestId("show-qr").click();
+    await expect(page.getByTestId("link-qr").locator("canvas")).toBeVisible();
 
     await expectClean(page, requests, [secret]);
   });
@@ -141,6 +146,7 @@ describeOnMock("payment watch on the create page", () => {
     const requests = await pinTip(page);
     await page.goto("/");
     await page.getByTestId("amount").fill("0.01");
+    await page.getByTestId("group-toggle").click();
     await page.getByTestId("count").fill("2");
     await page.getByTestId("create").click();
     await expect(page.getByTestId("group-row")).toHaveCount(2);

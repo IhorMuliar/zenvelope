@@ -48,8 +48,8 @@ describeOnMock("two-phase open: reveal first, then verify", () => {
     mkdirSync(DOCS, { recursive: true });
     await page.screenshot({ path: resolve(DOCS, "two-phase-checking-mock.png"), fullPage: true });
 
-    // The walk ends: the check line goes, the send-on flow arrives.
-    await expect(page.getByTestId("dest-address")).toBeVisible({ timeout: 10_000 });
+    // The walk ends: the check line goes, "Receive it" arrives.
+    await expect(page.getByTestId("receive-it")).toBeVisible({ timeout: 10_000 });
     await expect(page.getByTestId("spend-check")).toHaveCount(0);
     await expect(page.getByTestId("send-on-waiting")).toHaveCount(0);
     await expect(page.getByTestId("amount")).toHaveText("0.0013 ZEC");
@@ -75,6 +75,6 @@ describeOnMock("two-phase open: reveal first, then verify", () => {
     await expect(page.getByTestId("scanning")).toBeVisible();
     await expect(page.getByTestId("amount")).toHaveText("0.0013 ZEC", { timeout: 10_000 });
     await expect(page.getByTestId("spend-check")).toHaveCount(0);
-    await expect(page.getByTestId("dest-address")).toBeVisible();
+    await expect(page.getByTestId("receive-it")).toBeVisible();
   });
 });

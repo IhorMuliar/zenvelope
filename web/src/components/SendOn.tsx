@@ -33,7 +33,14 @@ import {
 import { DRY_RUN_COPY, isDryRun, rawTxBytes } from "../lib/dryRun";
 import { gatewayList } from "../lib/openFlow";
 import { formatCount, formatZecAmount, truncateMiddle } from "../lib/format";
-import { solanaExit as swapCopy, transparentBoundary as transparentCopy } from "../copy/en";
+import {
+  doneCopy,
+  exchangeBoundary as exchangeCopy,
+  receive as copy,
+  revealed,
+  solanaExit as swapCopy,
+  transparentBoundary as transparentCopy,
+} from "../copy/en";
 import { appFeeBps, effectiveCost, formatAssetAmount, formatUsd } from "../lib/oneclick";
 import {
   FUNDS_SAFE_COPY,
@@ -77,7 +84,13 @@ export const SEND_TIMING_COPY =
 
 export const RESTORE_COPY = "Restore in Zodl or Zingo with these words and this birthday height";
 
-type Choice = "address" | "wallet" | "solana" | null;
+/**
+ * Where the money goes, in the order the chooser lists them: an exchange
+ * account, USDC on Solana, a Zcash wallet app, and a wallet made in this page.
+ * The exchange and the app both end in a pasted Zcash address; they differ in
+ * the help around the box and in the words of the transparent gate.
+ */
+type Choice = "exchange" | "solana" | "app" | "wallet" | null;
 
 interface Props {
   core: LoadedCore;
@@ -112,6 +125,23 @@ interface Props {
    * chain now says instead of a retry that cannot succeed.
    */
   onCheckAgain?: () => void;
+  /**
+   * Whether the recipient has pressed "Receive it". Until then this renders only
+   * that button (or the too-small card), while the proving key warms underneath.
+   */
+  started?: boolean;
+  onStart?: () => void;
+  /** Back from the destinations to the opened envelope. */
+  onBackToEnvelope?: () => void;
+}
+
+/** `?debug=1` shows the Timing block on the done screen, for our own measurements. */
+function isDebug(): boolean {
+  try {
+    return new URLSearchParams(window.location.search).get("debug") === "1";
+  } catch {
+    return false;
+  }
 }
 
 export function SendOn({
@@ -123,6 +153,9 @@ export function SendOn({
   envelopeAddress,
   openMs = null,
   onCheckAgain,
+  started = true,
+  onStart,
+  onBackToEnvelope,
 }: Props) {
   const [state, dispatch] = useReducer(sendReducer, initialSendState);
   const [choice, setChoice] = useState<Choice>(null);
@@ -170,6 +203,7 @@ export function SendOn({
    * at mount, so nothing can flip it under a sweep that is already running.
    */
   const dryRun = useMemo(() => isDryRun(), []);
+  const debug = useMemo(isDebug, []);
 
   // Every note in the envelope, added up: one sweep spends the lot.
   const inEnvelopeZat = useMemo(
@@ -228,8 +262,7 @@ export function SendOn({
     };
   }, [wallet, core, network]);
 
-  const active =
-    choice === "wallet" ? walletDest : choice === "address" || choice === "solana" ? dest : null;
+  const active = choice === "wallet" ? walletDest : choice === null ? null : dest;
   const destination = active?.input.trim() ?? "";
   const amounts = sweepAmounts(
     inEnvelopeZat,
@@ -249,6 +282,8 @@ export function SendOn({
     SWEEP_FEE_ZAT,
     notes.length,
   ).receiveZat;
+  /** The Zcash side of a Solana exit: network fee plus service fee, before the swap. */
+  const swapZcashFeesZat = inEnvelopeZat - swapInputZat;
 
   /**
    * The rail's deposit address becomes the destination, classified by our own
@@ -301,8 +336,8 @@ export function SendOn({
    * the Solana exit, which has its own boundary — and a generated wallet is
    * always unified.
    */
-  const needsTransparentGate =
-    choice === "address" && active?.kind === "transparent" && !transparentAck;
+  const pastesAddress = choice === "exchange" || choice === "app";
+  const needsTransparentGate = pastesAddress && active?.kind === "transparent" && !transparentAck;
 
   /* ------------------------------------------------------------- the sweep */
 
@@ -479,6 +514,14 @@ export function SendOn({
           <p className="sent-amount" data-testid="sent-amount">
             {formatZecAmount(received)}
           </p>
+          {dry ? null : (
+            <div className="stack tight" aria-live="polite">
+              <p className="lede done-where" data-testid="done-where">
+                {doneCopy[choice ?? "app"].where}
+              </p>
+              <p data-testid="done-next">{doneCopy[choice ?? "app"].next}</p>
+            </div>
+          )}
           <CopyField
             label="Transaction"
             value={state.result.txid}
@@ -532,6 +575,7 @@ export function SendOn({
           ) : (
             <p data-testid="envelope-empty">The envelope is now empty.</p>
           )}
+          {debug ? (
           <div className="timing stack" data-testid="timing">
             <h3 className="timing-heading">Timing</h3>
             {rows.map((row) => (
@@ -550,6 +594,7 @@ export function SendOn({
               testId="copy-timing"
             />
           </div>
+          ) : null}
         </div>
         {/*
           Only a real broadcast has anything for the rail to watch for — and only
@@ -648,7 +693,7 @@ export function SendOn({
         ) : null}
         {amounts.ok ? (
           <button type="button" className="primary" onClick={() => void send()} data-testid="send-it-on">
-            Send it on
+            {copy.sendTo[choice ?? "app"]}
           </button>
         ) : (
           <p className="error" data-testid="too-small">
@@ -679,6 +724,7 @@ export function SendOn({
       <SolanaExit
         amountZat={swapInputZat}
         envelopeAddress={envelopeAddress}
+        zcashFeesZat={swapZcashFeesZat}
         classify={core.classify_address}
         network={network}
         onPlan={(plan) => void onSwapPlan(plan)}
@@ -695,9 +741,9 @@ export function SendOn({
   if (atTransparentGate) {
     return (
       <TrustBoundary
-        content={transparentCopy}
-        testId="transparent-boundary"
-        continueLabel={transparentCopy.continue}
+        content={choice === "exchange" ? exchangeCopy : transparentCopy}
+        testId={choice === "exchange" ? "exchange-boundary" : "transparent-boundary"}
+        continueLabel={choice === "exchange" ? exchangeCopy.continue : transparentCopy.continue}
         acknowledged={transparentAck}
         onAcknowledgedChange={setTransparentAck}
         onContinue={() => {
@@ -709,8 +755,13 @@ export function SendOn({
     );
   }
 
-  const onPickAddress = () => {
-    setChoice("address");
+  /** Exchange and app share the pasted-address box; switching clears it. */
+  const onPickPaste = (next: "exchange" | "app") => {
+    if (choice !== next) {
+      setDest(emptyDestination);
+      setTransparentAck(false);
+    }
+    setChoice(next);
     setWallet(null);
     setWroteDown(false);
     // A destination that is not the Solana exit's has no swap attached to it.
@@ -735,9 +786,71 @@ export function SendOn({
     }
   };
 
+  // Before "Receive it": one button, and the keys warming underneath it.
+  if (!started) {
+    return (
+      <button type="button" className="primary" onClick={onStart} data-testid="receive-it">
+        {revealed.receive}
+      </button>
+    );
+  }
+
+  /** The address box, for the two destinations that end in a pasted Zcash address. */
+  const addressPanel = (label: string, placeholder: string) => (
+    <>
+      <label className="field">
+        <span className="label strong">{label}</span>
+        <input
+          type="text"
+          inputMode="text"
+          autoComplete="off"
+          spellCheck={false}
+          value={dest.input}
+          placeholder={placeholder}
+          onChange={(e) => {
+            const input = e.target.value;
+            const id = ++destId.current;
+            // The transparent acknowledgement belongs to the address that
+            // was on screen when it was ticked, so typing takes it back.
+            setTransparentAck(false);
+            // The typed text has to show at once; the verdict lands when the
+            // worker answers, and only if nothing newer has been typed since.
+            setDest({ ...emptyDestination, input });
+            void classifyDestinationAsync(input, core.classify_address, network).then((d) => {
+              if (id === destId.current) setDest(d);
+            });
+          }}
+          data-testid="dest-input"
+        />
+      </label>
+      {dest.message ? (
+        <p
+          className={dest.status === "error" ? "error" : dest.status === "warn" ? "warn" : "hint"}
+          data-status={dest.status}
+          aria-live="polite"
+          data-testid="dest-feedback"
+        >
+          {dest.message}
+        </p>
+      ) : null}
+      {/* The core's own words, when it had any: the reason a wrong-network
+          address is refused is the reason, not a guess at the prefix (L10). */}
+      {dest.reason ? (
+        <p className="fine" data-testid="dest-reason">
+          {dest.reason}
+        </p>
+      ) : null}
+    </>
+  );
+
+  const swapNumbers =
+    swapInputZat > 0n
+      ? swapCopy.cardNumbers(formatZecAmount(swapInputZat), formatZecAmount(swapZcashFeesZat))
+      : null;
+
   return (
-    <div className="card stack">
-      <h2>Where should it go?</h2>
+    <div className="stack chooser">
+      <h2 className="screen-title">{copy.title}</h2>
       {/* A swap reservation we refused to sweep to, said out loud, with a way to
           try the exit again (L9/M6). */}
       {swapError ? (
@@ -758,13 +871,6 @@ export function SendOn({
           </button>
         </div>
       ) : null}
-      <p className="hint" data-testid="warm-status">
-        {warm === "warming"
-          ? `Preparing keys… ${WARM_ESTIMATE}`
-          : warm === "ready"
-            ? "Keys ready"
-            : "The keys will be built when you send."}
-      </p>
       {notes.length > 1 ? (
         <p className="hint" data-testid="multi-note">
           All {notes.length} payments go in one transaction, added up above.
@@ -775,63 +881,71 @@ export function SendOn({
         <li>
           <button
             type="button"
-            onClick={onPickAddress}
-            aria-pressed={choice === "address"}
+            onClick={() => onPickPaste("exchange")}
+            aria-pressed={choice === "exchange"}
+            aria-expanded={choice === "exchange"}
+            data-testid="dest-exchange"
+          >
+            <span className="next-title">{copy.exchangeTitle}</span>
+            <span className="hint">{copy.exchangeHint}</span>
+          </button>
+          {choice === "exchange" ? (
+            <div className="stack dest-panel">
+              <p className="hint">{copy.exchangeHow}</p>
+              {addressPanel(copy.exchangeLabel, "t1… or u1…")}
+            </div>
+          ) : null}
+        </li>
+
+        {/*
+          Never the headline. Tapping it does not start a swap: it opens the
+          trust-boundary screen, whose tick is the only way further. The card
+          carries the numbers it can know already; the quote carries the rest.
+        */}
+        <li>
+          <button
+            type="button"
+            onClick={() => {
+              setChoice("solana");
+              setWallet(null);
+              setWroteDown(false);
+              setDest(emptyDestination);
+              setSwap(null);
+              setSwapError(null);
+            }}
+            aria-pressed={choice === "solana"}
+            data-testid="dest-solana"
+          >
+            <span className="next-title">{swapCopy.cardTitle}</span>
+            <span className="hint">{swapCopy.cardHint}</span>
+            <span className="hint">{swapCopy.cardBody}</span>
+            {swapNumbers ? (
+              <span className="hint numbers" data-testid="dest-solana-numbers">
+                {swapNumbers}
+              </span>
+            ) : null}
+          </button>
+        </li>
+
+        <li>
+          <button
+            type="button"
+            onClick={() => onPickPaste("app")}
+            aria-pressed={choice === "app"}
+            aria-expanded={choice === "app"}
             data-testid="dest-address"
           >
-            <span className="next-title">A Zcash address</span>
-            <span className="hint">
-              Paste any Zcash address and the money moves there, still shielded.
-            </span>
+            <span className="next-title">{copy.appTitle}</span>
+            <span className="hint">{copy.appHint}</span>
           </button>
-          {choice === "address" ? (
+          {choice === "app" ? (
             <div className="stack dest-panel">
-              <label className="field">
-                <span className="label">Zcash address</span>
-                <input
-                  type="text"
-                  inputMode="text"
-                  autoComplete="off"
-                  spellCheck={false}
-                  value={dest.input}
-                  placeholder="u1…"
-                  onChange={(e) => {
-                    const input = e.target.value;
-                    const id = ++destId.current;
-                    // The transparent acknowledgement belongs to the address that
-                    // was on screen when it was ticked, so typing takes it back.
-                    setTransparentAck(false);
-                    // The typed text has to show at once; the verdict lands when the
-                    // worker answers, and only if nothing newer has been typed since.
-                    setDest({ ...emptyDestination, input });
-                    void classifyDestinationAsync(
-                      input,
-                      core.classify_address,
-                      network,
-                    ).then((d) => {
-                      if (id === destId.current) setDest(d);
-                    });
-                  }}
-                  data-testid="dest-input"
-                />
-              </label>
-              {dest.message ? (
-                <p
-                  className={dest.status === "error" ? "error" : dest.status === "warn" ? "warn" : "hint"}
-                  data-status={dest.status}
-                  aria-live="polite"
-                  data-testid="dest-feedback"
-                >
-                  {dest.message}
-                </p>
-              ) : null}
-              {/* The core's own words, when it had any: the reason a wrong-network
-                  address is refused is the reason, not a guess at the prefix (L10). */}
-              {dest.reason ? (
-                <p className="fine" data-testid="dest-reason">
-                  {dest.reason}
-                </p>
-              ) : null}
+              <ol className="numbered small" data-testid="app-steps">
+                {copy.appSteps.map((step) => (
+                  <li key={step}>{step}</li>
+                ))}
+              </ol>
+              {addressPanel(copy.appLabel, "u1…")}
             </div>
           ) : null}
         </li>
@@ -841,12 +955,11 @@ export function SendOn({
             type="button"
             onClick={() => void onPickWallet()}
             aria-pressed={choice === "wallet"}
+            aria-expanded={choice === "wallet"}
             data-testid="dest-wallet"
           >
-            <span className="next-title">A new wallet in this browser</span>
-            <span className="hint">
-              We generate a fresh Zcash wallet here and hand you the seed words to keep.
-            </span>
+            <span className="next-title">{copy.pageWalletTitle}</span>
+            <span className="hint">{copy.pageWalletHint}</span>
           </button>
           {choice === "wallet" ? (
             <div className="stack dest-panel">
@@ -857,9 +970,9 @@ export function SendOn({
               ) : null}
               {wallet ? (
                 <>
-                  <p className="hint">
-                    These 24 words are the wallet. Write them down now: they are shown here once
-                    and are saved nowhere.
+                  <p className="hint">{copy.pageWalletWords}</p>
+                  <p className="warn" data-testid="wallet-warn">
+                    {copy.pageWalletWarn}
                   </p>
                   <ol className="words" data-testid="wallet-words">
                     {wallet.mnemonic.split(" ").map((word, i) => (
@@ -869,6 +982,9 @@ export function SendOn({
                       </li>
                     ))}
                   </ol>
+                  <p className="hint" data-testid="wallet-later">
+                    {copy.pageWalletLater}
+                  </p>
                   <CopyField
                     label="Address"
                     value={wallet.address}
@@ -889,35 +1005,12 @@ export function SendOn({
                       onChange={(e) => setWroteDown(e.target.checked)}
                       data-testid="wallet-confirm"
                     />
-                    <span>I wrote these down</span>
+                    <span>{copy.pageWalletCheckbox}</span>
                   </label>
                 </>
               ) : null}
             </div>
           ) : null}
-        </li>
-
-        {/*
-          Third of three, and never the headline. Tapping it does not start a swap:
-          it opens the trust-boundary screen, whose tick is the only way further.
-        */}
-        <li>
-          <button
-            type="button"
-            onClick={() => {
-              setChoice("solana");
-              setWallet(null);
-              setWroteDown(false);
-              setDest(emptyDestination);
-              setSwap(null);
-              setSwapError(null);
-            }}
-            aria-pressed={choice === "solana"}
-            data-testid="dest-solana"
-          >
-            <span className="next-title">{swapCopy.cardTitle}</span>
-            <span className="hint">{swapCopy.cardBody}</span>
-          </button>
         </li>
       </ul>
 
@@ -940,8 +1033,20 @@ export function SendOn({
         }}
         data-testid="to-review"
       >
-        Continue
+        {copy.continue}
       </button>
+      <p className="fine" data-testid="warm-status">
+        {warm === "warming"
+          ? `Preparing keys… ${WARM_ESTIMATE}`
+          : warm === "ready"
+            ? "Keys ready"
+            : "The keys will be built when you send."}
+      </p>
+      {onBackToEnvelope ? (
+        <button type="button" className="ghost wide" onClick={onBackToEnvelope} data-testid="receive-back">
+          {copy.back}
+        </button>
+      ) : null}
     </div>
   );
 }

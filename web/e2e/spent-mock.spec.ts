@@ -55,6 +55,7 @@ describeOnMock("spent detection: the screens", () => {
     await expect(page.getByTestId("dest-wallet")).toHaveCount(0);
     await expect(page.getByTestId("dest-solana")).toHaveCount(0);
     await expect(page.getByTestId("send-it-on")).toHaveCount(0);
+    await expect(page.getByTestId("receive-it")).toHaveCount(0);
     expect((await page.locator("body").innerText()).toLowerCase()).not.toContain("claim");
 
     mkdirSync(DOCS, { recursive: true });

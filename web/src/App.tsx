@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Create } from "./pages/Create";
 import { Open } from "./pages/Open";
 import { How } from "./pages/How";
+import { TakeBack } from "./pages/TakeBack";
 import { footer } from "./copy/en";
 
 function currentPath(): string {
@@ -46,25 +47,32 @@ export function App() {
             navigate("/");
           }}
         >
-          Zenvelope
+          <img src="/logo.svg" alt="" width="28" height="28" className="logo" />
+          <span>Zenvelope</span>
         </a>
-        <nav>
+        <nav aria-label="Main">
           {link("/how", "How it works")}
-          <a href={footer.sourceUrl} rel="noreferrer noopener">
-            Source
-          </a>
+          {link("/back", "Take one back")}
         </nav>
       </header>
 
       <main>
-        {path === "/e" ? <Open /> : path === "/how" ? <How /> : <Create />}
+        {path === "/e" ? (
+          <Open />
+        ) : path === "/how" ? (
+          <How />
+        ) : path === "/back" ? (
+          <TakeBack />
+        ) : (
+          <Create navigate={navigate} />
+        )}
       </main>
 
       {/*
         Three lines, each of which a judge can check. The repo link is the
         evidence for the licence line, the track line says who this was built for,
         and "No analytics. No cookies." is a statement of fact about a static
-        build that ships neither — not a promise about the future.
+        build that ships neither, not a promise about the future.
       */}
       <footer className="site-footer" data-testid="site-footer">
         <p className="footer-lines">

@@ -7,6 +7,8 @@ interface Props {
   /** What the button says before it is pressed. "Copy" unless a caller says otherwise. */
   face?: string;
   testId?: string;
+  /** Overrides the small table-cell look, for a full-size button. */
+  className?: string;
 }
 
 /**
@@ -16,7 +18,13 @@ interface Props {
  * The clipboard is the only place the value goes. Nothing is logged, nothing is
  * stored, and the fallback path removes its textarea before it returns.
  */
-export function CopyButton({ value, label, face = "Copy", testId }: Props) {
+export function CopyButton({
+  value,
+  label,
+  face = "Copy",
+  testId,
+  className = "ghost copy-btn",
+}: Props) {
   const [copied, setCopied] = useState(false);
   const timer = useRef<number | undefined>(undefined);
 
@@ -39,7 +47,7 @@ export function CopyButton({ value, label, face = "Copy", testId }: Props) {
   };
 
   return (
-    <button type="button" className="ghost copy-btn" aria-label={label} data-testid={testId} onClick={copy}>
+    <button type="button" className={className} aria-label={label} data-testid={testId} onClick={copy}>
       {copied ? "Copied" : face}
     </button>
   );

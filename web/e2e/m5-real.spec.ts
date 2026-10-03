@@ -205,6 +205,7 @@ describeReal("M5: the Solana exit against the live 1Click API, dry run", () => {
 
     await page.getByTestId("open-envelope").click();
     await expect(page.getByTestId("amount")).toHaveText(ENVELOPE, { timeout: 300_000 });
+    await page.getByTestId("receive-it").click();
 
     /* ------------------- 1. the product's own path, with a generated keypair */
 

@@ -4,12 +4,14 @@ import {
   LIGHTWALLETD,
   LIGHTWALLETD_FALLBACK,
   MAX_MEMO_BYTES,
+  NETWORK_FEE_ZAT,
   SENDER_WALLETS,
 } from "../config";
 import type { LoadedCore, Network } from "../core/types";
 import { loadCore } from "../core";
-import { breakdownLines, feeBreakdown, validateAmount, type Breakdown } from "../lib/amount";
-import { memoByteLength, truncateMiddle } from "../lib/format";
+import { feeBreakdown, validateAmount, type Breakdown } from "../lib/amount";
+import { formatZec, memoByteLength, truncateMiddle } from "../lib/format";
+import { MAX_FROM_CHARS, composeMemo } from "../lib/memo";
 import { fetchChainHeight } from "../lib/grpcweb";
 import {
   MAX_ENVELOPES,
@@ -23,7 +25,10 @@ import {
 } from "../lib/group";
 import { CopyField } from "../components/CopyField";
 import { CopyButton } from "../components/CopyButton";
+import { Envelope } from "../components/Envelope";
+import { EnvelopePreview } from "../components/EnvelopePreview";
 import { Qr } from "../components/Qr";
+import { ShareButton, canShare } from "../components/ShareButton";
 import { group as groupCopy, landing, single as singleCopy, watch as watchCopy } from "../copy/en";
 import { gatewayList } from "../lib/openFlow";
 import { zatToZecString } from "../core/mock";
@@ -42,7 +47,7 @@ import {
  *
  * One envelope or fifty, the shape is the same: the difference is only which
  * screen renders it. Every secret in `rows` lives in this React state and in
- * nothing else — not localStorage, not a query string, not a log, not a
+ * nothing else: not localStorage, not a query string, not a log, not a
  * request. Leaving the page loses them, and that is the design.
  */
 interface Created {
@@ -52,16 +57,26 @@ interface Created {
   birthday: number | null;
   heightSource: string | null;
   network: Network;
+  /** The message as typed, trimmed, without the From line. */
   message: string;
+  /** The sender's name as typed, or "". */
+  from: string;
   /** The core that made them, which the payment watch asks to look for the payment. */
   core: LoadedCore;
 }
 
-export function Create() {
+interface CreateProps {
+  /** In-app navigation, for the "how it works" link under the form. */
+  navigate?: (to: string) => void;
+}
+
+export function Create({ navigate }: CreateProps = {}) {
   const [core, setCore] = useState<LoadedCore | null>(null);
   const [amount, setAmount] = useState("");
   const [count, setCount] = useState("1");
+  const [groupOpen, setGroupOpen] = useState(false);
   const [message, setMessage] = useState("");
+  const [from, setFrom] = useState("");
   const [busy, setBusy] = useState(false);
   /**
    * How far a group is: `[made, total]`, or null when nothing is being made.
@@ -91,9 +106,12 @@ export function Create() {
   }, []);
 
   const validation = amount.trim() === "" ? null : validateAmount(amount);
-  const countCheck = validateCount(count);
-  // The memo limit is a byte limit, so the counter has to encode to count.
-  const messageBytes = memoByteLength(message.trim());
+  const countCheck = groupOpen ? validateCount(count) : ({ ok: true, count: 1 } as const);
+  // The memo limit is a byte limit over everything the memo will carry: the
+  // message and the From line together.
+  const memo = composeMemo(message, from);
+  const memoBytes = memoByteLength(memo);
+  const memoTooLong = memoBytes > MAX_MEMO_BYTES;
   const preview =
     validation && validation.ok ? feeBreakdown(validation.zat, FLAT_FEE_ZAT) : null;
   const n = countCheck.ok ? countCheck.count : 1;
@@ -106,15 +124,13 @@ export function Create() {
       setError(v.error);
       return;
     }
-    const c = validateCount(count);
+    const c = groupOpen ? validateCount(count) : ({ ok: true, count: 1 } as const);
     if (!c.ok) {
       setError(c.error);
       return;
     }
-    if (memoByteLength(message.trim()) > MAX_MEMO_BYTES) {
-      setError(
-        `The message is too long: ${memoByteLength(message.trim())} of ${MAX_MEMO_BYTES} bytes.`,
-      );
+    if (memoTooLong) {
+      setError(landing.memoTooLong(memoBytes, MAX_MEMO_BYTES));
       return;
     }
     setBusy(true);
@@ -126,7 +142,6 @@ export function Create() {
       // One height fetch for the whole group: N links cost N derivations and no
       // extra network.
       const chain = await fetchChainHeight(LIGHTWALLETD[network], LIGHTWALLETD_FALLBACK[network]);
-      const trimmed = message.trim();
 
       // Every secret, address, fragment and URI below is a round trip to the core
       // worker: the wasm lives there and only there, so the secrets are made there
@@ -137,7 +152,7 @@ export function Create() {
           count: c.count,
           envelopeZat: v.zat,
           feeZat: FLAT_FEE_ZAT,
-          message: trimmed,
+          message: memo,
           network,
           birthday: chain?.height,
           origin: window.location.origin,
@@ -151,9 +166,11 @@ export function Create() {
         birthday: chain?.height ?? null,
         heightSource: chain?.source ?? null,
         network,
-        message: trimmed,
+        message: message.trim(),
+        from: from.trim(),
         core: loaded,
       });
+      window.scrollTo?.(0, 0);
     } catch (err) {
       setError((err as Error).message || "Could not create the envelope.");
     } finally {
@@ -166,7 +183,9 @@ export function Create() {
     setCreated(null);
     setAmount("");
     setCount("1");
+    setGroupOpen(false);
     setMessage("");
+    setFrom("");
   };
 
   if (created) {
@@ -188,51 +207,100 @@ export function Create() {
       : landing.submitMany;
 
   return (
-    <section className="stack">
-      <h1>{landing.headline}</h1>
-      <p className="lede" data-testid="how-paragraph">
-        {landing.howInOneParagraph}
-      </p>
+    <section className="stack landing">
+      <div className="stack tight">
+        <h1>{landing.headline}</h1>
+        <p className="lede" data-testid="landing-subline">
+          {landing.subline}
+        </p>
+      </div>
       {core?.isMock ? <MockBadge /> : null}
 
-      <section className="stack" data-testid="never-hold">
-        <h2>{landing.neverHoldTitle}</h2>
-        <p className="hint">{landing.neverHoldLede}</p>
-        <ol className="strip">
-          {landing.neverHoldSteps.map((step) => (
-            <li key={step.title} className="card">
-              <h3>{step.title}</h3>
-              <p className="hint">{step.body}</p>
-            </li>
-          ))}
-        </ol>
-      </section>
-
-      <form className="card stack" onSubmit={onSubmit}>
-        <h2>{landing.formTitle}</h2>
-
-        <div className="two-up">
-          <label className="field">
-            <span className="label">{landing.amountLabel}</span>
+      <form className="card stack" onSubmit={onSubmit} aria-label="Make an envelope">
+        <div className="field">
+          <label className="label strong" htmlFor="zv-amount">
+            {landing.amountLabel}
+          </label>
+          <div className="amount-box">
             <input
+              id="zv-amount"
+              className="amount-input"
               inputMode="decimal"
               autoComplete="off"
               placeholder="0.01"
               value={amount}
               data-testid="amount"
+              aria-invalid={validation ? !validation.ok : undefined}
+              aria-describedby="zv-amount-help"
               onChange={(e) => setAmount(e.target.value)}
             />
-            {validation && !validation.ok ? (
-              <span className="error" data-testid="amount-error">
-                {validation.error}
-              </span>
-            ) : (
-              <span className="hint">{landing.amountHint}</span>
-            )}
-          </label>
+            <span className="amount-unit" aria-hidden="true">
+              {landing.amountUnit}
+            </span>
+          </div>
+          {validation && !validation.ok ? (
+            <span className="error" id="zv-amount-help" data-testid="amount-error">
+              {validation.error}
+            </span>
+          ) : (
+            <span className="hint" id="zv-amount-help">
+              {landing.amountHint}
+            </span>
+          )}
+          <div className="chips" role="group" aria-label="Quick amounts">
+            {landing.presets.map((p) => (
+              <button
+                key={p}
+                type="button"
+                className="chip"
+                aria-pressed={amount.trim() === p}
+                data-testid={`preset-${p}`}
+                onClick={() => setAmount(p)}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+        </div>
 
+        <label className="field">
+          <span className="label strong">{landing.messageLabel}</span>
+          <input
+            autoComplete="off"
+            placeholder={landing.messagePlaceholder}
+            value={message}
+            data-testid="message"
+            aria-invalid={memoTooLong}
+            onChange={(e) => setMessage(e.target.value)}
+          />
+        </label>
+
+        <label className="field">
+          <span className="label strong">{landing.fromLabel}</span>
+          <input
+            autoComplete="off"
+            placeholder={landing.fromPlaceholder}
+            value={from}
+            maxLength={MAX_FROM_CHARS}
+            data-testid="from"
+            aria-invalid={memoTooLong}
+            onChange={(e) => setFrom(e.target.value)}
+          />
+          {memoTooLong ? (
+            <span className="error" data-testid="message-error">
+              {landing.memoTooLong(memoBytes, MAX_MEMO_BYTES)}
+            </span>
+          ) : (
+            <span className="hint" data-testid="message-count">
+              {landing.memoHint(memoBytes, MAX_MEMO_BYTES)}
+              {n > 1 ? " Every envelope in the group carries the same message." : ""}
+            </span>
+          )}
+        </label>
+
+        {groupOpen ? (
           <label className="field count-field">
-            <span className="label">{landing.countLabel}</span>
+            <span className="label strong">{landing.countLabel}</span>
             <input
               type="number"
               inputMode="numeric"
@@ -253,30 +321,7 @@ export function Create() {
               </span>
             )}
           </label>
-        </div>
-
-        <label className="field">
-          <span className="label">{landing.messageLabel}</span>
-          <input
-            autoComplete="off"
-            placeholder={landing.messagePlaceholder}
-            value={message}
-            data-testid="message"
-            aria-invalid={messageBytes > MAX_MEMO_BYTES}
-            onChange={(e) => setMessage(e.target.value)}
-          />
-          {messageBytes > MAX_MEMO_BYTES ? (
-            <span className="error" data-testid="message-error">
-              The message is too long: {messageBytes} of {MAX_MEMO_BYTES} bytes.
-            </span>
-          ) : (
-            <span className="hint" data-testid="message-count">
-              It travels in the payment itself, encrypted, and only the person who opens
-              the envelope can read it. {messageBytes}/{MAX_MEMO_BYTES} bytes.
-              {n > 1 ? " Every envelope in the group carries the same message." : ""}
-            </span>
-          )}
-        </label>
+        ) : null}
 
         {testnetUnlocked ? (
           <fieldset className="field net">
@@ -310,7 +355,11 @@ export function Create() {
           </p>
         ) : null}
 
-        {error ? <p className="error">{error}</p> : null}
+        {error ? (
+          <p className="error" role="alert">
+            {error}
+          </p>
+        ) : null}
 
         <button type="submit" className="primary" disabled={busy} data-testid="create">
           {submitLabel}
@@ -323,12 +372,52 @@ export function Create() {
             {`Making ${madeSoFar[1]} envelopes in your browser: ${madeSoFar[0]} done.`}
           </p>
         ) : null}
+
+        <p className="hint group-ask">
+          {groupOpen ? null : <>{landing.groupAsk} </>}
+          <button
+            type="button"
+            className="text-button"
+            aria-expanded={groupOpen}
+            data-testid="group-toggle"
+            onClick={() => {
+              setGroupOpen(!groupOpen);
+              setCount("1");
+            }}
+          >
+            {groupOpen ? landing.groupHide : landing.groupLink}
+          </button>
+        </p>
       </form>
 
-      <p className="fine" data-testid="never-ask">
-        {landing.neverAsk}
-      </p>
-      <p className="fine">{landing.secretFine}</p>
+      <section className="stack tight" data-testid="how-steps" aria-labelledby="zv-how">
+        <h2 id="zv-how">{landing.howTitle}</h2>
+        <ol className="numbered">
+          {landing.howSteps.map((step) => (
+            <li key={step}>{step}</li>
+          ))}
+        </ol>
+        <p className="hint">
+          <a
+            href="/how"
+            onClick={(e) => {
+              if (!navigate || e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+              e.preventDefault();
+              navigate("/how");
+            }}
+          >
+            {landing.howMore}
+          </a>
+        </p>
+      </section>
+
+      <section className="stack tight" data-testid="safe-by-design" aria-labelledby="zv-safe">
+        <h2 id="zv-safe">{landing.safeTitle}</h2>
+        <p className="hint">{landing.safeLine}</p>
+        <p className="hint" data-testid="never-ask">
+          {landing.neverAsk}
+        </p>
+      </section>
     </section>
   );
 }
@@ -336,7 +425,7 @@ export function Create() {
 function MockBadge() {
   return (
     <p className="badge" data-testid="mock-badge">
-      MOCK CORE — no WASM build found. Addresses on this page are placeholders and are not
+      MOCK CORE: no WASM build found. Addresses on this page are placeholders and are not
       spendable. Do not send real ZEC.
     </p>
   );
@@ -469,8 +558,42 @@ function WatchStatus({
   );
 }
 
-/* --------------------------------------------------------- one envelope (M1) */
+/* ------------------------------------------------- one envelope: the wizard */
 
+/** A phone or tablet, where a zcash: link opens the wallet app on this device. */
+function isTouchDevice(): boolean {
+  try {
+    if (window.matchMedia?.("(pointer: coarse)").matches) return true;
+    // Some browsers and emulators report a fine pointer on a touch screen.
+    return (navigator.maxTouchPoints ?? 0) > 0 && "ontouchstart" in window;
+  } catch {
+    return false;
+  }
+}
+
+/** The step heading takes focus on each step, so a screen reader hears the new step. */
+function useStepFocus(step: number) {
+  const ref = useRef<HTMLHeadingElement | null>(null);
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) {
+      first.current = false;
+      return;
+    }
+    ref.current?.focus();
+    window.scrollTo?.(0, 0);
+  }, [step]);
+  return ref;
+}
+
+/**
+ * One envelope, in three steps: save the link, pay, send it.
+ *
+ * The link is shown once and saved before anything else, because after the
+ * payment it is the money. The preview of what the recipient will see stays on
+ * every step. The payment watch runs for the whole wizard, so a payment that
+ * lands while the sender is still on step 1 is not missed.
+ */
 function SingleResult({
   created,
   isMock,
@@ -481,102 +604,297 @@ function SingleResult({
   onReset: () => void;
 }) {
   const envelope = created.rows[0];
-  const [line1, line2] = breakdownLines(created.breakdown);
   const { snap, restart } = usePaymentWatch(created);
   const paid = snap?.paid.get(envelope.index) ?? null;
-  const final = paid ? finalLink(envelope.link, paid.height) : null;
-  return (
-    <section className="stack">
-      <h1>{singleCopy.title}</h1>
-      {isMock ? <MockBadge /> : null}
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [saved, setSaved] = useState(false);
+  const [showQr, setShowQr] = useState(false);
+  const [takeBackOpen, setTakeBackOpen] = useState(false);
+  const touch = useMemo(isTouchDevice, []);
+  const share = useMemo(canShare, []);
+  const heading = useStepFocus(step);
 
-      <div className="card stack" data-testid="watch-card" data-paid={paid ? "yes" : "no"}>
-        {paid && final ? (
-          <>
-            <h2 data-testid="watch-paid">
-              {watchCopy.paidTitle(zatToZecString(paid.zat), paid.height)}
-            </h2>
-            <CopyField label={watchCopy.finalLabel} value={final} testId="final-link" />
-            <p className="hint">{watchCopy.finalBody(paid.height)}</p>
-            <p className="warn">{singleCopy.keepWarn}</p>
-            <details data-testid="final-qr">
-              <summary>{watchCopy.finalQr}</summary>
-              <Qr value={final} />
+  // The payment landing moves the sender on from the pay step by itself.
+  useEffect(() => {
+    if (paid && step === 2) setStep(3);
+  }, [paid, step]);
+
+  const b = created.breakdown;
+  const preview = (
+    <EnvelopePreview amount={b.envelope} message={created.message} from={created.from} />
+  );
+  const badge = isMock ? <MockBadge /> : null;
+  const stepOf = (
+    <p className="step-of" data-testid="step-of">
+      {singleCopy.stepOf(step)}
+    </p>
+  );
+
+  if (step === 1) {
+    return (
+      <section className="stack wizard" data-testid="wizard" data-step="1">
+        {stepOf}
+        <h1 ref={heading} tabIndex={-1}>
+          {singleCopy.saveTitle}
+        </h1>
+        {badge}
+        <p className="lede">{singleCopy.saveLede}</p>
+        <div className="stack tight">
+          <span className="label">{singleCopy.linkLabel}</span>
+          <code className="value mono link-full" data-testid="envelope-link">
+            {envelope.link}
+          </code>
+          <div className="button-row">
+            <CopyButton
+              value={envelope.link}
+              label={singleCopy.copy}
+              face={singleCopy.copy}
+              className="secondary"
+              testId="copy-link"
+            />
+            <ShareButton
+              url={envelope.link}
+              face={singleCopy.share}
+              className="secondary"
+              testId="share-link-button"
+            />
+          </div>
+        </div>
+        <p className="warn" data-testid="keep-warn">
+          {singleCopy.keepWarn}
+        </p>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={saved}
+            onChange={(e) => setSaved(e.target.checked)}
+            data-testid="saved-link"
+          />
+          <span>{singleCopy.savedCheckbox}</span>
+        </label>
+        <button
+          type="button"
+          className="primary"
+          disabled={!saved}
+          onClick={() => {
+            if (!saved) return;
+            setStep(paid ? 3 : 2);
+          }}
+          data-testid="to-pay"
+        >
+          {singleCopy.saveContinue}
+        </button>
+        {!saved ? (
+          <p className="hint" data-testid="saved-blocked">
+            {singleCopy.savedBlocked}
+          </p>
+        ) : null}
+        {preview}
+      </section>
+    );
+  }
+
+  if (step === 2) {
+    const openWallet = (primary: boolean) => (
+      <a
+        className={primary ? "button primary" : "button secondary"}
+        href={envelope.uri}
+        data-testid="open-wallet"
+      >
+        {singleCopy.openWallet}
+      </a>
+    );
+    return (
+      <section className="stack wizard" data-testid="wizard" data-step="2">
+        {stepOf}
+        <h1 ref={heading} tabIndex={-1}>
+          {singleCopy.payTitle(b.total)}
+        </h1>
+        {badge}
+        {touch ? openWallet(true) : null}
+        <div className="stack tight pay-qr">
+          <Qr value={envelope.uri} />
+          {touch ? <p className="hint center-text">{singleCopy.scanHint}</p> : null}
+        </div>
+        {touch ? null : openWallet(false)}
+
+        <div className="receipt" data-testid="breakdown">
+          <p className="row">
+            <span>{singleCopy.inEnvelope}</span>
+            <span data-testid="breakdown-envelope">{b.envelope} ZEC</span>
+          </p>
+          <p className="row">
+            <span>{singleCopy.serviceFee}</span>
+            <span data-testid="breakdown-fee">{b.fee} ZEC</span>
+          </p>
+          <p className="row total">
+            <span>{singleCopy.total}</span>
+            <strong data-testid="breakdown-total">{b.total} ZEC</strong>
+          </p>
+        </div>
+        <p className="hint">{singleCopy.walletFee}</p>
+        <p className="hint">{singleCopy.recipientFee(formatZec(NETWORK_FEE_ZAT))}</p>
+        <p className="hint">
+          {singleCopy.wallets(SENDER_WALLETS)} <strong>{singleCopy.fundWarn}</strong>
+        </p>
+
+        <div className="status-card" data-testid="watch-card" data-paid={paid ? "yes" : "no"}>
+          <p className="status-line" data-testid="watch-waiting" aria-live="polite">
+            <span className="dot" aria-hidden="true" />
+            {watchCopy.waitingLine}
+          </p>
+          {created.birthday === null ? (
+            <p className="hint" data-testid="watch-off">
+              {watchCopy.noHeight}
+            </p>
+          ) : (
+            <WatchStatus snap={snap} total={1} onRestart={restart} />
+          )}
+        </div>
+        <p className="hint" data-testid="can-close">
+          {singleCopy.canClose}
+        </p>
+
+        <details className="extras">
+          <summary>{singleCopy.payExtras}</summary>
+          <div className="stack tight">
+            <CopyField
+              label={singleCopy.paymentUriLabel}
+              value={envelope.uri}
+              testId="payment-uri"
+            />
+            <CopyField
+              label={singleCopy.addressLabel}
+              value={envelope.address}
+              testId="envelope-address"
+            />
+            <details data-testid="advanced-ufvk">
+              <summary>{singleCopy.viewingKeyLabel}</summary>
+              <p className="hint">{singleCopy.viewingKeyHint}</p>
+              <code className="value mono" data-testid="envelope-ufvk">
+                {envelope.ufvk}
+              </code>
             </details>
+            <Birthday created={created} />
+          </div>
+        </details>
+
+        {preview}
+
+        <div className="button-row">
+          <button type="button" className="ghost" onClick={() => setStep(1)} data-testid="pay-back">
+            {singleCopy.back}
+          </button>
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => setStep(3)}
+            data-testid="skip-to-share"
+          >
+            {singleCopy.paidSkip}
+          </button>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="stack wizard" data-testid="wizard" data-step="3">
+      {stepOf}
+      <Envelope />
+      <h1 ref={heading} tabIndex={-1} className="center-text" data-testid="send-title">
+        {paid ? singleCopy.sendTitlePaid : singleCopy.sendTitle}
+      </h1>
+      {badge}
+      <div aria-live="polite" className="stack tight center-text">
+        {paid ? (
+          <>
+            <p className="lede">{singleCopy.sendLede(b.envelope)}</p>
+            <p className="hint" data-testid="watch-paid">
+              {watchCopy.paidDetail(zatToZecString(paid.zat), paid.height)}
+            </p>
           </>
         ) : (
-          <>
-            <h2 data-testid="watch-waiting">{watchCopy.waitingTitle}</h2>
-            {created.birthday === null ? (
-              <p className="hint" data-testid="watch-off">
-                {watchCopy.noHeight}
-              </p>
-            ) : (
-              <>
-                <p className="hint">{watchCopy.waitingBody}</p>
-                <WatchStatus snap={snap} total={1} onRestart={restart} />
-              </>
-            )}
-          </>
+          <p className="lede" data-testid="send-unpaid">
+            {singleCopy.sendLedeUnpaid}
+          </p>
         )}
       </div>
 
-      <div className="card stack">
-        <h2>{singleCopy.keepTitle}</h2>
-        <CopyField
-          label={paid ? watchCopy.originalLabel : "Envelope link"}
-          value={envelope.link}
-          testId="envelope-link"
+      {share ? (
+        <ShareButton
+          url={envelope.link}
+          face={singleCopy.shareLink}
+          className="primary"
+          testId="share-primary"
         />
-        {paid && created.birthday !== null ? (
-          <p className="hint" data-testid="original-slower">
-            {watchCopy.originalBody(created.birthday)}
-          </p>
+      ) : (
+        <CopyButton
+          value={envelope.link}
+          label={singleCopy.copyLink}
+          face={singleCopy.copyLink}
+          className="primary"
+          testId="copy-primary"
+        />
+      )}
+      <div className="button-row">
+        {share ? (
+          <CopyButton
+            value={envelope.link}
+            label={singleCopy.copyLink}
+            face={singleCopy.copyLink}
+            className="secondary"
+            testId="copy-link"
+          />
         ) : null}
-        <p className="warn">{singleCopy.keepWarn}</p>
-        <Birthday created={created} />
+        <button
+          type="button"
+          className="secondary"
+          aria-expanded={showQr}
+          onClick={() => setShowQr(!showQr)}
+          data-testid="show-qr"
+        >
+          {showQr ? singleCopy.hideQr : singleCopy.showQr}
+        </button>
+      </div>
+      {showQr ? (
+        <div className="stack tight" data-testid="link-qr">
+          <Qr value={envelope.link} label="Envelope link QR code" />
+          <p className="hint center-text">{singleCopy.qrHint}</p>
+        </div>
+      ) : null}
+      <code className="value mono link-full" data-testid="share-link">
+        {envelope.link}
+      </code>
+
+      {preview}
+
+      <div className="stack tight take-back">
+        <button
+          type="button"
+          className="text-button"
+          aria-expanded={takeBackOpen}
+          onClick={() => setTakeBackOpen(!takeBackOpen)}
+          data-testid="take-back"
+        >
+          {singleCopy.takeBack}
+        </button>
+        {takeBackOpen ? (
+          <div className="stack tight" data-testid="take-back-panel">
+            <p className="hint">{singleCopy.takeBackBody}</p>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => window.location.assign(envelope.link)}
+              data-testid="take-back-go"
+            >
+              {singleCopy.takeBackGo}
+            </button>
+          </div>
+        ) : null}
       </div>
 
-      <div className="card stack">
-        <h2>{singleCopy.fundTitle}</h2>
-        <Qr value={envelope.uri} />
-        <p className="breakdown" data-testid="breakdown">
-          <span>{line1}</span>
-          <span>{line2}</span>
-        </p>
-        <CopyField label="Payment URI" value={envelope.uri} testId="payment-uri" />
-        <p className="hint">Works with {SENDER_WALLETS}.</p>
-        <p className="warn">{singleCopy.fundWarn}</p>
-        <details>
-          <summary>Envelope address</summary>
-          <code className="value mono" data-testid="envelope-address">
-            {envelope.address}
-          </code>
-        </details>
-        <details data-testid="advanced-ufvk">
-          <summary>Advanced: viewing key</summary>
-          <p className="hint">
-            This full viewing key lets a light client watch the envelope: it reveals the
-            amounts and memos that arrive at this address. It cannot spend, and it cannot
-            open the envelope. Share it only with someone you want watching.
-          </p>
-          <code className="value mono" data-testid="envelope-ufvk">
-            {envelope.ufvk}
-          </code>
-        </details>
-      </div>
-
-      <div className="card stack">
-        <h2>{singleCopy.sendTitle}</h2>
-        <p>
-          {singleCopy.sendBody}
-          {created.message
-            ? ` Your message travels inside the payment, encrypted: “${created.message}”.`
-            : ""}
-        </p>
-      </div>
-
-      <button type="button" className="ghost wide" onClick={onReset}>
+      <button type="button" className="ghost wide" onClick={onReset} data-testid="again">
         {singleCopy.again}
       </button>
     </section>

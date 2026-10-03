@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { LIGHTWALLETD, LIGHTWALLETD_FALLBACK, explorerTxUrl } from "../config";
-import { alreadyOpened, spendCheck } from "../copy/en";
+import { alreadyOpened, revealed, sealed, spendCheck } from "../copy/en";
 import { loadCore, provingNote } from "../core";
 import type { FoundNote, LoadedCore, Network } from "../core/types";
 import {
@@ -18,6 +18,7 @@ import {
   unspentNotes,
 } from "../lib/openFlow";
 import { formatCount, formatZecAmount, poolLabel, sumZat, truncateTxid } from "../lib/format";
+import { parseMemo } from "../lib/memo";
 import { CopyField } from "../components/CopyField";
 import { Envelope } from "../components/Envelope";
 import { SendOn } from "../components/SendOn";
@@ -183,20 +184,24 @@ export function Open() {
   if (state.phase === "sealed") {
     return (
       <section className="stack center">
-        <h1>You have an envelope</h1>
+        <h1>{sealed.title}</h1>
         {badge}
         <Envelope />
-        <p className="lede">Open it to see what is inside. Only you can.</p>
         <button type="button" className="primary" onClick={onOpen} data-testid="open-envelope">
-          Open envelope
+          {sealed.open}
         </button>
-        <p className="fine" data-testid="open-fineprint">
-          Opening scans the Zcash chain from your browser. Nothing leaves this page.
+        <p className="hint" data-testid="open-fineprint">
+          {sealed.reassure}
+        </p>
+        <p className="hint">
+          {/* A new tab, so following it does not lose this page and its link. */}
+          <a href="/how#safe" target="_blank" rel="noopener noreferrer" data-testid="safe-link">
+            {sealed.safeLink}
+          </a>
         </p>
         <p className="fine" data-testid="link-forgotten">
           {LINK_FORGOTTEN_COPY}
         </p>
-        {provingFooter}
         <details className="sealed-details">
           <summary data-testid="open-address-toggle">Check the envelope address</summary>
           <code className="value mono" data-testid="open-address">
@@ -208,6 +213,7 @@ export function Open() {
             {link.network === "test" ? " Testnet." : ""}
           </p>
         </details>
+        {provingFooter}
       </section>
     );
   }
@@ -216,7 +222,7 @@ export function Open() {
     const line = progressLabel(state, formatCount);
     return (
       <section className="stack center">
-        <h1 data-testid="scanning">Looking for your envelope…</h1>
+        <h1 data-testid="scanning">{sealed.scanningTitle}</h1>
         {badge}
         <Envelope busy />
         <progress
@@ -229,8 +235,8 @@ export function Open() {
           {line ?? "Starting the scan…"}
         </p>
         <p className="fine">
-          Every block is checked here, in your browser.
-          {state.attempt > 0 ? " The first Zcash node did not answer, so we moved to the backup." : ""}
+          {sealed.scanningHint}
+          {state.attempt > 0 ? " The main Zcash node did not answer, so we moved to the backup." : ""}
         </p>
       </section>
     );
@@ -412,52 +418,25 @@ function Opened({
   /**
    * Set while the walk to the tip is still checking the note has not been
    * spent: the count for the check line. The send-on flow is not mounted until
-   * it is done — mounting it would start the proving-key warm-up, which runs on
-   * the same worker thread as the walk and would hold the check up.
+   * it is done, because mounting it would start the proving-key warm-up, which
+   * runs on the same worker thread as the walk and would hold the check up.
    */
   checking?: { scanned: number; total: number } | null;
   /** Runs the open again; offered after a sweep lost the race to another device. */
   onCheckAgain?: () => void;
 }) {
   const total = sumZat(notes.map((n) => n.amount_zat));
-  const memo = notes.find((n) => n.memo && n.memo.trim() !== "")?.memo ?? null;
+  const rawMemo = notes.find((n) => n.memo && n.memo.trim() !== "")?.memo ?? null;
+  // A trailing "From <name>" line is the sender's name; the rest is the note.
+  const { from, note } = parseMemo(rawMemo);
   const single = notes.length === 1 ? notes[0] : null;
+  /** Past "Receive it": the reveal folds down and the destinations take the screen. */
+  const [receiving, setReceiving] = useState(false);
 
-  return (
-    <section className="stack">
-      <h1>Your envelope is open</h1>
-      {badge}
-
-      <div className="unwrap">
-        <Envelope open />
-        <p className="unwrap-amount" data-testid="amount">
-          {formatZecAmount(total)}
-        </p>
-        <FiatReveal amount={formatZecAmount(total)} />
-        {checking ? (
-          <p className="hint" aria-live="polite" data-testid="spend-check">
-            {checking.total > 0
-              ? spendCheck.line(formatCount(checking.scanned), formatCount(checking.total))
-              : spendCheck.starting}
-          </p>
-        ) : null}
-        {spentZat > 0n ? (
-          <p className="hint" data-testid="spent-partial">
-            {alreadyOpened.partial(formatZecAmount(spentZat))}
-          </p>
-        ) : null}
-      </div>
-
-      {memo ? (
-        <div className="card stack">
-          <h2>Their message</h2>
-          <p className="memo" data-testid="memo">
-            {memo}
-          </p>
-        </div>
-      ) : null}
-
-      <div className="card stack">
+  const details = (
+    <details className="extras" data-testid="open-details">
+      <summary>{revealed.details}</summary>
+      <div className="stack tight">
         {single ? (
           <>
             <Row label="Pool" value={poolLabel(single.pool)} testId="pool" />
@@ -472,56 +451,114 @@ function Opened({
         ) : (
           <>
             <Row label="Payments" value={`${notes.length} notes, added up above`} testId="note-count" />
-            <details data-testid="note-details">
-              <summary>Details</summary>
-              <ul className="notes">
-                {notes.map((n) => (
-                  <li key={`${n.txid}-${n.height}`} className="stack">
-                    <strong>{formatZecAmount(BigInt(n.amount_zat))}</strong>
-                    <span className="hint">
-                      {poolLabel(n.pool)} · block {formatCount(n.height)}
-                    </span>
-                    <CopyField
-                      label="Transaction"
-                      value={n.txid}
-                      display={truncateTxid(n.txid)}
-                    />
-                  </li>
-                ))}
-              </ul>
-            </details>
+            <ul className="notes" data-testid="note-details">
+              {notes.map((n) => (
+                <li key={`${n.txid}-${n.height}`} className="stack">
+                  <strong>{formatZecAmount(BigInt(n.amount_zat))}</strong>
+                  <span className="hint">
+                    {poolLabel(n.pool)} · block {formatCount(n.height)}
+                  </span>
+                  <CopyField label="Transaction" value={n.txid} display={truncateTxid(n.txid)} />
+                </li>
+              ))}
+            </ul>
           </>
         )}
         {checking ? null : (
           <p className="hint">Chain tip {formatCount(tipHeight)} when this scan finished.</p>
         )}
+        <p className="fine">
+          The secret in this link stayed in your browser. Nothing about this envelope was sent
+          anywhere.
+        </p>
       </div>
+    </details>
+  );
 
-      {checking ? (
-        <div className="card stack" data-testid="send-on-waiting">
-          <h2>{spendCheck.sendOnTitle}</h2>
-          <p className="hint">{spendCheck.sendOnWaiting}</p>
-          <button type="button" className="primary" disabled data-testid="send-on-disabled">
-            {spendCheck.sendOnButton}
-          </button>
-        </div>
+  const sendOn = checking ? null : (
+    <SendOn
+      core={core}
+      getSecret={getSecret}
+      network={network}
+      notes={notes}
+      tipHeight={tipHeight}
+      envelopeAddress={envelopeAddress}
+      openMs={openMs}
+      onCheckAgain={onCheckAgain}
+      started={receiving}
+      onStart={() => {
+        setReceiving(true);
+        window.scrollTo?.(0, 0);
+      }}
+      onBackToEnvelope={() => setReceiving(false)}
+    />
+  );
+
+  // One tree for both states, with SendOn in the same slot, so going to the
+  // destinations and back keeps its state and does not restart the key warm-up.
+  return (
+    <section className="stack">
+      <h1 className="sr-only">{revealed.title}</h1>
+      {badge}
+
+      {receiving ? (
+        <p className="compact-amount">
+          {from ? <span data-testid="from">{revealed.from(from)}</span> : null}
+          <span className="hint">{revealed.compactLabel}</span>
+          <strong data-testid="amount">{formatZecAmount(total)}</strong>
+        </p>
       ) : (
-        <SendOn
-          core={core}
-          getSecret={getSecret}
-          network={network}
-          notes={notes}
-          tipHeight={tipHeight}
-          envelopeAddress={envelopeAddress}
-          openMs={openMs}
-          onCheckAgain={onCheckAgain}
-        />
+        <div className="unwrap">
+          <Envelope open />
+          {from ? (
+            <p className="unwrap-from" data-testid="from">
+              {revealed.from(from)}
+            </p>
+          ) : null}
+          <p className="unwrap-amount" data-testid="amount">
+            {formatZecAmount(total)}
+          </p>
+          {checking ? (
+            <p className="hint" aria-live="polite" data-testid="spend-check">
+              {checking.total > 0
+                ? spendCheck.line(formatCount(checking.scanned), formatCount(checking.total))
+                : spendCheck.starting}
+            </p>
+          ) : null}
+          {spentZat > 0n ? (
+            <p className="hint" data-testid="spent-partial">
+              {alreadyOpened.partial(formatZecAmount(spentZat))}
+            </p>
+          ) : null}
+        </div>
       )}
 
-      <p className="fine">
-        The secret in this link stayed in your browser. Nothing about this envelope was sent
-        anywhere.
-      </p>
+      {!receiving && note ? (
+        <blockquote className="note-card">
+          <p className="memo" data-testid="memo">
+            {note}
+          </p>
+        </blockquote>
+      ) : null}
+
+      {checking ? (
+        <div className="stack tight" data-testid="send-on-waiting">
+          <button type="button" className="primary" disabled data-testid="send-on-disabled">
+            {revealed.checking}
+          </button>
+          <p className="hint center-text">{spendCheck.sendOnWaiting}</p>
+        </div>
+      ) : null}
+      {sendOn}
+
+      {receiving ? null : (
+        <details className="extras" data-testid="what-is-zec">
+          <summary>{revealed.whatIsZec}</summary>
+          <p className="hint">{revealed.whatIsZecBody}</p>
+        </details>
+      )}
+      {receiving ? null : details}
+
       <p className="fine" data-testid="link-forgotten">
         {LINK_FORGOTTEN_COPY}
       </p>
@@ -535,24 +572,6 @@ function Row({ label, value, testId }: { label: string; value: string; testId?: 
     <p className="row">
       <span className="label">{label}</span>
       <span data-testid={testId}>{value}</span>
-    </p>
-  );
-}
-
-/** No price API in M2: asking one would tell it an envelope was just opened. */
-function FiatReveal({ amount }: { amount: string }) {
-  const [shown, setShown] = useState(false);
-  if (!shown) {
-    return (
-      <button type="button" className="ghost" onClick={() => setShown(true)} data-testid="fiat">
-        What is that worth?
-      </button>
-    );
-  }
-  return (
-    <p className="hint" data-testid="fiat-answer">
-      {amount}, and that is all we will tell you. Asking a price server for a rate would tell
-      it that you just opened an envelope, so this milestone shows ZEC only.
     </p>
   );
 }
@@ -573,7 +592,7 @@ function ProvingNote({ note }: { note: string }) {
 function MockBadge() {
   return (
     <p className="badge" data-testid="mock-badge">
-      MOCK CORE — no WASM build found. No chain is read, the scan is simulated, and any
+      MOCK CORE: no WASM build found. No chain is read, the scan is simulated, and any
       amount shown is not real money.
     </p>
   );

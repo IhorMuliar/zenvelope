@@ -5,11 +5,13 @@
  *
  * Three things, all on the MOCK core so this needs no network and no wasm build:
  *
- *   1. The landing page. The tagline, one paragraph of how it works, the
- *      three-step "we never hold funds" strip, the never-ask line and the
+ *   1. The landing page is the tool: one headline, one short subline, the
+ *      form with preset amounts and an optional From line, group mode behind
+ *      a small link, a three-step "how it works", the never-ask line and the
  *      footer. Screenshot: docs/m4-landing.png.
- *   2. `/how`. The "Is this link safe?" section and its four checks, and the
- *      never-ask line again.
+ *   2. `/how`. The one-paragraph protocol and the "we never hold funds"
+ *      strip (moved here from the landing page), the "Is this link safe?"
+ *      section and its four checks, and the never-ask line again.
  *   3. Group envelopes. Three links generated client-side, a table of three
  *      single-output ZIP-321 URIs, and a CSV download whose bytes are read back
  *      and parsed. Screenshot: docs/m4-group.png.
@@ -59,28 +61,50 @@ async function expectNothingStored(page: Page) {
 }
 
 describeOnMock("M4: the landing page", () => {
-  test("leads with the tagline, the strip and the footer", async ({ page }) => {
+  test("is the tool: headline, form, three steps and the footer", async ({ page }) => {
     await page.goto("/");
 
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-      "Send shielded money as a link. No wallet, no address, no amount on screen.",
+      "Send shielded money as a link",
     );
+    const subline = (await page.getByTestId("landing-subline").innerText()).trim();
+    expect(subline.split(/\s+/).length).toBeLessThanOrEqual(20);
 
-    // How it works, in one paragraph, naming the fragment.
-    await expect(page.getByTestId("how-paragraph")).toContainText("after the #");
-    await expect(page.getByTestId("how-paragraph")).toContainText("never send to any server");
+    // The long protocol paragraph and the strip live on /how now.
+    await expect(page.getByTestId("how-paragraph")).toHaveCount(0);
+    await expect(page.getByTestId("never-hold")).toHaveCount(0);
 
-    // The three-step strip: sender's wallet, the link's address, their browser.
-    const strip = page.getByTestId("never-hold").locator("li");
-    await expect(strip).toHaveCount(3);
-    await expect(strip.nth(0)).toContainText("Your wallet");
-    await expect(strip.nth(1)).toContainText("on-chain");
-    await expect(strip.nth(2)).toContainText("Their browser");
-
-    // The create form is on the same screen, with both group controls.
+    // The form: amount, presets, message, From, one button.
     await expect(page.getByTestId("amount")).toBeVisible();
-    await expect(page.getByTestId("count")).toHaveValue("1");
+    for (const p of ["0.01", "0.05", "0.1", "0.5"]) {
+      await expect(page.getByTestId(`preset-${p}`)).toBeVisible();
+    }
+    await page.getByTestId("preset-0.05").click();
+    await expect(page.getByTestId("amount")).toHaveValue("0.05");
+    await expect(page.getByTestId("preset-0.05")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("message")).toBeVisible();
+    await expect(page.getByTestId("from")).toBeVisible();
     await expect(page.getByTestId("create")).toHaveText("Create envelope");
+
+    // Group mode sits behind a small link.
+    await expect(page.getByTestId("count")).toHaveCount(0);
+    await expect(page.getByTestId("group-toggle")).toHaveText("Make several links");
+    await page.getByTestId("group-toggle").click();
+    await expect(page.getByTestId("count")).toHaveValue("1");
+    await page.getByTestId("group-toggle").click();
+    await expect(page.getByTestId("count")).toHaveCount(0);
+
+    // Three steps under the card.
+    const steps = page.getByTestId("how-steps").locator("li");
+    await expect(steps).toHaveCount(3);
+    await expect(steps.nth(0)).toContainText("Zcash wallet");
+    await expect(steps.nth(1)).toContainText("any chat");
+    await expect(steps.nth(2)).toContainText("where the money goes");
+    await expect(page.getByTestId("safe-by-design")).toContainText("Safe by design");
+
+    // The header: logo, "How it works" and "Take one back".
+    await expect(page.getByRole("link", { name: "How it works", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Take one back" })).toBeVisible();
 
     // Said out loud, on the landing page itself.
     await expect(page.getByTestId("never-ask")).toHaveText(NEVER_ASK);
@@ -117,7 +141,19 @@ describeOnMock('M4: "Is this link safe?" on /how', () => {
   test("names what we never ask for and teaches four checks", async ({ page }) => {
     await page.goto("/how");
 
+    // How it works, in one paragraph, naming the fragment.
+    await expect(page.getByTestId("how-paragraph")).toContainText("after the #");
+    await expect(page.getByTestId("how-paragraph")).toContainText("never send to any server");
+
+    // The three-step strip: sender's wallet, the link's address, their browser.
+    const strip = page.getByTestId("never-hold").locator("li");
+    await expect(strip).toHaveCount(3);
+    await expect(strip.nth(0)).toContainText("Your wallet");
+    await expect(strip.nth(1)).toContainText("on-chain");
+    await expect(strip.nth(2)).toContainText("Their browser");
+
     const safety = page.getByTestId("safety");
+    await expect(safety).toHaveAttribute("id", "safe");
     await expect(safety.getByRole("heading", { name: "Is this link safe?" })).toBeVisible();
     await expect(page.getByTestId("never-ask")).toHaveText(NEVER_ASK);
 
@@ -143,6 +179,7 @@ describeOnMock("M4: group envelopes (M6 preview)", () => {
 
     await page.goto("/");
     await page.getByTestId("amount").fill("0.01");
+    await page.getByTestId("group-toggle").click();
     await page.getByTestId("count").fill("3");
     await page.getByTestId("message").fill("Payroll, March");
 
@@ -246,21 +283,95 @@ describeOnMock("M4: group envelopes (M6 preview)", () => {
     }
   });
 
-  test("keeps the M1 QR flow for a single envelope", async ({ page }) => {
+  test("a single envelope: save the link, then pay, then send it", async ({ page }) => {
     await page.goto("/");
     await page.getByTestId("amount").fill("0.01");
-    await expect(page.getByTestId("count")).toHaveValue("1");
+    await page.getByTestId("message").fill("Coffee is on me.");
+    await page.getByTestId("from").fill("Ihor");
     await page.getByTestId("create").click();
 
-    await expect(page.getByRole("heading", { name: "Your envelope is ready" })).toBeVisible();
+    // Step 1: the link, in full, and no way on until it is saved.
+    await expect(page.getByTestId("step-of")).toHaveText("Step 1 of 3");
+    await expect(page.getByRole("heading", { name: "Save your link first" })).toBeVisible();
+    const link = (await page.getByTestId("envelope-link").innerText()).trim();
+    expect(link).toMatch(/\/e#[A-Za-z0-9_-]{43}(\.\d+)?$/);
+    expect(link).not.toContain("…");
+    await expect(page.getByTestId("copy-link")).toBeVisible();
+    await expect(page.getByTestId("keep-warn")).toContainText("Anyone with this link");
+    // The preview of what they will see, on every step.
+    await expect(page.getByTestId("preview-from")).toHaveText("From Ihor");
+    await expect(page.getByTestId("preview-amount")).toHaveText("0.01 ZEC");
+    await expect(page.getByTestId("preview-note")).toHaveText("Coffee is on me.");
+    await expect(page.getByTestId("to-pay")).toBeDisabled();
+    await page.getByTestId("saved-link").check();
+    await page.getByTestId("to-pay").click();
+
+    // Step 2: pay. The QR on a desktop, the wallet button on both.
+    await expect(page.getByTestId("step-of")).toHaveText("Step 2 of 3");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+      "Pay 0.0103 ZEC from your Zcash wallet",
+    );
     await expect(page.locator("canvas[aria-label='Payment QR code']")).toBeVisible();
-    await expect(page.getByTestId("envelope-link")).toContainText("/e#");
+    await expect(page.getByTestId("open-wallet")).toHaveAttribute("href", /^zcash:/);
     await expect(page.getByTestId("payment-uri")).toContainText("zcash:");
     await expect(page.getByTestId("group-table")).toHaveCount(0);
-    await expect(page.getByTestId("breakdown")).toContainText("= 0.0103 ZEC");
+    await expect(page.getByTestId("breakdown-total")).toHaveText("0.0103 ZEC");
+    await expect(page.getByTestId("can-close")).toContainText("You can close this page");
+    await expect(page.getByTestId("preview-from")).toHaveText("From Ihor");
+
+    // Step 3, before the payment is seen: one link, the one that was saved.
+    await page.getByTestId("skip-to-share").click();
+    await expect(page.getByTestId("step-of")).toHaveText("Step 3 of 3");
+    await expect(page.getByTestId("send-title")).toHaveText("Now send it.");
+    await expect(page.getByTestId("share-link")).toHaveText(link);
+    await expect(page.getByTestId("final-link")).toHaveCount(0);
+    await page.getByTestId("show-qr").click();
+    await expect(page.getByTestId("link-qr").locator("canvas")).toBeVisible();
+    await page.getByTestId("take-back").click();
+    await expect(page.getByTestId("take-back-panel")).toContainText("not opened it yet");
 
     await expectNoDrainerCopy(page);
     await expectNothingStored(page);
+  });
+
+  test("the From line rides in the memo, and the byte count includes it", async ({ page }) => {
+    await page.goto("/");
+    await page.getByTestId("amount").fill("0.01");
+    await page.getByTestId("message").fill("hi");
+    await page.getByTestId("from").fill("Ann");
+    // "hi\n\nFrom Ann" is 12 bytes.
+    await expect(page.getByTestId("message-count")).toContainText("12/512 bytes");
+    await page.getByTestId("message").fill("x".repeat(505));
+    await expect(page.getByTestId("message-error")).toContainText("515 of 512 bytes");
+    await page.getByTestId("message").fill("hi");
+    await page.getByTestId("create").click();
+    await page.getByTestId("saved-link").check();
+    await page.getByTestId("to-pay").click();
+    const uri = (await page.getByTestId("payment-uri").textContent())!.trim();
+    const memo = uri.split("memo=")[1];
+    expect(Buffer.from(memo, "base64url").toString("utf8")).toBe("hi\n\nFrom Ann");
+  });
+
+  test("take one back: only an envelope link on this site is followed", async ({ page }) => {
+    await page.goto("/");
+    await page.getByRole("link", { name: "Take one back" }).click();
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Take an envelope back");
+    await page.getByTestId("take-back-input").fill("https://example.com/e#abc");
+    await page.getByTestId("take-back-open").click();
+    await expect(page.getByTestId("take-back-error")).toContainText("not an envelope link");
+    await expect(page).toHaveURL(/\/back$/);
+
+    const origin = new URL(page.url()).origin;
+    await page.getByTestId("take-back-input").fill(`${origin}/e`);
+    await page.getByTestId("take-back-open").click();
+    await expect(page.getByTestId("take-back-error")).toContainText("no envelope in it");
+
+    await page
+      .getByTestId("take-back-input")
+      .fill(`${origin}/e#AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8.3490437`);
+    await page.getByTestId("take-back-open").click();
+    await expect(page.getByRole("heading", { name: "You have an envelope" })).toBeVisible();
+    await expectNoDrainerCopy(page);
   });
 
   test("asks 0.0013 ZEC for a 0.001 envelope: the envelope plus the service fee", async ({
@@ -272,16 +383,18 @@ describeOnMock("M4: group envelopes (M6 preview)", () => {
       "You will send 0.0013 ZEC: 0.001 ZEC in the envelope plus a 0.0003 ZEC service fee.",
     );
     await page.getByTestId("create").click();
-    await expect(page.getByTestId("breakdown")).toContainText(
-      "Envelope 0.001 ZEC + service fee 0.0003 ZEC",
-    );
-    await expect(page.getByTestId("breakdown")).toContainText("= 0.0013 ZEC");
+    await page.getByTestId("saved-link").check();
+    await page.getByTestId("to-pay").click();
+    await expect(page.getByTestId("breakdown-envelope")).toHaveText("0.001 ZEC");
+    await expect(page.getByTestId("breakdown-fee")).toHaveText("0.0003 ZEC");
+    await expect(page.getByTestId("breakdown-total")).toHaveText("0.0013 ZEC");
     await expect(page.getByTestId("payment-uri")).toContainText("?amount=0.0013");
   });
 
   test("refuses a group larger than fifty", async ({ page }) => {
     await page.goto("/");
     await page.getByTestId("amount").fill("0.01");
+    await page.getByTestId("group-toggle").click();
     await page.getByTestId("count").fill("51");
     await expect(page.getByTestId("count-error")).toContainText("50 envelopes at a time");
     await page.getByTestId("create").click();

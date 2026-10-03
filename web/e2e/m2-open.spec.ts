@@ -19,8 +19,9 @@
  *   - /e#<fragment> shows the sealed envelope, with the sender's message hidden
  *   - tapping "Open envelope" shows scan progress driven by on_progress
  *   - the amount reads 0.0013 ZEC and the memo is shown as the sender's message
- *   - the fiat equivalent is behind a tap and never a price request
- *   - the M3 destination cards are live, with the Solana rail still disabled
+ *   - there is no price lookup; "What is ZEC?" explains it in plain words instead
+ *   - "Receive it" opens the four destinations, in the order exchange, Solana,
+ *     wallet app, a wallet made in this page
  *   - no link on the page carries the secret fragment onward
  *   - **the secret is out of the URL bar** the moment it has been read, and a
  *     reload lands on the friendly "no envelope in this link" screen (H1)
@@ -64,8 +65,11 @@ describeOnMock("M2: opening an envelope", () => {
     await expect(page.getByRole("heading", { name: "You have an envelope" })).toBeVisible();
     await expect(page.getByTestId("envelope")).toHaveAttribute("data-open", "false");
     await expect(page.getByTestId("open-fineprint")).toHaveText(
-      "Opening scans the Zcash chain from your browser. Nothing leaves this page.",
+      "It opens here in your browser. Nothing to install. We never ask for a password or card details.",
     );
+    await expect(page.getByTestId("safe-link")).toHaveText("Is this safe?");
+    await expect(page.getByTestId("safe-link")).toHaveAttribute("href", "/how#safe");
+    await expect(page.getByTestId("open-envelope")).toHaveText("Open");
     await expect(page.getByText("Zenvelope M1")).toHaveCount(0);
     await expect(page.getByTestId("amount")).toHaveCount(0);
     // The MOCK core must be loudly badged.
@@ -86,13 +90,8 @@ describeOnMock("M2: opening an envelope", () => {
     await expect(page.getByTestId("height")).toHaveText("3,490,472");
     await expect(page.getByTestId("txid")).toHaveText(/^[0-9a-f]{8}…[0-9a-f]{8}$/);
 
-    // All three destination cards are live from M5. The shielded flows are
-    // proved in m3-open.spec.ts and the Solana exit in m5-solana.spec.ts; here
-    // it is only that the third one still leads with what it costs you.
-    await expect(page.getByTestId("dest-address")).toBeEnabled();
-    await expect(page.getByTestId("dest-wallet")).toBeEnabled();
-    await expect(page.getByTestId("dest-solana")).toBeEnabled();
-    await expect(page.getByTestId("dest-solana")).toContainText("leaves the shielded pool");
+    // An old memo with no From line has no From line on screen.
+    await expect(page.getByTestId("from")).toHaveCount(0);
 
     // The amount slides in on a delay: wait for the unwrap to settle, so the
     // screenshot is of the finished screen and not of a frame mid-animation.
@@ -100,10 +99,27 @@ describeOnMock("M2: opening an envelope", () => {
     mkdirSync(DOCS, { recursive: true });
     await page.screenshot({ path: resolve(DOCS, "m2-open.png"), fullPage: true });
 
-    // The fiat equivalent is behind a tap, and it is not a price request.
-    await expect(page.getByTestId("fiat-answer")).toHaveCount(0);
-    await page.getByTestId("fiat").click();
-    await expect(page.getByTestId("fiat-answer")).toContainText("0.0013 ZEC");
+    // No price lookup and no refusal button: a plain "What is ZEC?" instead.
+    await expect(page.getByTestId("fiat")).toHaveCount(0);
+    await page.getByTestId("what-is-zec").locator("summary").click();
+    await expect(page.getByTestId("what-is-zec")).toContainText("digital money");
+
+    // "Receive it" opens the destinations, in the order the testing asked for.
+    // The shielded flows are proved in m3-open.spec.ts and the Solana exit in
+    // m5-solana.spec.ts; here it is the order, and that Solana says what it costs.
+    await expect(page.getByTestId("dest-address")).toHaveCount(0);
+    await page.getByTestId("receive-it").click();
+    const order = await page
+      .locator(".next-steps > li > button")
+      .evaluateAll((els) => els.map((e) => e.getAttribute("data-testid")));
+    expect(order).toEqual(["dest-exchange", "dest-solana", "dest-address", "dest-wallet"]);
+    await expect(page.getByTestId("dest-exchange")).toContainText("My exchange account");
+    await expect(page.getByTestId("dest-address")).toContainText("A Zcash wallet app");
+    await expect(page.getByTestId("dest-wallet")).toContainText("Make a wallet in this page");
+    await expect(page.getByTestId("dest-solana")).toContainText("leaves the shielded pool");
+    // And back again to the envelope.
+    await page.getByTestId("receive-back").click();
+    await expect(page.getByTestId("memo")).toHaveText("Zenvelope M1");
 
     // Drainer copy is banned product-wide.
     expect((await page.locator("body").innerText()).toLowerCase()).not.toContain("claim");
@@ -118,6 +134,20 @@ describeOnMock("M2: opening an envelope", () => {
     // And the URL is still clean at the end of the flow, not only at the start.
     expect(page.url()).not.toContain(SECRET);
     expect(await page.evaluate(() => window.location.hash)).toBe("");
+  });
+
+  test("a memo ending in a From line shows the name above the amount", async ({ page }) => {
+    // src/core/mock.ts: a secret starting `fromName` carries
+    // "Happy birthday, Olena. Coffee is on me.\n\nFrom Ihor".
+    await page.goto(`/e#fromName${SECRET.slice(8)}.3490437`);
+    await page.getByTestId("open-envelope").click();
+    await expect(page.getByTestId("amount")).toHaveText("0.0013 ZEC");
+    await expect(page.getByTestId("from")).toHaveText("From Ihor");
+    await expect(page.getByTestId("memo")).toHaveText("Happy birthday, Olena. Coffee is on me.");
+    // The name comes before the amount on the page.
+    const fromBox = await page.getByTestId("from").boundingBox();
+    const amountBox = await page.getByTestId("amount").boundingBox();
+    expect(fromBox!.y).toBeLessThan(amountBox!.y);
   });
 
   test("forgets the link on reload, and says so rather than looking broken", async ({ page }) => {

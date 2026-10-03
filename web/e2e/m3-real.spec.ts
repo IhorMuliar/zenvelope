@@ -73,7 +73,8 @@ const FEE_ENABLED = true;
  * `ZENV_M4_THREADS=1` sends the core worker down the single-threaded package.
  */
 const THREADS = process.env.ZENV_M4_THREADS;
-const QUERY = `?dry=1${THREADS ? `&threads=${THREADS}` : ""}`;
+// `debug=1` shows the Timing block on the done screen, which this run reads.
+const QUERY = `?dry=1&debug=1${THREADS ? `&threads=${THREADS}` : ""}`;
 
 /* ------------------------------------------------------- what to expect, in ZEC */
 
@@ -202,6 +203,8 @@ async function openEnvelope(page: Page): Promise<void> {
   }
   await expect(page.getByTestId("amount")).toHaveText(ENVELOPE, { timeout: 180_000 });
   await expect(page.getByTestId("mock-badge")).toHaveCount(0);
+  // "Receive it" opens the destinations; the key warm-up began when the envelope opened.
+  await page.getByTestId("receive-it").click();
   // warm_proving_key runs in the background from the moment the envelope opens. This is
   // the wait a recipient actually has before "Send it on" can start proving, so it is
   // the other half of the M4 timing table.

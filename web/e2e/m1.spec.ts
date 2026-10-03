@@ -107,7 +107,10 @@ describeOnRealCore("M1: the web app on the real wasm core", () => {
     await expect(page.getByTestId("envelope-link")).toBeVisible();
     await expectRealCore(page);
 
+    // Step 1 shows the link; the payment details are on step 2, once it is saved.
     const link = (await page.getByTestId("envelope-link").textContent())!.trim();
+    await page.getByTestId("saved-link").check();
+    await page.getByTestId("to-pay").click();
     const uri = (await page.getByTestId("payment-uri").textContent())!.trim();
     const address = (await page.getByTestId("envelope-address").textContent())!.trim();
     const ufvk = (await page.getByTestId("envelope-ufvk").textContent())!.trim();

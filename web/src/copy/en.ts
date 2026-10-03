@@ -27,7 +27,7 @@
  * test over this module's exports rather than a grep over JSX.
  */
 
-import { EXPLORER_NAME, SENDER_WALLETS, TAGLINE } from "../config";
+import { EXPLORER_NAME, SENDER_WALLETS } from "../config";
 
 /** The repository every "read the code" line points at. */
 export const REPO_URL = "https://github.com/IhorMuliar/zenvelope";
@@ -58,13 +58,73 @@ export interface Step {
 }
 
 export const landing = {
-  headline: TAGLINE,
+  /** One headline. The longer tagline stays in the page's meta description. */
+  headline: "Send shielded money as a link",
+  /** One short line under it. Under 20 words, and it is about the recipient. */
+  subline: "They open it in any browser. No app and no wallet needed to receive it.",
+
+  amountLabel: "Amount",
+  amountUnit: "ZEC",
+  amountHint: "Minimum 0.0001 ZEC.",
+  /** Quick picks under the amount. */
+  presets: ["0.01", "0.05", "0.1", "0.5"],
+  messageLabel: "Message (optional)",
+  messagePlaceholder: "Happy birthday!",
+  fromLabel: "From (optional)",
+  fromPlaceholder: "Your name",
+  /** Under the message and name, with the live byte count. */
+  memoHint: (used: number, max: number) =>
+    `Only the person who opens it can read this. ${used}/${max} bytes.`,
+  memoTooLong: (used: number, max: number) =>
+    `The message and name are too long together: ${used} of ${max} bytes.`,
+
+  /** Group mode sits behind this, so the common case is one simple form. */
+  groupAsk: "Sending to several people?",
+  groupLink: "Make several links",
+  groupHide: "Just one link",
+  countLabel: "Number of links",
+  countHint: "1 to 50. Each link is its own envelope with the same amount.",
+
+  submit: "Create envelope",
+  submitMany: "Create envelopes",
+  submitBusy: "Creating…",
+
+  howTitle: "How it works",
+  /** The three-step strip under the form. */
+  howSteps: [
+    "You pay from your Zcash wallet.",
+    "You send the link in any chat.",
+    "They open it and choose where the money goes.",
+  ],
+  howMore: "More about how it works",
+
+  safeTitle: "Safe by design",
+  safeLine:
+    "We never hold your money. The secret lives in the link, and the code is open source.",
+  neverAsk: NEVER_ASK,
+} as const;
+
+/* ------------------------------------------------------------------ footer */
+
+export const footer = {
+  sourceLabel: "Open source, MIT",
+  sourceUrl: REPO_URL,
+  built: "Built for the Colosseum Crypto World's Fair 2026, Zcash track.",
+  /** Stated as a fact, because it is one: there is no analytics code and no cookie. */
+  noTracking: "No analytics. No cookies.",
+} as const;
+
+/* -------------------------------------------------------------------- /how */
+
+export const how = {
+  title: "We never hold funds",
+  lede: "Five steps, and none of them is us holding your money.",
 
   /** How it works, in one paragraph. Rule 4 in miniature: no trust asked for. */
-  howInOneParagraph:
-    "Your browser makes a secret and puts it in the part of a link after the #, which browsers never send to any server. That secret derives a one-time shielded Zcash address, and you pay it from your own wallet. Whoever opens the link uses the same secret, in their own browser, to find the payment and move it wherever they want. The amount is not in the link, so a link on its own tells nobody anything.",
+  inOneParagraph:
+    "Your browser makes a secret and puts it in the part of a link after the #, which browsers never send to any server. That secret derives a one-time shielded Zcash address, and you pay it from your own wallet. Whoever opens the link uses the same secret, in their own browser, to find the payment and move it wherever they want. The amount is not in the link, so a link on its own tells a stranger nothing.",
 
-  neverHoldTitle: "We never hold funds",
+  neverHoldTitle: "Where the money is",
   neverHoldLede: "Three places the money can be. None of them is us.",
 
   /** The three-step strip. Sender's wallet, the link's address, the recipient. */
@@ -83,37 +143,7 @@ export const landing = {
     },
   ] as Step[],
 
-  formTitle: "Make an envelope",
-  amountLabel: "Amount per envelope, in ZEC",
-  amountHint: "Minimum 0.0001 ZEC. Up to 8 decimal places.",
-  countLabel: "Number of envelopes",
-  countHint: "1 to 50. More than one makes a link for each, with the same amount.",
-  messageLabel: "Message to the recipient (encrypted on-chain, revealed when opened)",
-  messagePlaceholder: "Happy birthday",
-  submit: "Create envelope",
-  submitMany: "Create envelopes",
-  submitBusy: "Creating…",
-
-  neverAsk: NEVER_ASK,
-  secretFine:
-    "The secret is generated in your browser and lives in the link only. We never see it, and we cannot open, freeze or refund an envelope.",
-} as const;
-
-/* ------------------------------------------------------------------ footer */
-
-export const footer = {
-  sourceLabel: "Open source, MIT",
-  sourceUrl: REPO_URL,
-  built: "Built for the Colosseum Crypto World's Fair 2026, Zcash track.",
-  /** Stated as a fact, because it is one: there is no analytics code and no cookie. */
-  noTracking: "No analytics. No cookies.",
-} as const;
-
-/* -------------------------------------------------------------------- /how */
-
-export const how = {
-  title: "We never hold funds",
-  lede: "Five steps, and none of them is us holding your money.",
+  stepsTitle: "Step by step",
 
   steps: [
     {
@@ -149,11 +179,11 @@ export const how = {
   safeChecks: [
     {
       title: "Read the host in the URL bar",
-      body: `Everything before the first single / is the host. It has to be ${CANONICAL_HOST_HINT} — a look-alike spelling, an extra word before the dot, or a different ending is a different site. The part after the # is never something you need to read, and never something you should retype somewhere else.`,
+      body: `Everything before the first single / is the host. It has to be ${CANONICAL_HOST_HINT}. A look-alike spelling, an extra word before the dot, or a different ending is a different site. The part after the # is never something you need to read, and never something you should retype somewhere else.`,
     },
     {
       title: "The secret after the # never leaves your browser",
-      body: "Browsers do not send the fragment — the part after the # — to any server. Ours never sees it, never logs it, and could not hand it over if asked. You can watch that yourself: open your browser's network panel before you open the envelope and check that the secret appears in no request.",
+      body: "Browsers do not send the fragment, the part after the #, to any server. Ours never sees it, never logs it, and could not hand it over if asked. You can watch that yourself: open your browser's network panel before you open the envelope and check that the secret appears in no request.",
     },
     {
       title: "Read the code that runs on you",
@@ -239,7 +269,7 @@ export const transparentBoundary = {
     },
     {
       title: "It can be linked to everything that address does",
-      body: "Every other payment that address has made or received is public too, so this one joins them. If that address is known to be yours — an exchange deposit, a published tip address — this envelope becomes yours in public as well.",
+      body: "Every other payment that address has made or received is public too, so this one joins them. If that address is known to be yours, such as an exchange deposit or a published tip address, this envelope becomes yours in public as well.",
     },
     {
       title: "The envelope stops being private at this point",
@@ -258,6 +288,43 @@ export const transparentBoundary = {
   back: "Use a shielded address instead",
 } as const;
 
+/* ---------------------------------- the same gate, for an exchange deposit */
+
+/**
+ * The transparent gate again, in the words someone sending to their own
+ * exchange account needs. The gate is the same component and the same tick:
+ * the deposit really is public. What changes is the framing, because for an
+ * exchange deposit that is normal and expected, not a mistake to warn off.
+ */
+export const exchangeBoundary = {
+  title: "Exchange deposits are public",
+  lede: "Your exchange receives this like any other deposit. Read these before you send. A sent payment cannot be taken back.",
+
+  points: [
+    {
+      title: "The amount and the address are visible on-chain",
+      body: "Most exchange deposit addresses are transparent. Anyone can see how much arrived and where. That is normal for exchange deposits.",
+    },
+    {
+      title: "Your exchange links it to your account",
+      body: "The exchange knows this deposit is yours, as it does with every deposit you make.",
+    },
+    {
+      title: "The network fee is a little higher",
+      body: "Sending to this kind of address costs 0.00015 ZEC in network fees instead of 0.0001 ZEC.",
+    },
+    {
+      title: "Check the address, then it is final",
+      body: "Copy the address straight from your exchange's ZEC deposit page. Once the payment is on the chain it cannot be reversed, by you or by us.",
+    },
+  ] as Step[],
+
+  checkbox: "I understand this deposit is public",
+  blockedHint: "Tick the box above to continue.",
+  continue: "Continue",
+  back: "Choose somewhere else",
+} as const;
+
 /* ------------------------------------------------------- the Solana exit (M5) */
 
 /**
@@ -271,14 +338,19 @@ export const transparentBoundary = {
  * minimum below which it will not trade, and the sentence that we are not the
  * swap provider and never hold the funds.
  *
- * The exit is never the headline. It is the third card of three, behind a
- * required tick, and every screen of it offers the way back to a shielded
- * destination.
+ * The exit is never the headline. It is one card of four, behind a required
+ * tick, and every screen of it offers the way back to a shielded destination.
  */
 export const solanaExit = {
-  cardTitle: "USDC or SOL on Solana",
+  cardTitle: "USDC in my Solana wallet",
+  cardHint: "Phantom, Solflare and other Solana wallets.",
   cardBody:
-    "This leaves the shielded pool. A third-party swap rail does the exchange, we never hold the funds on either side, and you see every cost before you commit.",
+    "A swap service changes it into USDC. This leaves the shielded pool, and we never hold the funds.",
+  /** The numbers on the card itself, so the option never says only "fees apply". */
+  cardNumbers: (zecIn: string, zcashFees: string) =>
+    `${zecIn} goes into the swap after ${zcashFees} of Zcash fees. You see the exact USDC amount and the swap's cost before anything is sent.`,
+  /** The Zcash side of the cost, as its own row on the quote. */
+  zcashFeesLabel: "Zcash fees, already taken off",
 
   /* ------------------------------------------------------------- the asset */
 
@@ -463,7 +535,7 @@ export const group = {
     "“In the envelope” is what the person who opens that link receives. “To send” is that plus the flat service fee, and it is the amount the payment URI asks your wallet for.",
   warn: "Each link is the money. Anyone holding one can open that envelope, so treat the CSV like cash and send each link to one person only.",
   memoryFine:
-    "These links exist in this tab and in the CSV you download. They are not stored, not sent anywhere, and not recoverable: leave this page without saving them and the money stays in the envelopes with nobody able to open them.",
+    "These links exist in this tab and in the CSV you download. They are not stored, not sent anywhere, and not recoverable: leave this page without saving them and the money stays in envelopes that cannot be opened.",
   total: (total: string, n: number, each: string) =>
     `You will send ${total} ZEC in total: ${n} payments of ${each} ZEC.`,
   again: "Create more envelopes",
@@ -473,15 +545,64 @@ export const group = {
 /* ------------------------------------------------------------------ singles */
 
 export const single = {
-  title: "Your envelope is ready",
-  keepTitle: "1. Keep this link",
-  keepWarn: "Anyone with this link can open the envelope. We never see it.",
-  fundTitle: "2. Fund it from a shielded balance",
+  stepOf: (n: number) => `Step ${n} of 3`,
+  previewLabel: "What they will see",
+  previewEmpty: "No message",
+  previewFrom: (name: string) => `From ${name}`,
+
+  /* Step 1: save the link before paying. */
+  saveTitle: "Save your link first",
+  saveLede:
+    "This link will hold the money. Keep a copy before you pay. Sending it to yourself in a chat works.",
+  linkLabel: "Your envelope link",
+  copy: "Copy",
+  share: "Share…",
+  shareFailed: "Sharing did not work here. Use Copy instead.",
+  keepWarn:
+    "This link is the money. Anyone with this link can open the envelope. If you lose it after paying, the money cannot be recovered, and we cannot recover it either.",
+  savedCheckbox: "I saved the link",
+  savedBlocked: "Tick the box once the link is somewhere safe.",
+  saveContinue: "Continue to payment",
+
+  /* Step 2: pay. */
+  payTitle: (total: string) => `Pay ${total} ZEC from your Zcash wallet`,
+  openWallet: "Open in my wallet app",
+  scanHint: "Or scan this with your wallet app.",
+  inEnvelope: "In the envelope",
+  serviceFee: "Service fee",
+  total: "Total",
+  walletFee: "Your wallet may add its own small network fee on top.",
+  recipientFee: (fee: string) =>
+    `When they send it on, a network fee of about ${fee} ZEC comes out of the envelope.`,
+  wallets: (list: string) => `Works with ${list}.`,
   fundWarn: "Send exactly this amount from a shielded balance.",
-  sendTitle: "3. Send the link",
-  sendBody:
-    "Once the payment confirms, whoever opens the link unwraps the envelope in their browser and moves the money where they want it.",
-  again: "Create another envelope",
+  canClose:
+    "You can close this page. The money is safe as long as you keep the link. Open the link any time to check.",
+  paidSkip: "I paid. Show me how to share it",
+  payExtras: "Payment details",
+  paymentUriLabel: "Payment URI",
+  addressLabel: "Envelope address",
+  viewingKeyLabel: "Advanced: viewing key",
+  viewingKeyHint:
+    "This full viewing key lets a light client watch the envelope: it reveals the amounts and memos that arrive at this address. It cannot spend, and it cannot open the envelope. Share it only with someone you want watching.",
+  back: "Back",
+
+  /* Step 3: send the link. */
+  sendTitlePaid: "Paid. Now send it.",
+  sendTitle: "Now send it.",
+  sendLede: (amount: string) => `${amount} ZEC is in the envelope. Send the link to them in any chat.`,
+  sendLedeUnpaid:
+    "We have not seen your payment yet. The link works as soon as it arrives, so you can send it now.",
+  shareLink: "Share link…",
+  copyLink: "Copy link",
+  showQr: "Show QR",
+  hideQr: "Hide QR",
+  qrHint: "For in person: they scan this with their phone camera.",
+  takeBack: "Take it back",
+  takeBackBody:
+    "If they have not opened it yet, you can open your own link and send the money back to your wallet.",
+  takeBackGo: "Open my link",
+  again: "Make another envelope",
 } as const;
 
 /* ------------------------------------------------------------ payment watch */
@@ -492,8 +613,8 @@ export const single = {
  */
 export const watch = {
   waitingTitle: "Waiting for your payment",
-  waitingBody:
-    "Keep this tab open and it checks the chain every 45 seconds for the next two hours. When the payment lands you get a faster link to share. Close it and nothing is lost: the link above works just the same.",
+  /** The status line on step 2, before the first look has an answer. */
+  waitingLine: "Waiting for your payment. Usually about a minute.",
   groupWaitingBody:
     "Keep this tab open and it checks each envelope in turn, every 45 seconds, for the next two hours. As payments land, the table and the CSV gain the block they arrived in and a faster link for that envelope. Close it and nothing is lost: the links you have work just the same.",
   firstLook: "First look in about 30 seconds.",
@@ -506,20 +627,109 @@ export const watch = {
   errors: (n: number) =>
     `${n === 1 ? "One look" : `${n} looks`} could not reach the chain. It keeps trying.`,
   noHeight:
-    "This page could not read the chain height when it made the link, so it is not watching for the payment. The link works as it is.",
-  paidTitle: (zec: string, height: number) => `Paid: ${zec} ZEC arrived at block ${height}`,
-  finalLabel: "Final link: share this one",
-  finalBody: (height: number) =>
-    `It starts its scan at block ${height}, where the payment is, so it opens after about one block of scanning when used straight away, and it stays faster than the original however long it waits.`,
-  originalLabel: "Original link: still works, slower to open",
-  originalBody: (birthday: number) =>
-    `It scans from block ${birthday}, when the link was made. Both links open the same envelope; send only one of them.`,
-  finalQr: "Show the final link as a QR code",
+    "This page could not read the chain height, so it is not watching for the payment. The link works as it is.",
+  paidDetail: (zec: string, height: number) => `${zec} ZEC arrived in block ${height}.`,
   groupPaid: (paid: number, n: number) => `${paid} of ${n} paid.`,
   groupDone: (n: number) =>
     `All ${n} paid. Download the CSV again for the final links; the originals still work.`,
   groupPaidCell: (height: number) => `block ${height}`,
   groupUnpaidCell: "not yet",
+} as const;
+
+/* ------------------------------------------------------- take one back (/back) */
+
+export const takeBack = {
+  title: "Take an envelope back",
+  lede: "Paste the link of an envelope you made. If it has not been opened yet, you can open it yourself and send the money to your own wallet.",
+  label: "Your envelope link",
+  placeholder: "https://…/e#…",
+  submit: "Open my envelope",
+  notHere: "That is not an envelope link from this site. Check that you copied all of it.",
+  noSecret: "That link has no envelope in it. Check that you copied all of it.",
+  note: "Once someone has opened it and sent the money on, it cannot be taken back.",
+} as const;
+
+/* ------------------------------------------------ open page: sealed and revealed */
+
+export const sealed = {
+  title: "You have an envelope",
+  open: "Open",
+  reassure:
+    "It opens here in your browser. Nothing to install. We never ask for a password or card details.",
+  safeLink: "Is this safe?",
+  scanningTitle: "Opening your envelope…",
+  scanningHint: "Finding it on the Zcash network. Every block is checked here, in your browser.",
+} as const;
+
+export const revealed = {
+  title: "Your envelope is open",
+  from: (name: string) => `From ${name}`,
+  receive: "Receive it",
+  checking: "Checking…",
+  details: "Details",
+  whatIsZec: "What is ZEC?",
+  whatIsZecBody:
+    "ZEC is Zcash, a kind of digital money. This envelope holds an amount of it. You can keep it as ZEC, or change it into dollars.",
+  compactLabel: "In this envelope",
+} as const;
+
+/* -------------------------------------------- open page: where should it go? */
+
+export const receive = {
+  title: "Where should it go?",
+  back: "Back",
+  continue: "Continue",
+
+  exchangeTitle: "My exchange account",
+  exchangeHint: "Coinbase, Kraken, Binance and others.",
+  exchangeHow: "In your exchange, open Deposit, choose ZEC, and copy the deposit address.",
+  exchangeLabel: "Your ZEC deposit address",
+
+  appTitle: "A Zcash wallet app",
+  appHint: "Zodl, Zingo and others. Free on your phone.",
+  appSteps: [
+    "Install Zodl or Zingo from your app store.",
+    "Open it and tap Receive.",
+    "Copy the address and paste it here.",
+  ],
+  appLabel: "Your Zcash address",
+
+  pageWalletTitle: "Make a wallet in this page",
+  pageWalletHint: "For people who cannot install an app. You get 24 words to keep.",
+  pageWalletWords:
+    "These 24 words are the wallet. Write them on paper now: they are shown here once and saved nowhere.",
+  pageWalletWarn: "Never screenshot these words or send them to anyone, even family.",
+  pageWalletLater:
+    "To use this money later, you type these 24 words into a wallet app such as Zodl or Zingo.",
+  pageWalletCheckbox: "I wrote these down",
+
+  /** The review button, named after where the money goes. */
+  sendTo: {
+    exchange: "Send to my exchange",
+    app: "Send to my wallet app",
+    wallet: "Send to my new wallet",
+    solana: "Send to my Solana wallet",
+  },
+} as const;
+
+/** The done screen: where the money is now, and what to do next. */
+export const doneCopy = {
+  exchange: {
+    where: "The money is on its way to your exchange account.",
+    next: "It shows in your account once the exchange has seen enough confirmations. That usually takes minutes, sometimes longer.",
+  },
+  app: {
+    where: "The money is on its way to your Zcash wallet app.",
+    next: "It shows in the app within a few minutes, once the next blocks arrive.",
+  },
+  wallet: {
+    where: "The money is in the wallet this page made for you.",
+    next: "To use it, install a wallet app such as Zodl or Zingo, choose to restore a wallet, and type your 24 words.",
+  },
+  solana: {
+    where: "The ZEC is on its way to the swap service.",
+    next: "The USDC arrives in your Solana wallet when the swap finishes. This page follows it below.",
+  },
 } as const;
 
 /**
@@ -587,6 +797,12 @@ export function allStrings(): string[] {
     how,
     trustBoundary,
     transparentBoundary,
+    exchangeBoundary,
+    takeBack,
+    sealed,
+    revealed,
+    receive,
+    doneCopy,
     solanaExit,
     group,
     single,

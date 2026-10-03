@@ -21,8 +21,11 @@
  *     exit does, and the tick is the only way past it (M7)
  *   - the done screen has the txid, a copy button, an explorer link, and says
  *     the envelope is now empty
- *   - the done screen's Timing block measures the scan, the warm-up and each
- *     stage, and copies as plain text
+ *   - the done screen says where the money is now and what to do next
+ *   - the done screen's Timing block, shown with `?debug=1` only, measures the
+ *     scan, the warm-up and each stage, and copies as plain text
+ *   - an exchange deposit address (a t1) goes through the same gate, in the
+ *     words an exchange deposit needs, and the button names the exchange
  *   - the secret never reaches a link or a request, and the word "claim" never
  *     appears anywhere on any screen
  *
@@ -56,11 +59,12 @@ const SAPLING =
 const REAL_CORE = existsSync(resolve(HERE, "../src/wasm/core/zenvelope_core.js"));
 const describeOnMock = REAL_CORE ? test.describe.skip : test.describe;
 
-/** Opens the envelope and lands on the "Where should it go?" card. */
-async function openEnvelope(page: Page) {
-  await page.goto(`/e#${FRAGMENT}`);
+/** Opens the envelope, taps "Receive it" and lands on "Where should it go?". */
+async function openEnvelope(page: Page, query = "") {
+  await page.goto(`/e${query}#${FRAGMENT}`);
   await page.getByTestId("open-envelope").click();
   await expect(page.getByTestId("amount")).toHaveText("0.0013 ZEC");
+  await page.getByTestId("receive-it").click();
 }
 
 /** How the page shortens a long string: src/lib/format.ts truncateMiddle. */
@@ -82,7 +86,8 @@ describeOnMock("M3: sending the envelope on", () => {
     const requests: string[] = [];
     page.on("request", (r) => requests.push(r.url()));
 
-    await openEnvelope(page);
+    // `debug=1` shows the Timing block on the done screen, which this test reads.
+    await openEnvelope(page, "?debug=1");
 
     // 1. The proving key is already being built, before anything was chosen.
     await expect(page.getByTestId("warm-status")).toHaveText(/Preparing keys… ~40 s|Keys ready/);
@@ -133,6 +138,8 @@ describeOnMock("M3: sending the envelope on", () => {
     // 5. The four stages, in order, with a clock. Each stage is one second in
     // the mock, so the states are caught with an in-page poll rather than with
     // a round trip that could miss the window.
+    // The button names where the money goes.
+    await expect(page.getByTestId("send-it-on")).toHaveText("Send to my wallet app");
     await page.getByTestId("send-it-on").click();
     await expect(page.getByTestId("sending")).toBeVisible();
     await expect(page.getByTestId("stage-row")).toHaveCount(4);
@@ -175,6 +182,10 @@ describeOnMock("M3: sending the envelope on", () => {
       /^https:\/\/mainnet\.zcashexplorer\.app\/transactions\/[0-9a-f]{64}$/,
     );
     await expect(page.getByTestId("envelope-empty")).toHaveText("The envelope is now empty.");
+    await expect(page.getByTestId("done-where")).toHaveText(
+      "The money is on its way to your Zcash wallet app.",
+    );
+    await expect(page.getByTestId("done-next")).toContainText("shows in the app");
     // The progress checklist is gone: this screen is the end of the road.
     await expect(page.getByTestId("stage-row")).toHaveCount(0);
 
@@ -241,8 +252,12 @@ describeOnMock("M3: sending the envelope on", () => {
 
     await page.getByTestId("dest-wallet").click();
 
-    // 24 words, on screen, in a grid.
+    // 24 words, on screen, in a grid, with the warning and the honest "later".
     await expect(page.getByTestId("wallet-word")).toHaveCount(24);
+    await expect(page.getByTestId("wallet-warn")).toHaveText(
+      "Never screenshot these words or send them to anyone, even family.",
+    );
+    await expect(page.getByTestId("wallet-later")).toContainText("wallet app");
     await expect(page.getByTestId("wallet-address")).toHaveText(/^u1mock.{6}\u2026.{12}$/);
     await expect(page.getByTestId("wallet-birthday")).toHaveText("3,490,500");
     await expect(page.getByTestId("wallet-restore")).toHaveText(
@@ -265,6 +280,7 @@ describeOnMock("M3: sending the envelope on", () => {
     await page.getByTestId("to-review").click();
     await expect(page.getByTestId("review-receive")).toHaveText("0.0009 ZEC");
     await expect(page.getByTestId("review-destination")).toHaveText(/^u1mock.{6}\u2026.{12}$/);
+    await expect(page.getByTestId("send-it-on")).toHaveText("Send to my new wallet");
 
     // The mnemonic is on the screen and nowhere else.
     const words = await page.getByTestId("wallet-word").count();
@@ -331,6 +347,38 @@ describeOnMock("M3: sending the envelope on", () => {
     await noDrainerCopy(page);
   });
 
+  /**
+   * An exchange deposit address is usually a t1. The gate is the same
+   * component and the same tick, worded for an ordinary exchange deposit, and
+   * the done screen says where the money is and that the timing block is
+   * hidden unless asked for.
+   */
+  test("sends to an exchange deposit address, through the exchange wording", async ({ page }) => {
+    await openEnvelope(page);
+    await page.getByTestId("dest-exchange").click();
+    await page.getByTestId("dest-input").fill("t1KvSHRKp5ZgFcqJe8ZbeBHhpTCVCXjPWKa");
+    await expect(page.getByTestId("dest-feedback")).toHaveAttribute("data-status", "warn");
+    await page.getByTestId("to-review").click();
+
+    await expect(page.getByTestId("exchange-boundary")).toBeVisible();
+    await expect(page.getByTestId("trust-title")).toHaveText("Exchange deposits are public");
+    await expect(page.getByTestId("trust-points").locator("li")).toHaveCount(4);
+    await expect(page.getByTestId("trust-continue")).toBeDisabled();
+    await page.getByTestId("trust-ack").check();
+    await page.getByTestId("trust-continue").click();
+
+    await expect(page.getByTestId("review-network-fee")).toHaveText("0.00015 ZEC");
+    await expect(page.getByTestId("send-it-on")).toHaveText("Send to my exchange");
+    await page.getByTestId("send-it-on").click();
+    await expect(page.getByTestId("sent-heading")).toHaveText("Sent.", { timeout: 60_000 });
+    await expect(page.getByTestId("done-where")).toContainText("your exchange account");
+    await expect(page.getByTestId("done-next")).toContainText("confirmations");
+    // The developer timing is not on the recipient's screen without ?debug=1.
+    await expect(page.getByTestId("timing")).toHaveCount(0);
+    await expect(page.getByTestId("copy-timing")).toHaveCount(0);
+    await noDrainerCopy(page);
+  });
+
   /** A unified address is not gated: it never leaves the shielded pool. */
   test("does not gate a shielded destination", async ({ page }) => {
     await openEnvelope(page);
@@ -369,6 +417,8 @@ describeOnMock("M3: sending the envelope on", () => {
     await page.goto(`/e#${TINY_SECRET}.3490437`);
     await page.getByTestId("open-envelope").click();
     await expect(page.getByTestId("amount")).toHaveText("0.0003 ZEC");
+    // Nothing to receive: no "Receive it", just the reason.
+    await expect(page.getByTestId("receive-it")).toHaveCount(0);
     await expect(page.getByTestId("too-small")).toHaveText(
       "This envelope is too small to send on with the service fee; it needs at least 0.0005 ZEC.",
     );

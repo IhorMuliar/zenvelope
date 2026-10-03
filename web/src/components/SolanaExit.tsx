@@ -73,6 +73,12 @@ interface Props {
    */
   envelopeAddress: string;
   /**
+   * The Zcash side of the cost: the network fee and the service fee the sweep
+   * takes before the rail sees anything. Shown as its own row on the quote, so
+   * every cost is a number on one screen.
+   */
+  zcashFeesZat?: bigint;
+  /**
    * The core's address classifier, for the refund override and for nothing else
    * (M4). The exit still never sees the secret and never builds a transaction.
    */
@@ -84,7 +90,7 @@ interface Props {
 
 /** ISO to something a person reads, in their own time zone. */
 function formatDeadline(iso: string | null): string {
-  if (!iso) return "—";
+  if (!iso) return "not given";
   const at = new Date(iso);
   if (Number.isNaN(at.getTime())) return iso;
   return at.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
@@ -93,6 +99,7 @@ function formatDeadline(iso: string | null): string {
 export function SolanaExit({
   amountZat,
   envelopeAddress,
+  zcashFeesZat,
   classify,
   network,
   onPlan,
@@ -458,6 +465,12 @@ export function SolanaExit({
       <div className="card stack" data-testid="swap-quote">
         <h2>{copy.quoteTitle}</h2>
 
+        {zcashFeesZat !== undefined && zcashFeesZat > 0n ? (
+          <p className="row">
+            <span className="label">{copy.zcashFeesLabel}</span>
+            <span data-testid="swap-zcash-fees">{formatZecAmount(zcashFeesZat)}</span>
+          </p>
+        ) : null}
         <p className="row">
           <span className="label">You send</span>
           <span data-testid="swap-amount-in">

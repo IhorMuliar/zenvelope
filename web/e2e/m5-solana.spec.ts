@@ -232,6 +232,7 @@ async function openEnvelope(page: Page, query = ""): Promise<void> {
   await page.goto(`/e${query}#${FRAGMENT}`);
   await page.getByTestId("open-envelope").click();
   await expect(page.getByTestId("amount")).toHaveText("0.0013 ZEC");
+  await page.getByTestId("receive-it").click();
 }
 
 /** Through the trust boundary, ticking the box on the way. */
@@ -262,6 +263,11 @@ describeOnMock("M5: the Solana exit", () => {
     await expect(page.getByTestId("dest-solana")).toBeEnabled();
     await expect(page.getByTestId("dest-solana")).toContainText("leaves the shielded pool");
     await expect(page.getByTestId("dest-solana")).toContainText("never hold the funds");
+    // Numbers on the card, before anything is tapped: what goes into the swap,
+    // after the 0.00015 ZEC network fee and the 0.0003 ZEC service fee.
+    await expect(page.getByTestId("dest-solana-numbers")).toContainText(
+      "0.00085 ZEC goes into the swap after 0.00045 ZEC of Zcash fees",
+    );
 
     await page.getByTestId("dest-solana").click();
 
@@ -299,7 +305,8 @@ describeOnMock("M5: the Solana exit", () => {
 
   test("a pasted address, the quote's numbers, and the dry-run end screen", async ({ page }) => {
     const rail = await mockRail(page);
-    await openEnvelope(page, "?dry=1");
+    // `debug=1` shows the Timing block the dry-run end screen is checked for.
+    await openEnvelope(page, "?dry=1&debug=1");
     await throughTrustBoundary(page);
 
     // 1. What should arrive.
@@ -355,6 +362,8 @@ describeOnMock("M5: the Solana exit", () => {
     expect(String(rail.quoteRequests[0].refundTo)).toMatch(/^u1/);
 
     await expect(page.getByTestId("swap-amount-in")).toContainText("0.00085 ZEC");
+    // The Zcash side of the cost is a number on the same screen as the quote.
+    await expect(page.getByTestId("swap-zcash-fees")).toHaveText("0.00045 ZEC");
     await expect(page.getByTestId("swap-amount-in")).toContainText("$1.74");
     await expect(page.getByTestId("swap-amount-out")).toHaveText("1.424851 USDC");
     await expect(page.getByTestId("swap-amount-out-usd")).toHaveText("$1.68");

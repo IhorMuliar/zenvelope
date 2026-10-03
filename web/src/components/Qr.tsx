@@ -4,10 +4,12 @@ import QRCode from "qrcode";
 interface Props {
   value: string;
   size?: number;
+  /** What the code holds, for a screen reader. */
+  label?: string;
 }
 
 /** Renders a payment URI to a canvas. Nothing leaves the browser. */
-export function Qr({ value, size = 232 }: Props) {
+export function Qr({ value, size = 232, label = "Payment QR code" }: Props) {
   const ref = useRef<HTMLCanvasElement | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,7 +36,7 @@ export function Qr({ value, size = 232 }: Props) {
 
   return (
     <div className="qr">
-      <canvas ref={ref} width={size} height={size} aria-label="Payment QR code" />
+      <canvas ref={ref} width={size} height={size} aria-label={label} />
       {error ? <p className="error">QR could not be drawn: {error}</p> : null}
     </div>
   );

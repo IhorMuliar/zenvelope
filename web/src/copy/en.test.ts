@@ -11,12 +11,19 @@ import {
   NEVER_ASK,
   ONLY_ASK,
   allStrings,
+  doneCopy,
+  exchangeBoundary,
   footer,
   group,
   how,
   landing,
+  receive,
+  revealed,
+  sealed,
   single,
   solanaExit,
+  takeBack,
+  transparentBoundary,
   trustBoundary,
 } from "./en";
 
@@ -115,18 +122,156 @@ describe('rule 4: the "Is this link safe?" section teaches the check', () => {
   });
 });
 
-describe("the landing page", () => {
-  it("leads with the tagline and one paragraph of how it works", () => {
-    expect(landing.headline).toMatch(/Send shielded money as a link/);
-    expect(landing.howInOneParagraph.split(". ").length).toBeGreaterThan(2);
-    expect(landing.howInOneParagraph).toMatch(/#/);
+describe("the landing page is the tool", () => {
+  it("has one headline and one short subline about the recipient", () => {
+    expect(landing.headline).toBe("Send shielded money as a link");
+    const words = landing.subline.trim().split(/\s+/);
+    expect(words.length).toBeLessThanOrEqual(20);
+    expect(landing.subline).toMatch(/browser/i);
+    expect(landing.subline).toMatch(/no app/i);
+    expect(landing.subline).toMatch(/wallet/i);
   });
 
-  it('has a three-step "we never hold funds" strip: wallet, chain, browser', () => {
-    expect(landing.neverHoldSteps).toHaveLength(3);
-    expect(landing.neverHoldSteps[0].title).toMatch(/wallet/i);
-    expect(landing.neverHoldSteps[1].title).toMatch(/on-chain/i);
-    expect(landing.neverHoldSteps[2].title).toMatch(/browser/i);
+  it("offers the four preset amounts", () => {
+    expect(landing.presets).toEqual(["0.01", "0.05", "0.1", "0.5"]);
+  });
+
+  it("has optional message and From fields, and a memo limit that names both", () => {
+    expect(landing.messageLabel).toMatch(/optional/i);
+    expect(landing.fromLabel).toMatch(/^From/);
+    expect(landing.fromLabel).toMatch(/optional/i);
+    expect(landing.memoTooLong(600, 512)).toContain("600 of 512 bytes");
+  });
+
+  it("keeps group mode behind a small link", () => {
+    expect(landing.groupAsk).toBe("Sending to several people?");
+    expect(landing.groupLink).toBe("Make several links");
+  });
+
+  it('has a three-step "how it works": wallet, chat, they choose', () => {
+    expect(landing.howSteps).toHaveLength(3);
+    expect(landing.howSteps[0]).toMatch(/Zcash wallet/i);
+    expect(landing.howSteps[1]).toMatch(/chat/i);
+    expect(landing.howSteps[2]).toMatch(/open it/i);
+    expect(landing.howSteps[2]).toMatch(/where the money goes/i);
+  });
+
+  it('says "Safe by design" in one short line, next to the never-ask sentence', () => {
+    expect(landing.safeTitle).toBe("Safe by design");
+    expect(landing.safeLine).toMatch(/never hold/i);
+    expect(landing.safeLine.split(". ").length).toBeLessThanOrEqual(3);
+  });
+});
+
+describe("/how carries the long explanation", () => {
+  it("has the one-paragraph protocol, naming the fragment", () => {
+    expect(how.inOneParagraph.split(". ").length).toBeGreaterThan(2);
+    expect(how.inOneParagraph).toMatch(/#/);
+    expect(how.inOneParagraph).toMatch(/never send to any server/);
+  });
+
+  it('has the three-card "we never hold funds" strip: wallet, chain, browser', () => {
+    expect(how.neverHoldSteps).toHaveLength(3);
+    expect(how.neverHoldSteps[0].title).toMatch(/wallet/i);
+    expect(how.neverHoldSteps[1].title).toMatch(/on-chain/i);
+    expect(how.neverHoldSteps[2].title).toMatch(/browser/i);
+  });
+});
+
+describe("plain words", () => {
+  it("has no em-dashes anywhere in the copy", () => {
+    const offenders = strings.filter((s) => s.includes("\u2014"));
+    expect(offenders, offenders.join(" | ")).toEqual([]);
+  });
+
+  it('never says "nobody" or "unique"', () => {
+    const offenders = strings.filter((s) => /\b(nobody|unique)\b/i.test(s));
+    expect(offenders, offenders.join(" | ")).toEqual([]);
+  });
+});
+
+describe("the sender's three steps", () => {
+  it("counts the steps out of three", () => {
+    expect(single.stepOf(2)).toBe("Step 2 of 3");
+  });
+
+  it("saves the link before anything is paid", () => {
+    expect(single.saveTitle).toBe("Save your link first");
+    expect(single.savedCheckbox).toBe("I saved the link");
+    expect(single.keepWarn).toMatch(/cannot be recovered/i);
+  });
+
+  it("names the total, both fees, and that the page may be closed", () => {
+    expect(single.payTitle("0.0103")).toBe("Pay 0.0103 ZEC from your Zcash wallet");
+    expect(single.walletFee).toMatch(/network fee/i);
+    expect(single.recipientFee("0.0001")).toContain("0.0001 ZEC");
+    expect(single.canClose).toMatch(/close this page/i);
+    expect(single.canClose).toMatch(/keep the link/i);
+  });
+
+  it("explains taking it back plainly", () => {
+    expect(single.takeBackBody).toMatch(/not opened it yet/i);
+    expect(takeBack.note).toMatch(/cannot be taken back/i);
+  });
+});
+
+describe("the open page", () => {
+  it("reassures on the sealed screen without asking for anything", () => {
+    expect(sealed.title).toBe("You have an envelope");
+    expect(sealed.reassure).toMatch(/browser/i);
+    expect(sealed.reassure).toMatch(/never ask for a password or card details/i);
+    expect(sealed.safeLink).toBe("Is this safe?");
+  });
+
+  it("explains ZEC in one or two plain sentences", () => {
+    const sentences = revealed.whatIsZecBody.split(/(?<=\.)\s+/);
+    expect(sentences.length).toBeLessThanOrEqual(3);
+    expect(revealed.whatIsZecBody).toMatch(/digital money/i);
+    expect(revealed.whatIsZecBody).toMatch(/dollars/i);
+  });
+
+  it("names every destination in plain words", () => {
+    expect(receive.exchangeTitle).toBe("My exchange account");
+    expect(solanaExit.cardTitle).toBe("USDC in my Solana wallet");
+    expect(receive.appTitle).toBe("A Zcash wallet app");
+    expect(receive.pageWalletTitle).toBe("Make a wallet in this page");
+    expect(receive.pageWalletHint).toMatch(/cannot install an app/i);
+  });
+
+  it("warns about the 24 words and says how they are used later", () => {
+    expect(receive.pageWalletWarn).toMatch(/never screenshot/i);
+    expect(receive.pageWalletWarn).toMatch(/even family/i);
+    expect(receive.pageWalletLater).toMatch(/wallet app/i);
+  });
+
+  it("names the destination on the send button", () => {
+    expect(receive.sendTo.exchange).toBe("Send to my exchange");
+    expect(Object.values(receive.sendTo).every((l) => l.startsWith("Send to my"))).toBe(true);
+  });
+
+  it("says where the money is and what to do next, for every destination", () => {
+    for (const d of Object.values(doneCopy)) {
+      expect(d.where.length).toBeGreaterThan(10);
+      expect(d.next.length).toBeGreaterThan(10);
+    }
+    expect(doneCopy.wallet.next).toMatch(/24 words/);
+  });
+});
+
+describe("the transparent gates", () => {
+  it("keeps four points and a required tick for each wording", () => {
+    for (const gate of [transparentBoundary, exchangeBoundary]) {
+      expect(gate.points).toHaveLength(4);
+      expect(gate.checkbox).toMatch(/^I understand/);
+      expect(gate.blockedHint).toMatch(/tick the box/i);
+    }
+  });
+
+  it("words the exchange case as an ordinary, public deposit", () => {
+    const all = exchangeBoundary.points.map((p) => `${p.title} ${p.body}`).join(" ");
+    expect(exchangeBoundary.lede).toMatch(/like any other deposit/i);
+    expect(all).toMatch(/visible/i);
+    expect(all).toMatch(/0\.00015/);
   });
 });
 
@@ -203,9 +348,16 @@ describe("the Solana exit", () => {
     expect(solanaExit.notProvider).toMatch(/never holds the funds/i);
   });
 
-  it("is never the headline: the card leads with what it costs you", () => {
+  it("is never the headline: the card says what it costs you", () => {
     expect(solanaExit.cardBody).toMatch(/leaves the shielded pool/i);
     expect(solanaExit.back).toMatch(/shielded/i);
+  });
+
+  it("puts numbers on the card, never a bare 'fees apply'", () => {
+    const line = solanaExit.cardNumbers("0.00085 ZEC", "0.00045 ZEC");
+    expect(line).toContain("0.00085 ZEC");
+    expect(line).toContain("0.00045 ZEC");
+    expect(`${solanaExit.cardBody} ${line}`).not.toMatch(/fees apply/i);
   });
 
   it("tells a generated secret key holder that it is shown once and stored nowhere", () => {

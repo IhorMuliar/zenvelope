@@ -224,6 +224,9 @@ export const MOCK_TINY_ZAT = "30000";
  *   `spentOne…`  two notes, the 0.0013 ZEC one spent and a 0.0003 ZEC one
  *                still there: the envelope opens with a line about the rest.
  *
+ *   `fromName…`  one unspent note whose memo ends in a "From <name>" line, the
+ *                shape the create form writes when the sender gives a name.
+ *
  * Any other secret behaves exactly as before: one unspent note.
  *
  * The spend facts are the real M1 sweep's, so the mock screen and the real one
@@ -232,6 +235,9 @@ export const MOCK_TINY_ZAT = "30000";
  */
 export const MOCK_SPENT_ALL_MARKER = "spentAll";
 export const MOCK_SPENT_ONE_MARKER = "spentOne";
+export const MOCK_FROM_MARKER = "fromName";
+/** The `fromName` variant's memo: a message, a blank line, then the From line. */
+export const MOCK_FROM_MEMO = "Happy birthday, Olena. Coffee is on me.\n\nFrom Ihor";
 export const MOCK_SPENT = {
   txid: "ba0f91cfe7ca33dd269b692bf80027df2681a321215e90ab28c2a56260fa2aad",
   height: 3491056,
@@ -253,11 +259,12 @@ export const MOCK_LEFT_NOTE = {
   spent_time: null,
 } as const;
 
-type MockVariant = "unspent" | "spentAll" | "spentOne";
+type MockVariant = "unspent" | "spentAll" | "spentOne" | "from";
 
 function mockVariant(secret: string): MockVariant {
   if (secret.startsWith(MOCK_SPENT_ALL_MARKER)) return "spentAll";
   if (secret.startsWith(MOCK_SPENT_ONE_MARKER)) return "spentOne";
+  if (secret.startsWith(MOCK_FROM_MARKER)) return "from";
   return "unspent";
 }
 
@@ -269,7 +276,7 @@ function mockResult(variant: MockVariant, birthday: number | undefined, total: n
     spent_height: MOCK_SPENT.height,
     spent_time: MOCK_SPENT.time,
   };
-  const tip = variant === "unspent" ? MOCK_TIP_HEIGHT : MOCK_SPENT_TIP;
+  const tip = variant === "unspent" || variant === "from" ? MOCK_TIP_HEIGHT : MOCK_SPENT_TIP;
   const base = {
     found: true,
     tip_height: tip,
@@ -288,6 +295,14 @@ function mockResult(variant: MockVariant, birthday: number | undefined, total: n
         notes: [spentNote, { ...MOCK_LEFT_NOTE }],
         total_zat: MOCK_LEFT_NOTE.amount_zat,
         spent_zat: MOCK_NOTE.amount_zat,
+      };
+    case "from":
+      return {
+        ...base,
+        all_spent: false,
+        notes: [{ ...MOCK_NOTE, memo: MOCK_FROM_MEMO }],
+        total_zat: MOCK_NOTE.amount_zat,
+        spent_zat: "0",
       };
     default:
       return {
@@ -324,7 +339,7 @@ export async function openEnvelope(
   // Derive first, so a bad secret fails the same way the real core would.
   derive(secret_b64url, network);
   const variant = mockVariant(secret_b64url);
-  const tip = variant === "unspent" ? MOCK_TIP_HEIGHT : MOCK_SPENT_TIP;
+  const tip = variant === "unspent" || variant === "from" ? MOCK_TIP_HEIGHT : MOCK_SPENT_TIP;
   const total = birthday !== undefined && birthday < tip ? tip - birthday + 1 : MOCK_DEFAULT_SPAN;
   const ticks = Math.round(MOCK_SCAN_MS / MOCK_TICK_MS);
 
