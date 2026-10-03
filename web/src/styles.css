@@ -1,14 +1,21 @@
 /* Mobile first. No framework. Dark and light from prefers-color-scheme. */
 
 :root {
-  --bg: #fbfaf7;
+  /* Sealed Letter: paper, ink, a gold seal. */
+  --bg: #fbf7ef;
   --surface: #ffffff;
-  --text: #16150f;
-  --muted: #5d5b52;
-  --line: #e2ded2;
-  --accent: #b8860b;
-  --accent-text: #ffffff;
-  --warn-bg: #fdf4e3;
+  --text: #231f20;
+  --muted: #6b635a;
+  --line: #e6dcc8;
+  --accent: #231f20;
+  --accent-text: #fbf7ef;
+  --link: #8a5a00;
+  --seal: #f4b728;
+  --seal-deep: #cf8a00;
+  --envelope: #ede3cf;
+  --envelope-line: #d9cbb0;
+  --paper: #ffffff;
+  --warn-bg: #fbf0d9;
   --warn-text: #6b4c06;
   --error: #a3260f;
   --radius: 12px;
@@ -16,14 +23,20 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #12120f;
-    --surface: #1b1b17;
-    --text: #f2efe6;
-    --muted: #a9a496;
-    --line: #2d2c25;
-    --accent: #e0b64a;
-    --accent-text: #17160f;
-    --warn-bg: #2a2412;
+    --bg: #171412;
+    --surface: #221e1b;
+    --text: #f3ede2;
+    --muted: #a89f92;
+    --line: #3a332c;
+    --accent: #f4b728;
+    --accent-text: #231f20;
+    --link: #f4c04e;
+    --seal: #f4b728;
+    --seal-deep: #cf8a00;
+    --envelope: #e3d6bc;
+    --envelope-line: #c4b38f;
+    --paper: #fbf7ef;
+    --warn-bg: #2b2414;
     --warn-text: #f0d79a;
     --error: #ff9478;
   }
@@ -76,7 +89,7 @@ nav {
 }
 
 a {
-  color: var(--accent);
+  color: var(--link);
 }
 
 h1 {
@@ -195,7 +208,7 @@ summary:focus-visible {
 }
 
 .badge {
-  border: 1px dashed var(--accent);
+  border: 1px dashed var(--seal-deep);
   color: var(--warn-text);
   background: var(--warn-bg);
   border-radius: 9px;
@@ -316,7 +329,7 @@ details summary {
 
 .steps li h2::before {
   content: counter(step) ". ";
-  color: var(--accent);
+  color: var(--link);
 }
 
 .site-footer {
@@ -364,22 +377,22 @@ details summary {
 }
 
 .env-body {
-  fill: var(--surface);
-  stroke: var(--accent);
+  fill: var(--envelope);
+  stroke: var(--seal-deep);
   stroke-width: 3;
 }
 
 .env-pocket {
   fill: none;
-  stroke: var(--line);
+  stroke: var(--envelope-line);
   stroke-width: 3;
   stroke-linejoin: round;
   stroke-linecap: round;
 }
 
 .env-flap {
-  fill: var(--accent);
-  stroke: var(--accent);
+  fill: var(--seal);
+  stroke: var(--seal-deep);
   stroke-width: 3;
   stroke-linejoin: round;
   transform-box: fill-box;
@@ -393,14 +406,14 @@ details summary {
 }
 
 .env-note rect {
-  fill: var(--bg);
-  stroke: var(--line);
+  fill: var(--paper);
+  stroke: var(--envelope-line);
   stroke-width: 3;
 }
 
 .env-note path {
   fill: none;
-  stroke: var(--line);
+  stroke: var(--envelope-line);
   stroke-width: 5;
   stroke-linecap: round;
 }
@@ -518,12 +531,12 @@ progress.scan-bar::-webkit-progress-bar {
 }
 
 progress.scan-bar::-webkit-progress-value {
-  background: var(--accent);
+  background: var(--seal);
   border-radius: 999px;
 }
 
 progress.scan-bar::-moz-progress-bar {
-  background: var(--accent);
+  background: var(--seal);
   border-radius: 999px;
 }
 
@@ -532,7 +545,7 @@ progress.scan-bar:indeterminate::-webkit-progress-bar {
   background-image: linear-gradient(
     90deg,
     var(--line) 0 35%,
-    var(--accent) 35% 65%,
+    var(--seal) 35% 65%,
     var(--line) 65% 100%
   );
   background-size: 260% 100%;
@@ -753,7 +766,7 @@ progress.scan-bar:indeterminate::-webkit-progress-bar {
 }
 
 .stage-mark {
-  color: var(--accent);
+  color: var(--link);
   min-width: 1rem;
 }
 
@@ -811,7 +824,7 @@ h3 {
 
 .strip li h3::before {
   content: counter(place) ". ";
-  color: var(--accent);
+  color: var(--link);
 }
 
 /* Two fields side by side where there is room: amount, then how many. */
@@ -834,7 +847,7 @@ h3 {
 
 .steps li h3::before {
   content: counter(step) ". ";
-  color: var(--accent);
+  color: var(--link);
 }
 
 /* ------------------------------------------------------------ trust boundary */
