@@ -87,9 +87,6 @@
   --gold: #f4b728;
   --gold-hi: #ffe08a;
   --gold-deep: #b9820a;
-  --env: #e9dcc0;
-  --env-shade: #dccca9;
-  --env-slit: #c9b78f;
   --obj-shadow: 0 2px 3px rgba(60, 40, 10, 0.08), 0 24px 48px -26px rgba(60, 40, 10, 0.45);
   --note-shadow: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 1px 1px rgba(40, 30, 10, 0.12),
     0 6px 14px -6px rgba(40, 30, 10, 0.25), 0 22px 40px -18px rgba(40, 30, 10, 0.35);
@@ -98,8 +95,6 @@
   --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
-  /* The security tint inside the envelope: an inline SVG tile, no request. */
-  --tint-tile: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='46' height='46'%3E%3Cg fill='none' stroke='%237d8d9b' stroke-width='.7'%3E%3Cpath d='M0 11 q11.5 -9 23 0 t23 0'/%3E%3Cpath d='M0 34 q11.5 -9 23 0 t23 0'/%3E%3Cpath d='M11.5 0 q-9 11.5 0 23 t0 23'/%3E%3Cpath d='M34.5 0 q-9 11.5 0 23 t0 23'/%3E%3C/g%3E%3C/svg%3E");
 
   color-scheme: light;
 }
@@ -1529,14 +1524,25 @@ progress.scan-bar:indeterminate::-webkit-progress-bar {
 
 /*
  * One stage, three sizes. `has-rise` keeps room above the envelope for the
- * note to rise into, so opening never moves the page under the reader.
+ * note and the open flap, so opening never moves the page under the reader.
+ * The drawing is SVG in one 338 x 200 space (lib/envelopeArt); the layers
+ * stack back panel, open flap, note, pocket, closed flap, seal, ink, strip.
  */
 .env-stage {
   --env-w: 22.5rem;
+  --env-drop: 0.5px 1px 1px rgba(60, 40, 10, 0.2), 1px 3px 5px -1px rgba(60, 40, 10, 0.14),
+    3px 12px 22px -8px rgba(60, 40, 10, 0.26), 6px 30px 50px -24px rgba(60, 40, 10, 0.42);
   position: relative;
   width: 100%;
   max-width: var(--env-w);
   margin-inline: auto;
+}
+
+@media (prefers-color-scheme: dark) {
+  .env-stage {
+    --env-drop: 0.5px 1px 1px rgba(0, 0, 0, 0.55), 1px 3px 6px -1px rgba(0, 0, 0, 0.5),
+      3px 14px 26px -8px rgba(0, 0, 0, 0.62), 6px 34px 60px -22px rgba(0, 0, 0, 0.85);
+  }
 }
 
 .env-hero {
@@ -1562,184 +1568,320 @@ progress.scan-bar:indeterminate::-webkit-progress-bar {
   perspective: 1100px;
 }
 
-.env-back {
+.env-defs {
   position: absolute;
-  inset: 0;
-  border-radius: 10px;
-  background: var(--env-shade);
+  width: 0;
+  height: 0;
   overflow: hidden;
-  box-shadow: var(--obj-shadow);
 }
 
-.env-back::after,
-.env-flap-inside::after {
-  content: "";
+.env-shadow {
   position: absolute;
   inset: 0;
-  background-image: var(--tint-tile);
-  background-size: 46px 46px;
-  opacity: 0.55;
+  border-radius: 3px;
+  box-shadow: var(--env-drop);
 }
 
-.env-small .env-back::after,
-.env-small .env-flap-inside::after {
-  background-size: 23px 23px;
-}
-
-/* The front pocket: the envelope's body, with the V cut where the flap sits. */
-.env-front {
+.env-back,
+.env-front,
+.env-cast {
   position: absolute;
   inset: 0;
-  z-index: 4;
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
   pointer-events: none;
-  border-radius: 10px;
-  background: linear-gradient(180deg, transparent 0 30%, rgba(0, 0, 0, 0.04)), var(--env);
-  clip-path: polygon(0 2%, 50% 64%, 100% 2%, 100% 100%, 0 100%);
-  box-shadow: inset 0 0 0 1px rgba(80, 60, 20, 0.12);
 }
 
-.env-front::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(160deg, rgba(255, 255, 255, 0.35), transparent 40%);
+.env-front {
+  z-index: 4;
 }
 
-/* The flap. Closing: waits for the note to go in. Opening: goes first. */
+.env-cast {
+  z-index: 5;
+}
+
+/* Seams: a fine darker line, and a lighter one on the raised side. */
+.seam,
+.seam-hi {
+  fill: none;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  stroke-linejoin: round;
+}
+
+.seam {
+  stroke: rgba(110, 86, 48, 0.2);
+}
+
+.seam-hi {
+  stroke: rgba(255, 255, 255, 0.8);
+}
+
+.env-contact path {
+  fill: rgba(72, 52, 22, 0.2);
+}
+
+.env-grain {
+  opacity: 0.16;
+}
+
+.env-tint {
+  opacity: 0.22;
+}
+
+.env-gum {
+  fill: none;
+  stroke-width: 15;
+  stroke-linejoin: round;
+}
+
+.env-gum-shine {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.55);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+/* The flap, on its hinge. Two faces back to back, and a shade for its angle. */
 .env-flap {
   position: absolute;
   left: 0;
   right: 0;
   top: 0;
-  height: 67%;
-  z-index: 5;
+  height: 68%;
+  z-index: 6;
   pointer-events: none;
-  transform-origin: top center;
+  transform-origin: 50% 0;
   transform-style: preserve-3d;
   transform: rotateX(0deg);
-  transition:
-    transform 0.4s cubic-bezier(0.5, 0, 0.2, 1) 0.35s,
-    z-index 0s linear 0.35s;
 }
 
-.env-flap-face,
-.env-flap-inside {
+.env-flap > svg {
   position: absolute;
   inset: 0;
-  clip-path: polygon(0 0, 100% 0, 50% 100%);
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
 }
 
-.env-flap-face {
-  background: linear-gradient(180deg, #e6d8ba, #efe3c8 70%, #f3e9d2);
+.env-flap-inside {
+  transform: rotateX(180deg);
 }
 
-/* Turned over on its own axis, so its triangle is drawn upside down to land
-   the right way round in the flap's plane: base on the hinge, tip at the seal. */
-.env-flap-inside {
-  clip-path: polygon(0 100%, 100% 100%, 50% 0);
-  transform: rotateX(180deg);
-  background: var(--env-shade);
-  overflow: hidden;
+.env-flap-shade {
+  opacity: 0;
 }
 
 .env-stage.is-open .env-flap {
   transform: rotateX(178deg);
   z-index: 1;
-  transition:
-    transform 0.55s cubic-bezier(0.5, 0, 0.2, 1),
-    z-index 0s linear 0.25s;
 }
 
-/* The note, inside the pocket. Opening: it rises once the flap is up. */
+.env-stage.is-open .env-cast {
+  opacity: 0;
+}
+
+/* The note, inside the pocket; out, it stands most of the way above it. */
 .env-note {
   position: absolute;
-  left: 6%;
-  right: 6%;
-  top: 8%;
+  left: 9%;
+  right: 9%;
+  top: 9%;
   z-index: 2;
+  container-type: inline-size;
   transform: translateY(0);
-  transition: transform 0.45s cubic-bezier(0.5, 0, 0.3, 1);
 }
 
 .env-stage.is-open .env-note {
-  transform: translateY(-96%);
-  transition: transform 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.3s;
+  transform: translateY(-87%);
 }
 
-/* The seal: stamps last when closing, lifts first when opening. */
+/* A band of light, out of sight until a sequence runs it across. */
+.env-glint,
+.wax-glint {
+  position: absolute;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.env-glint {
+  inset: 0;
+  border-radius: 1.9cqi;
+}
+
+.env-glint::before,
+.wax-glint::before {
+  content: "";
+  position: absolute;
+  top: -30%;
+  bottom: -30%;
+  left: 0;
+  width: 42%;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 252, 235, 0),
+    rgba(255, 252, 235, 0.42) 40%,
+    rgba(255, 255, 255, 0.72) 50%,
+    rgba(255, 252, 235, 0.42) 60%,
+    rgba(255, 252, 235, 0)
+  );
+  transform: translateX(-120%) skewX(-18deg);
+}
+
+/* ------------------------------------------------------------ the wax */
+
 .env-seal {
   position: absolute;
   left: 50%;
-  top: 58%;
-  width: 14%;
+  top: 60.6%;
+  width: 19.5%;
   aspect-ratio: 1;
   translate: -50% -50%;
-  z-index: 6;
-  border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, var(--gold-hi), var(--gold) 45%, var(--gold-deep) 100%);
-  box-shadow: 0 2px 0 #8a6006, 0 6px 14px -4px rgba(90, 60, 0, 0.5),
-    inset 0 0 0 3px rgba(255, 255, 255, 0.18);
-  display: grid;
-  place-items: center;
-  color: #5c3f02;
-  transform: scale(1);
-  opacity: 1;
-  transition:
-    transform 0.32s cubic-bezier(0.3, 1.6, 0.5, 1) 0.72s,
-    opacity 0.12s linear 0.72s;
+  z-index: 7;
+  pointer-events: none;
 }
 
-.env-seal svg {
-  width: 58%;
-  height: auto;
-  opacity: 0.8;
+.env-small .env-seal {
+  width: 23%;
 }
 
 .env-stage.is-open .env-seal {
-  transform: scale(1.6);
   opacity: 0;
-  transition:
-    transform 0.2s ease-in,
-    opacity 0.15s linear;
 }
 
-.env-stage.is-busy .env-seal {
-  animation: zv-seal-pulse 1.8s ease-in-out infinite;
+.wax-gold {
+  --wax-z: #b07917;
+  --wax-z-hi: rgba(255, 240, 190, 0.85);
+  --wax-z-lo: rgba(66, 38, 0, 0.7);
 }
 
-@keyframes zv-seal-pulse {
+.wax-oxblood {
+  --wax-z: #6c151a;
+  --wax-z-hi: rgba(250, 170, 160, 0.55);
+  --wax-z-lo: rgba(25, 0, 3, 0.75);
+}
+
+.wax {
+  position: absolute;
+  inset: 0;
+}
+
+.wax-l {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.wax-z {
+  font-family: var(--display);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 30px;
+}
+
+.wax-deb {
+  fill: var(--wax-z);
+}
+
+.wax-deb-hi {
+  fill: var(--wax-z-hi);
+}
+
+.wax-deb-lo {
+  fill: var(--wax-z-lo);
+}
+
+.wax-spark {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  opacity: 0.7;
+}
+
+.wax-spark-core {
+  stroke-width: 0.8;
+  opacity: 1;
+}
+
+.wax-spark-low {
+  stroke-width: 1.1;
+  opacity: 0.45;
+}
+
+.wax-glint {
+  inset: 15%;
+  border-radius: 50%;
+}
+
+/* The stamp's own shadow, an instant before it lands. */
+.wax-whole::after {
+  content: "";
+  position: absolute;
+  inset: 12%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(30, 16, 0, 0.55), rgba(30, 16, 0, 0) 70%);
+  opacity: 0;
+}
+
+.wax-piece {
+  display: none;
+}
+
+/* Reading the chain: a slow glow round the seal. */
+.env-seal::before {
+  content: "";
+  position: absolute;
+  inset: 4%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(244, 183, 40, 0.6), rgba(244, 183, 40, 0) 70%);
+  opacity: 0;
+}
+
+.env-stage.is-busy .env-seal::before {
+  animation: zv-seal-glow 1.8s ease-in-out infinite;
+}
+
+@keyframes zv-seal-glow {
   0%,
   100% {
-    box-shadow: 0 2px 0 #8a6006, 0 6px 14px -4px rgba(90, 60, 0, 0.5),
-      0 0 0 0 rgba(244, 183, 40, 0.55);
+    opacity: 0;
+    transform: scale(0.95);
   }
   50% {
-    box-shadow: 0 2px 0 #8a6006, 0 6px 14px -4px rgba(90, 60, 0, 0.5),
-      0 0 0 12px rgba(244, 183, 40, 0);
+    opacity: 0.9;
+    transform: scale(1.4);
   }
 }
 
-/* The postmark, inked onto the front. */
+/* ------------------------------------------------------------ the ink */
+
 .postmark {
   position: absolute;
-  z-index: 6;
-  right: 6%;
-  bottom: 9%;
-  width: 22%;
+  z-index: 8;
+  right: 2.5%;
+  bottom: 6%;
+  width: 37%;
   height: auto;
-  color: var(--engrave);
-  transform: rotate(-12deg);
-  opacity: 0.72;
+  color: #24304a;
+  transform: rotate(-9deg);
+  opacity: 0.86;
   mix-blend-mode: multiply;
   pointer-events: none;
 }
 
 .postmark-ring {
   font-family: var(--mono);
-  font-size: 8.6px;
-  letter-spacing: 2px;
+  font-size: 8.4px;
+  letter-spacing: 1.9px;
 }
 
 .postmark-day {
@@ -1754,106 +1896,646 @@ progress.scan-bar:indeterminate::-webkit-progress-bar {
 }
 
 .env-small .postmark {
-  width: 34%;
-  right: 5%;
+  width: 48%;
+  right: 1%;
 }
 
-.env-small .env-seal {
-  width: 18%;
+.env-stage.is-inking .postmark {
+  animation: zv-ink var(--postmark-t) cubic-bezier(0.2, 0.9, 0.3, 1.15) var(--postmark-d) both;
 }
 
-/* The tear strip and its tab, which is the Open button. */
+.env-stage.is-inking .env {
+  animation: zv-thump 260ms ease-out calc(var(--postmark-d) + 90ms) both;
+}
+
+@keyframes zv-ink {
+  0% {
+    opacity: 0;
+    transform: rotate(-15deg) scale(1.16);
+  }
+  40% {
+    opacity: 0.86;
+    transform: rotate(-8deg) scale(0.97);
+  }
+  100% {
+    opacity: 0.86;
+    transform: rotate(-9deg) scale(1);
+  }
+}
+
+@keyframes zv-thump {
+  0%,
+  100% {
+    transform: none;
+  }
+  40% {
+    transform: translateY(0.7%) scale(0.996);
+  }
+}
+
+/* ------------------------------------------------------ the tear strip */
+
 .tear {
   --p: 0;
-  --tab-w: 6.75rem;
+  --tab-w: 6.4rem;
+  --tab-h: 2rem;
+  --band: 1.05rem;
   position: absolute;
-  z-index: 7;
-  left: 4%;
-  right: 4%;
-  top: 5%;
+  z-index: 9;
+  left: 0;
+  right: 0;
+  top: calc(12.5% - 1.375rem);
   height: 2.75rem;
 }
 
-.tear-perf {
+/* The strip between its two lines of perforation. */
+.tear-band,
+.tear-channel,
+.tear-peel {
   position: absolute;
+  top: 50%;
+  height: var(--band);
+  translate: 0 -50%;
+}
+
+.tear-band {
+  left: 0.6rem;
+  right: 0;
+  background:
+    radial-gradient(circle, rgba(88, 66, 34, 0.55) 0 0.65px, transparent 1.05px) 0 0 / 4px 2px repeat-x,
+    radial-gradient(circle, rgba(88, 66, 34, 0.55) 0 0.65px, transparent 1.05px) 0 100% / 4px 2px repeat-x,
+    linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(120, 95, 50, 0.06) 30%, rgba(120, 95, 50, 0.08));
+}
+
+/* Where the strip has come away: the paper's torn edges and the inside. */
+.tear-channel {
   left: 0;
   right: 0;
-  top: 50%;
-  border-top: 2px dashed rgba(90, 70, 30, 0.45);
+  transform-origin: 0 50%;
+  transform: scaleX(var(--p));
+  background: linear-gradient(180deg, #c7c2b5, #dcd8cd 45%, #e6e2d8);
+  box-shadow:
+    inset 0 1.5px 2px rgba(50, 38, 18, 0.45),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.55);
+  -webkit-mask:
+    radial-gradient(circle at 2px 0, transparent 0.9px, #000 1.2px) 0 0 / 4px 51% repeat-x,
+    radial-gradient(circle at 2px 100%, transparent 0.9px, #000 1.2px) 0 100% / 4px 51% repeat-x;
+  mask:
+    radial-gradient(circle at 2px 0, transparent 0.9px, #000 1.2px) 0 0 / 4px 51% repeat-x,
+    radial-gradient(circle at 2px 100%, transparent 0.9px, #000 1.2px) 0 100% / 4px 51% repeat-x;
+  transition: transform 0.3s cubic-bezier(0.3, 1.3, 0.5, 1);
 }
 
-.tear-done,
-.tear.is-torn::before {
-  position: absolute;
+/* The strip itself, lifting off as it is pulled. */
+.tear-peel {
   left: 0;
-  top: calc(50% - 3px);
-  height: 6px;
-  width: calc(var(--p) * 100%);
-  background: var(--env-slit);
-  border-radius: 3px;
-  box-shadow: inset 0 1px 1px rgba(60, 40, 10, 0.3);
+  right: var(--tab-w);
+  transform-origin: 0 50%;
+  transform: translateY(-70%) rotate(-1.4deg) scaleX(var(--p));
+  background: linear-gradient(180deg, #fdfaf3, #ede5d3);
+  box-shadow: 0 2px 3px -1px rgba(60, 40, 10, 0.35);
+  opacity: min(1, calc(var(--p) * 12));
+  transition: transform 0.3s cubic-bezier(0.3, 1.3, 0.5, 1), opacity 0.3s;
 }
 
-.tear.is-torn::before {
-  content: "";
-  width: 100%;
-}
-
+/* The tab: the strip's end, a paper tab with its word printed on. */
 .tear-tab {
   position: absolute;
   top: 0;
-  left: calc(var(--p) * (100% - var(--tab-w)));
+  left: calc(var(--p) * (100% - var(--tab-w)) - 0.5rem);
   width: var(--tab-w);
   height: 2.75rem;
-  padding: 0 0.9rem 0 0.75rem;
+  padding: 0 0.6rem 0 0.95rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.55rem;
+  gap: 0.5rem;
   border: 0;
-  border-radius: 999px;
-  background: var(--ink);
-  color: var(--paper);
-  font: 600 1rem/1 var(--body);
+  border-radius: 0;
+  background: transparent;
+  color: var(--serial);
+  font: 700 1.05rem/1 var(--display);
+  letter-spacing: 0.04em;
   white-space: nowrap;
   cursor: grab;
   touch-action: pan-y;
-  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2), 0 8px 16px -8px rgba(35, 31, 32, 0.8);
-  transition: left 0.3s cubic-bezier(0.3, 1.3, 0.5, 1), transform 0.1s ease;
+  isolation: isolate;
+  transition: left 0.3s cubic-bezier(0.3, 1.3, 0.5, 1);
 }
 
-.tear[data-drag] .tear-tab {
-  transition: none;
-  cursor: grabbing;
+.tear-tab::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: var(--tab-h);
+  translate: 0 -50%;
+  border-radius: calc(var(--tab-h) / 2) 2px 2px calc(var(--tab-h) / 2);
+  background: linear-gradient(180deg, #fefcf7, #f0e8d7);
+  box-shadow:
+    inset 0 1px 0 #fff,
+    inset 0 -1px 0 rgba(110, 85, 45, 0.16),
+    0 0.5px 0.5px rgba(60, 40, 10, 0.32),
+    1px 3px 6px -2px rgba(60, 40, 10, 0.38);
+  transition: box-shadow 0.15s ease, translate 0.15s ease;
 }
 
-.tear-tab:hover {
-  background: #3a3334;
+/* Where the tab meets the strip: the first tear line. */
+.tear-tab::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: calc(50% - var(--band) / 2);
+  height: var(--band);
+  border-right: 1px dotted rgba(88, 66, 34, 0.5);
+}
+
+.tear-tab:hover::before {
+  translate: 0 calc(-50% - 1px);
+  box-shadow:
+    inset 0 1px 0 #fff,
+    inset 0 -1px 0 rgba(110, 85, 45, 0.16),
+    0 1px 1px rgba(60, 40, 10, 0.3),
+    2px 5px 9px -3px rgba(60, 40, 10, 0.42);
 }
 
 .tear-tab:focus-visible {
+  outline: none;
+}
+
+.tear-tab:focus-visible::before {
   outline: 3px solid var(--gold);
   outline-offset: 2px;
 }
 
-/* Three ridges: something to take hold of. */
+/* A printed arrow: the way to pull. */
 .tear-grip {
-  width: 9px;
-  height: 14px;
-  background: linear-gradient(
-    90deg,
-    currentColor 0 1.5px,
-    transparent 1.5px 3.75px,
-    currentColor 3.75px 5.25px,
-    transparent 5.25px 7.5px,
-    currentColor 7.5px 9px
-  );
-  opacity: 0.6;
+  width: 0.42rem;
+  height: 0.42rem;
+  border-top: 2px solid currentColor;
+  border-right: 2px solid currentColor;
+  transform: rotate(45deg);
+  opacity: 0.75;
+}
+
+.tear[data-drag] .tear-tab,
+.tear[data-drag] .tear-channel,
+.tear[data-drag] .tear-peel {
+  transition: none;
+}
+
+.tear[data-drag] .tear-tab {
+  cursor: grabbing;
+}
+
+.tear[data-tearing] .tear-tab,
+.tear[data-tearing] .tear-channel,
+.tear[data-tearing] .tear-peel {
+  transition-duration: var(--tear-t);
+  transition-timing-function: cubic-bezier(0.45, 0, 0.25, 1);
+}
+
+.tear.is-torn {
+  --p: 1;
 }
 
 .env-stage.is-open .tear {
   opacity: 0;
   pointer-events: none;
+}
+
+/* ------------------------------------------------------- the sequences */
+
+/*
+ * Closing, then opening: keyframes under a class that is set only while a
+ * sequence runs, and never when motion is reduced. Each ends on the static
+ * pose above. Delays and durations come from lib/envelopeArt.
+ */
+.anim-seal .env-flap,
+.anim-open .env-flap {
+  will-change: transform;
+}
+
+.anim-seal .env-note {
+  animation: zv-note-in var(--seal-note-t) linear var(--seal-note-d) both;
+}
+
+.anim-seal .env {
+  animation: zv-bounce var(--seal-bounce-t) ease-out var(--seal-bounce-d) both;
+}
+
+.anim-seal .env-front {
+  transform-origin: 50% 100%;
+  animation: zv-flex var(--seal-bounce-t) ease-out var(--seal-bounce-d) both;
+}
+
+.anim-seal .env-flap {
+  animation: zv-flap-close var(--seal-flap-t) linear var(--seal-flap-d) both;
+}
+
+.anim-seal .env-flap-shade {
+  animation: zv-shade-close var(--seal-flap-t) linear var(--seal-flap-d) both;
+}
+
+.anim-seal .env-cast {
+  transform-origin: 50% 0;
+  animation: zv-cast-in var(--seal-cast-t) cubic-bezier(0.3, 0.6, 0.4, 1) var(--seal-cast-d) both;
+}
+
+.anim-seal .wax-base {
+  animation: zv-drop var(--seal-drop-t) linear var(--seal-drop-d) both;
+}
+
+.anim-seal .wax-whole {
+  animation: zv-press var(--seal-press-t) linear var(--seal-press-d) both;
+}
+
+.anim-seal .wax-whole::after {
+  animation: zv-stamp-shade var(--seal-press-t) ease-out var(--seal-press-d) both;
+}
+
+.anim-seal .wax-rim {
+  animation: zv-rim var(--seal-press-t) linear var(--seal-press-d) both;
+}
+
+.anim-seal .wax-imp {
+  animation: zv-imp var(--seal-press-t) ease-out var(--seal-press-d) both;
+}
+
+.anim-seal .wax-spec {
+  animation: zv-spec var(--seal-press-t) ease-out var(--seal-press-d) both;
+}
+
+.anim-seal .wax-glint::before {
+  animation: zv-sweep var(--seal-glint-t) cubic-bezier(0.4, 0, 0.3, 1) var(--seal-glint-d) both;
+}
+
+.env-stage.anim-open .env-seal {
+  opacity: 1;
+}
+
+.anim-open .wax-whole {
+  opacity: 0;
+}
+
+.anim-open .wax-piece {
+  display: block;
+}
+
+.wax-piece-1 {
+  clip-path: polygon(0 0, 52% 0, 47% 22%, 55% 40%, 50% 50%, 53% 76%, 48% 100%, 0 100%);
+}
+
+.wax-piece-2 {
+  clip-path: polygon(52% 0, 100% 0, 100% 60%, 80% 52%, 66% 55%, 50% 50%, 55% 40%, 47% 22%);
+}
+
+.wax-piece-3 {
+  clip-path: polygon(50% 50%, 66% 55%, 80% 52%, 100% 60%, 100% 100%, 48% 100%, 53% 76%);
+}
+
+.anim-open .wax-piece-1 {
+  animation: zv-shard-1 var(--open-crack-t) linear var(--open-crack-d) both;
+}
+
+.anim-open .wax-piece-2 {
+  animation: zv-shard-2 var(--open-crack-t) linear var(--open-crack-d) both;
+}
+
+.anim-open .wax-piece-3 {
+  animation: zv-shard-3 var(--open-crack-t) linear var(--open-crack-d) both;
+}
+
+.anim-open .env-flap {
+  animation: zv-flap-open var(--open-flap-t) linear var(--open-flap-d) both;
+}
+
+.anim-open .env-flap-shade {
+  animation: zv-shade-open var(--open-flap-t) linear var(--open-flap-d) both;
+}
+
+.anim-open .env-cast {
+  transform-origin: 50% 0;
+  animation: zv-cast-out var(--open-flap-t) linear var(--open-flap-d) both;
+}
+
+.anim-open .env-note {
+  animation: zv-note-out var(--open-note-t) linear var(--open-note-d) both;
+}
+
+.anim-open .env-glint::before {
+  animation: zv-sweep var(--open-glint-t) cubic-bezier(0.45, 0, 0.35, 1) var(--open-glint-d) both;
+}
+
+@keyframes zv-note-in {
+  0% {
+    transform: translateY(-87%);
+    animation-timing-function: cubic-bezier(0.45, 0, 0.75, 0.6);
+  }
+  74% {
+    transform: translateY(1.8%);
+    animation-timing-function: cubic-bezier(0.3, 0, 0.4, 1);
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+
+@keyframes zv-bounce {
+  0%,
+  100% {
+    transform: none;
+  }
+  32% {
+    transform: translateY(0.8%);
+  }
+  68% {
+    transform: translateY(-0.2%);
+  }
+}
+
+@keyframes zv-flex {
+  0%,
+  100% {
+    transform: none;
+  }
+  32% {
+    transform: scaleY(1.012);
+  }
+  68% {
+    transform: scaleY(0.997);
+  }
+}
+
+@keyframes zv-flap-close {
+  0% {
+    transform: rotateX(178deg);
+    z-index: 1;
+    animation-timing-function: cubic-bezier(0.42, 0, 0.7, 0.55);
+  }
+  42% {
+    transform: rotateX(90deg);
+    z-index: 1;
+    animation-timing-function: cubic-bezier(0.25, 0.5, 0.5, 1);
+  }
+  42.1% {
+    z-index: 6;
+  }
+  80% {
+    transform: rotateX(-7deg);
+    animation-timing-function: cubic-bezier(0.4, 0, 0.4, 1);
+  }
+  100% {
+    transform: rotateX(0deg);
+    z-index: 6;
+  }
+}
+
+@keyframes zv-shade-close {
+  0%,
+  42% {
+    opacity: 0.3;
+  }
+  70% {
+    opacity: 0.08;
+  }
+  84%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes zv-cast-in {
+  0% {
+    opacity: 0;
+    transform: scaleY(0.3);
+  }
+  55% {
+    opacity: 0.85;
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes zv-drop {
+  0% {
+    opacity: 0;
+    transform: scale(0.18);
+    animation-timing-function: cubic-bezier(0.3, 0.7, 0.4, 1);
+  }
+  25% {
+    opacity: 1;
+  }
+  68% {
+    transform: scale(1.06);
+    animation-timing-function: cubic-bezier(0.4, 0, 0.5, 1);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes zv-press {
+  0% {
+    transform: scale(1);
+    animation-timing-function: cubic-bezier(0.55, 0, 0.9, 0.5);
+  }
+  20% {
+    transform: scale(0.91, 0.89);
+    animation-timing-function: cubic-bezier(0.2, 0.6, 0.35, 1);
+  }
+  52% {
+    transform: scale(1.035);
+    animation-timing-function: cubic-bezier(0.4, 0, 0.5, 1);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes zv-stamp-shade {
+  0% {
+    opacity: 0;
+    transform: scale(1.35);
+  }
+  18% {
+    opacity: 0.6;
+    transform: scale(1);
+  }
+  42%,
+  100% {
+    opacity: 0;
+    transform: scale(1);
+  }
+}
+
+@keyframes zv-rim {
+  0%,
+  16% {
+    opacity: 0;
+    transform: scale(0.8);
+    animation-timing-function: cubic-bezier(0.2, 0.7, 0.4, 1);
+  }
+  48% {
+    opacity: 1;
+    transform: scale(1.08);
+    animation-timing-function: cubic-bezier(0.4, 0, 0.5, 1);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes zv-imp {
+  0%,
+  18% {
+    opacity: 0;
+    transform: scale(1.08);
+  }
+  42% {
+    opacity: 1;
+    transform: scale(0.98);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes zv-spec {
+  0%,
+  45% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes zv-sweep {
+  from {
+    transform: translateX(-120%) skewX(-18deg);
+  }
+  to {
+    transform: translateX(260%) skewX(-18deg);
+  }
+}
+
+@keyframes zv-shard-1 {
+  0% {
+    transform: none;
+    opacity: 1;
+    animation-timing-function: cubic-bezier(0.2, 0.8, 0.4, 1);
+  }
+  16% {
+    transform: translate(-2%, 0.5%) rotate(-3deg);
+    opacity: 1;
+    animation-timing-function: cubic-bezier(0.5, 0, 0.9, 0.6);
+  }
+  100% {
+    transform: translate(-16%, 34%) rotate(-28deg);
+    opacity: 0;
+  }
+}
+
+@keyframes zv-shard-2 {
+  0% {
+    transform: none;
+    opacity: 1;
+    animation-timing-function: cubic-bezier(0.2, 0.8, 0.4, 1);
+  }
+  16% {
+    transform: translate(2%, -1.5%) rotate(3deg);
+    opacity: 1;
+    animation-timing-function: cubic-bezier(0.5, 0, 0.9, 0.6);
+  }
+  100% {
+    transform: translate(18%, 22%) rotate(24deg);
+    opacity: 0;
+  }
+}
+
+@keyframes zv-shard-3 {
+  0% {
+    transform: none;
+    opacity: 1;
+    animation-timing-function: cubic-bezier(0.2, 0.8, 0.4, 1);
+  }
+  16% {
+    transform: translate(1.5%, 2%) rotate(2deg);
+    opacity: 1;
+    animation-timing-function: cubic-bezier(0.5, 0, 0.9, 0.6);
+  }
+  100% {
+    transform: translate(6%, 42%) rotate(36deg);
+    opacity: 0;
+  }
+}
+
+@keyframes zv-flap-open {
+  0% {
+    transform: rotateX(0deg);
+    z-index: 6;
+    animation-timing-function: cubic-bezier(0.45, 0, 0.65, 0.55);
+  }
+  40% {
+    transform: rotateX(90deg);
+    z-index: 6;
+    animation-timing-function: cubic-bezier(0.2, 0.55, 0.45, 1);
+  }
+  40.1% {
+    z-index: 1;
+  }
+  78% {
+    transform: rotateX(185deg);
+    animation-timing-function: cubic-bezier(0.4, 0, 0.5, 1);
+  }
+  100% {
+    transform: rotateX(178deg);
+    z-index: 1;
+  }
+}
+
+@keyframes zv-shade-open {
+  0% {
+    opacity: 0;
+  }
+  40%,
+  100% {
+    opacity: 0.3;
+  }
+}
+
+@keyframes zv-cast-out {
+  0% {
+    opacity: 1;
+    transform: none;
+  }
+  40%,
+  100% {
+    opacity: 0;
+    transform: scaleY(0.35);
+  }
+}
+
+@keyframes zv-note-out {
+  0% {
+    transform: translateY(0);
+    animation-timing-function: cubic-bezier(0.3, 0, 0.15, 1);
+  }
+  64% {
+    transform: translateY(-90%) rotate(-0.5deg);
+    animation-timing-function: cubic-bezier(0.45, 0, 0.5, 1);
+  }
+  100% {
+    transform: translateY(-87%) rotate(0deg);
+  }
 }
 
 /* =================================================================== */

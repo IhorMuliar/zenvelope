@@ -27,6 +27,7 @@ import { CopyField } from "../components/CopyField";
 import { CopyButton } from "../components/CopyButton";
 import { Envelope } from "../components/Envelope";
 import { EnvelopePreview } from "../components/EnvelopePreview";
+import { SEAL_TOTAL_MS } from "../lib/envelopeArt";
 import { Qr } from "../components/Qr";
 import { ShareButton, canShare } from "../components/ShareButton";
 import { group as groupCopy, landing, single as singleCopy, watch as watchCopy } from "../copy/en";
@@ -141,7 +142,7 @@ export function Create({ navigate }: CreateProps = {}) {
     }
     setBusy(true);
     setMadeSoFar(c.count > 1 ? [0, c.count] : null);
-    // The note slides in, the flap closes, the seal stamps: about a second,
+    // The note slides in, the flap closes, the seal stamps: about two seconds,
     // played while the core works, and skipped when motion is reduced.
     setSealing(true);
     const sealed = prefersReducedMotion()
@@ -461,8 +462,8 @@ export function Create({ navigate }: CreateProps = {}) {
   );
 }
 
-/** How long the landing seal plays before step 1, in milliseconds. */
-const SEAL_MS = 1050;
+/** How long the landing seal plays before step 1: the sequence and a beat. */
+const SEAL_MS = SEAL_TOTAL_MS + 180;
 
 function MockBadge() {
   return (
