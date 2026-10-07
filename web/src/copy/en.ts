@@ -59,7 +59,7 @@ export interface Step {
 
 export const landing = {
   /** One headline. The longer tagline stays in the page's meta description. */
-  headline: "Send shielded money as a link",
+  headline: "Send shielded ZEC as a link",
   /** One short line under it. Under 20 words, and it is about the recipient. */
   subline: "They open it in any browser. No app or wallet needed.",
 

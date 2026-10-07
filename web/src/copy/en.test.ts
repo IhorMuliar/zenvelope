@@ -124,7 +124,7 @@ describe('rule 4: the "Is this link safe?" section teaches the check', () => {
 
 describe("the landing page is the tool", () => {
   it("has one headline and one short subline about the recipient", () => {
-    expect(landing.headline).toBe("Send shielded money as a link");
+    expect(landing.headline).toBe("Send shielded ZEC as a link");
     const words = landing.subline.trim().split(/\s+/);
     expect(words.length).toBeLessThanOrEqual(20);
     expect(landing.subline).toMatch(/browser/i);

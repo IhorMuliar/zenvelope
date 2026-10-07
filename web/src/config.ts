@@ -112,4 +112,4 @@ export const LIGHTWALLETD_FALLBACK: Record<Network, string> = {
 export const SENDER_WALLETS = "Zodl, Zingo, ZKool2, Vizor, Cake";
 
 export const TAGLINE =
-  "Send shielded money as a link. No wallet, no address, no amount on screen.";
+  "Send shielded ZEC as a link. No wallet, no address, no amount on screen.";

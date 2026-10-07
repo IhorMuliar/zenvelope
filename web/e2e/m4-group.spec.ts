@@ -65,7 +65,7 @@ describeOnMock("M4: the landing page", () => {
     await page.goto("/");
 
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-      "Send shielded money as a link",
+      "Send shielded ZEC as a link",
     );
     const subline = (await page.getByTestId("landing-subline").innerText()).trim();
     expect(subline.split(/\s+/).length).toBeLessThanOrEqual(20);
@@ -399,6 +399,6 @@ describeOnMock("M4: group envelopes (M6 preview)", () => {
     await expect(page.getByTestId("count-error")).toContainText("50 envelopes at a time");
     await page.getByTestId("create").click();
     await expect(page.getByTestId("group-table")).toHaveCount(0);
-    await expect(page.getByRole("heading", { level: 1 })).toContainText("Send shielded money");
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("Send shielded ZEC");
   });
 });
