@@ -1,0 +1,42 @@
+{
+ "tier": "tier_0",
+ "tierIndex": 0,
+ "percentFeeBps": 50,
+ "percentFeeRaw": "1492537",
+ "flatFeeLamportsPerHop": 0,
+ "flatFeeLamportsPerRoute": 0,
+ "totalFlatFeeLamports": 0,
+ "integratorPercentShare": "746268",
+ "integratorFlatShare": 0,
+ "usdEquivalent": 43.6161,
+ "usdValueMicros": "43399104",
+ "priceSource": "onchain_pool",
+ "hopAmountRaw": "298507462",
+ "cappedAtTierBoundary": false,
+ "destinationCount": null,
+ "revolverFragments": null,
+ "revolverStartFragments": null,
+ "isTestMode": true,
+ "tokens": {
+  "amountRaw": "300000000",
+  "feeRaw": "1492537",
+  "netDeliveredRaw": "298507462",
+  "decimals": 9
+ },
+ "sol": {
+  "requiredSolUpFrontLamports": 350210313,
+  "minTransferAmountLamports": 2039280,
+  "breakdown": {
+   "routeInitRentLamports": 15407640,
+   "orchestratorRentLamports": 13655040,
+   "ataRentLamports": 2428240,
+   "transactionFeesLamports": 45000,
+   "priorityFeesLamports": 0,
+   "protocolFlatFeeLamports": 0,
+   "screeningFeeLamports": 2000000,
+   "dispersionRentLamports": 0
+  },
+  "refundableLamports": 16083280,
+  "netCostLamports": 334127033
+ }
+}

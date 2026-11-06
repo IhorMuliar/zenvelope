@@ -1,0 +1,86 @@
+{
+ "id": 1583,
+ "externalId": "spike-sol-1",
+ "supportBundleId": "DLBO-1583-23AC",
+ "tokenMint": "So11111111111111111111111111111111111111112",
+ "tokenSymbol": "SOL",
+ "amountRaw": "300000000",
+ "amountTokens": "0.3",
+ "sourceOwner": "57pLT7WdE1oKDF4XKTiyefnncJ44hVtLUqbcPKEwT37a",
+ "recipientWallet": "29P4wwnFKaU7hmEAnKaGydGcYbywvqBuSwc4Yad5cMfx",
+ "destinationCount": null,
+ "destinations": null,
+ "fundingStrategy": "direct_orchestration",
+ "hops": 3,
+ "arrivalSeconds": 120,
+ "pricingTier": "tier_0",
+ "percentFeeBps": 50,
+ "percentFeeRaw": "1492537",
+ "flatFeeLamportsPerHop": 0,
+ "totalFlatFeeLamports": 0,
+ "recipientReceivesRaw": "298507462",
+ "status": "completed",
+ "isTest": true,
+ "quotedAt": "2026-11-06T06:15:05.329Z",
+ "completedAt": "2026-11-06T06:17:21.382Z",
+ "expiresAt": "2026-11-06T06:45:05.328Z",
+ "createdAt": "2026-11-06T06:15:05.329Z",
+ "route": {
+  "hops": [
+   {
+    "index": 0,
+    "address": "5V6dZDWWaTKnzFpcqCsFBdohRqb9QkuVo3dc7hzwWq1U",
+    "label": null,
+    "category": null,
+    "scheduledAt": "2026-11-06T06:15:11.156Z",
+    "executedAt": "2026-11-06T06:16:30.001Z",
+    "txSignature": "4UJ41Ss1oiQhEmfTKEcYfFXC7qxZGafPLNtBi3Spd29BCQDi6QJFTXUBh6oeihnv6sDVwhZYbSfX7X2LM9GcoGvr"
+   },
+   {
+    "index": 1,
+    "address": "HD4y1d5VRkjP7Gf9yraoLvY2fYUfKA683wSpTep5r1Fr",
+    "label": null,
+    "category": null,
+    "scheduledAt": "2026-11-06T06:15:28.148Z",
+    "executedAt": "2026-11-06T06:16:40.001Z",
+    "txSignature": "5Zk7dLUdy4Tqe6q3FrxaVB9X1LutTpBbdquiDZ7fYiJe9ejQzFjfzZLer4Cookpc6MXqbXKLnkVQiwLUYrZMMQ8N"
+   },
+   {
+    "index": 2,
+    "address": "29P4wwnFKaU7hmEAnKaGydGcYbywvqBuSwc4Yad5cMfx",
+    "label": null,
+    "category": null,
+    "scheduledAt": "2026-11-06T06:17:05.336Z",
+    "executedAt": "2026-11-06T06:17:10.002Z",
+    "txSignature": "5N9LFY3vCb3vh24kh99PUzsNJHJikdsJx17j1Ujmsd6h6o7mWCE9kWx7z6omkS7UwSx7CD5pw17P2QQKZRzRVCcD"
+   }
+  ]
+ },
+ "phase": "reclaimed",
+ "progress": {
+  "hopsCompleted": 6,
+  "hopsTotal": 6
+ },
+ "lastError": null,
+ "recovery": {
+  "canRescue": false,
+  "rescuableLamports": 0,
+  "rescuableAccounts": [],
+  "canReclaimRent": false,
+  "reclaimableLamports": 0
+ },
+ "signatures": {
+  "routeInit": [
+   "ZewjdAkJVobq31JQAG8U57RSwwRQyBqbWr99qbPoMSWVQqvfULqM8CSCsbvGLqbqbJSbKt5ksJCbBTtABdZxCVE"
+  ],
+  "sessionInit": [],
+  "hops": [
+   "4ryb3gjSMNHdG4dxYvvuhhwhbdQD9VNZkMNJCiUaumTX2ooZ4CoadHqD9MFwySmzjtK988kGdMdLubasZC8G8F55",
+   "CZ47p9L2wzQoX7SRAfYhiVa2seAS5AsYkw5dAD1XQ4B6d1wWGpT4FxJGtrzYWvhiWkNhyxcJSdE3kQykvm8ityN",
+   "3XSwNomyNbyuHiN4rgvqKQf76JBmHr7L119fD9XNRxTUkigwDnwiiComrPYWfgzYos8etLoLkGZfq4z84QVuTttx",
+   "3LqyYmKff9KaB5e6es255eeYsxVyug5E6dtvWhbtqrFiEMkfnK48vA5TVGi56SVYVeJ4KQh4fd59Z3VqvJdE492f",
+   "3LHEzpxMRZ4yGfFRvN6wx43tFFYSJUsNdTYjFdkmesBndadxaA3xubn8MJMMLnVX9NjuNVNoEEPhgwd8PJ7n7Hzd",
+   "5c5KDiAHqXFonpxMpc7hqxFD6rJasxtUshW8z6h5CbuaCSTb3hKJrq5eYgbv4PN1D5qb1uB3vJnpmeJXcvYDWZhL"
+  ]
+ }
+}

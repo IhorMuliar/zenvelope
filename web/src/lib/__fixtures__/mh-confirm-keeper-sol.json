@@ -1,0 +1,31 @@
+{
+ "transfer": {
+  "id": 1583,
+  "externalId": "spike-sol-1",
+  "supportBundleId": "DLBO-1583-23AC",
+  "tokenMint": "So11111111111111111111111111111111111111112",
+  "tokenSymbol": "SOL",
+  "amountRaw": "300000000",
+  "amountTokens": "0.3",
+  "sourceOwner": "57pLT7WdE1oKDF4XKTiyefnncJ44hVtLUqbcPKEwT37a",
+  "recipientWallet": "29P4wwnFKaU7hmEAnKaGydGcYbywvqBuSwc4Yad5cMfx",
+  "destinationCount": null,
+  "destinations": null,
+  "fundingStrategy": "direct_orchestration",
+  "hops": 3,
+  "arrivalSeconds": 120,
+  "pricingTier": "tier_0",
+  "percentFeeBps": 50,
+  "percentFeeRaw": "1492537",
+  "flatFeeLamportsPerHop": 0,
+  "totalFlatFeeLamports": 0,
+  "recipientReceivesRaw": "298507462",
+  "status": "processing",
+  "isTest": true,
+  "quotedAt": "2026-11-06T06:15:05.329Z",
+  "completedAt": null,
+  "expiresAt": "2026-11-06T06:45:05.328Z",
+  "createdAt": "2026-11-06T06:15:05.329Z",
+  "route": null
+ }
+}

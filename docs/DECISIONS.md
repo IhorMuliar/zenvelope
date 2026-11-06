@@ -3,6 +3,28 @@
 One entry per decision. Newest section first. Each entry: what we decided, why, and
 the evidence it rests on. If something here contradicts another doc, this file wins.
 
+## 2026-11-06
+
+### D20 Sweep can pay a second fixed output (route gas)
+
+**Decision.** `SweepRequest` has an optional `extra_output: (address, zatoshi)`. When set, the sweep pays that fixed amount to a second **transparent** address (`t1` or `t3`; shielded is refused), and the main destination receives everything else: total minus the flat fee, the network fee and the extra amount. With no extra output nothing changes. `sweep_envelope` takes it as two trailing optional arguments after `on_stage` (`extra_address`, `extra_zat`), so the callback keeps its slot. The page previews it with `splitSweepAmounts` in `web/src/lib/amount.ts`.
+
+**Why.** The "private route" swaps the recipient's ZEC through NEAR Intents 1Click into USDC for the gift and a little SOL for the route's Solana costs. Each quote has its own transparent deposit address, so one sweep must pay two transparent outputs.
+
+**Cost.** Each transparent output is one more ZIP-317 logical action: **+5,000 zat** of network fee for the extra output (15,000 with a shielded main destination, 20,000 with a transparent one). A split that leaves the main destination under 546 zat, or under zero, is refused with a message naming the amounts; the 546 zat floor applies only when an extra output is present.
+
+### D19 Server-side proxy for MultiHopper and Solana RPC
+
+**Decision.** Add two Netlify Functions (`web/netlify/functions/`): `/api/mh/*`, a proxy for six MultiHopper calls, and `/api/sol`, a JSON-RPC relay for seven Solana methods. The app stops being purely static: the host now runs a little code for the optional "Private route" step. Everything else (the envelope, the sweep, the 1Click exit) is unchanged and still runs only in the page.
+
+**Why.** A browser cannot send `Idempotency-Key` (it is not in MultiHopper's CORS allow-list), and the MultiHopper key and the keyed Solana RPC URL must not ship in the page bundle, where anyone could read and spend them. A same-origin proxy also keeps the CSP's `connect-src 'self'` and the COOP/COEP isolation as they are.
+
+**What the proxy may do.** Forward `POST transfers/estimate`, `POST transfers`, `POST transfers/{id}/prepare`, `POST transfers/{id}/confirm-broadcast`, `GET transfers/{id}` and `GET transfers/by-external/{externalId}`, adding the API key and an idempotency key (derived from `externalId` on create, random otherwise). Create and estimate bodies may carry only the fields the app uses, only allow-listed token mints, and 3-5 hops. Relay `getLatestBlockhash`, `sendTransaction`, `getSignatureStatuses`, `getBalance`, `getTokenAccountsByOwner`, `getAccountInfo` and `getMinimumBalanceForRentExemption`, one request at a time. Requests must be same-origin (no CORS headers are sent), bodies are capped at 64 KB, upstream calls time out at 20 s, and creates are limited per IP (best effort, in memory).
+
+**What it may not do.** Anything not listed returns 404 (no webhooks, templates, usage, rescue or reclaim routes; no other RPC methods; no batches). It never sees an envelope secret, a link or a spending key, and it never signs anything: the page signs and sends transactions itself and the proxy only carries the bytes. Its only secrets are the two environment values, set in the host and never in the repository.
+
+**Evidence.** MultiHopper devnet spike, 2026-11-06: create is idempotent per `externalId`, and a POST with no body fails with `FST_ERR_CTP_EMPTY_JSON_BODY`, so the proxy always sends JSON. Plan: [MULTIHOPPER-PLAN.md](MULTIHOPPER-PLAN.md), phase 1.
+
 ## 2026-09-21
 
 ### D18 The witness walk is capped at 24 blocks (was 120 earlier the same day)
