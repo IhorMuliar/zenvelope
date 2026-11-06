@@ -142,6 +142,8 @@ describe("handleMh", () => {
     expect(k(f1)).toBe(k(f2));
     expect(k(f1)).toBe(await createIdempotencyKey(EXT));
     expect(await createIdempotencyKey("ext_2")).not.toBe(k(f1));
+    // MultiHopper's rule for the header (MH_070 on the live API): 8-64 chars of [a-zA-Z0-9._-].
+    expect(k(f1)).toMatch(/^[a-zA-Z0-9._-]{8,64}$/);
   });
   it("prepare and confirm use fresh keys and send {} for an empty body", async () => {
     const f = upstream();

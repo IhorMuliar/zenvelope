@@ -643,7 +643,8 @@ export const privateRoute = {
 
   devnetTitle: "Test the private route",
   devnetBadge: "Devnet test build. No real money.",
-  devnetBody: "Send devnet SOL or USDC here to test",
+  devnetBody:
+    "Send devnet SOL or USDC here to test. SOL: send at least 0.1 SOL; about 0.06 SOL stays behind for route costs and comes back to the recipient at the end. USDC: send the USDC plus about 0.09 SOL for route costs.",
   devnetLabel: "Route wallet address",
   devnetWaiting: "Waiting for devnet funds to arrive. This page checks every few seconds.",
   devnetNote:

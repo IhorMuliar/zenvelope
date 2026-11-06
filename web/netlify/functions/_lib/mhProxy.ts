@@ -311,7 +311,8 @@ async function sha256Hex(s: string): Promise<string> {
 
 /** Create is idempotent per externalId upstream; the key says the same thing. */
 export async function createIdempotencyKey(externalId: string): Promise<string> {
-  return `zenvelope-create-${(await sha256Hex(externalId)).slice(0, 48)}`;
+  // MultiHopper accepts 8-64 chars of [a-zA-Z0-9._-] (MH_070, measured): "zv-create-" + 48 hex = 58.
+  return `zv-create-${(await sha256Hex(externalId)).slice(0, 48)}`;
 }
 
 /** Null when the transfer found by externalId has this numeric id; otherwise the error response. */
