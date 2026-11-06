@@ -3,7 +3,6 @@ import byExternal from "./__fixtures__/mh-by-external-sol.json";
 import polls from "./__fixtures__/mh-polls-sol.json";
 import estimateSol from "./__fixtures__/mh-estimate-sol.json";
 import vectors from "./__fixtures__/soltx-vectors.json";
-import tv from "./__fixtures__/soltx-token-vectors.json";
 import { WSOL_MINT, usdcMint } from "./cluster";
 import type { Clock, MhClient, MhEstimate, MhTransfer, SolRpc } from "./multihop";
 import type { MhEvent } from "./multihopFlow";
@@ -112,7 +111,13 @@ describe("runRoute: resume from the link", () => {
 
   it("a completed USDC route closes the empty token account before sweeping SOL", async () => {
     const usdcDone = { ...done, tokenMint: usdcMint(), tokenSymbol: "USDC" } as MhTransfer;
-    const { rpc, sent } = fakeRpc({ lamports: 40_000_000, tokens: [{ pubkey: tv.acct, amount: 0n }] });
+    // The router's own USDC ATA: anything else is refused by trustedTokenAccount.
+    const { findAssociatedTokenAddress, TOKEN_PROGRAM } = await import("./soltx");
+    const { base58Decode, base58Encode } = await import("./solana");
+    const ata = base58Encode(
+      await findAssociatedTokenAddress(base58Decode(vectors.address), base58Decode(usdcMint()), TOKEN_PROGRAM),
+    );
+    const { rpc, sent } = fakeRpc({ lamports: 40_000_000, tokens: [{ pubkey: ata, amount: 0n }] });
     const { e, key } = await env({ rpc, mh: { byExternal: async () => usdcDone } });
     await runRoute(e);
     // pass 1: close + sweep; pass 2: close again (account still listed by the fake) + sweep

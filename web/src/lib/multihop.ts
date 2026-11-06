@@ -18,7 +18,7 @@
  * confirm-broadcast wrap it as `{ transfer }`.
  */
 
-import { base58Decode } from "./solana";
+import { base58Decode, base58Encode } from "./solana";
 import type { RouterKey } from "./router";
 import { MIN_SYSTEM_BALANCE_LAMPORTS } from "./privateRoute";
 import {
@@ -28,6 +28,8 @@ import {
   buildTransferTransaction,
   findAssociatedTokenAddress,
   signTransaction,
+  TOKEN_2022_PROGRAM,
+  TOKEN_PROGRAM,
 } from "./soltx";
 
 // ---------------------------------------------------------------------------
@@ -544,6 +546,26 @@ async function sendSigned(key: RouterKey, unsigned: string, rpc: SolRpc): Promis
 }
 
 /**
+ * The token program an RPC row names, but only if it is one of the two real ones, and only if
+ * the row is the router's own associated token account for that mint under that program.
+ * The router signs these transactions, and a signer handed to an arbitrary program can be
+ * drained through it, so nothing the RPC says is trusted beyond this. Null means skip the row.
+ */
+export async function trustedTokenAccount(
+  owner: Uint8Array,
+  mint: string,
+  acct: { pubkey: string; program: string },
+): Promise<Uint8Array | null> {
+  const program =
+    acct.program === base58Encode(TOKEN_PROGRAM) ? TOKEN_PROGRAM
+    : acct.program === base58Encode(TOKEN_2022_PROGRAM) ? TOKEN_2022_PROGRAM
+    : null;
+  if (!program) return null;
+  const ata = await findAssociatedTokenAddress(owner, base58Decode(mint), program);
+  return base58Encode(ata) === acct.pubkey ? program : null;
+}
+
+/**
  * Closes the router's empty token accounts for `mint`, so their rent comes back to the
  * router (and from there to the recipient with the leftover SOL). Accounts that still
  * hold tokens are left alone: the runtime would refuse to close them anyway.
@@ -552,13 +574,15 @@ export async function closeEmptyTokenAccounts(key: RouterKey, mint: string, rpc:
   const sigs: string[] = [];
   for (const acct of await rpc.getTokenAccounts(key.address, mint)) {
     if (acct.amount !== 0n) continue;
+    const program = await trustedTokenAccount(key.publicKey, mint, acct);
+    if (!program) continue;
     const { blockhash } = await rpc.getLatestBlockhash();
     const tx = buildCloseAccountTransaction(
       key.publicKey,
       base58Decode(acct.pubkey),
       key.publicKey,
       base58Decode(blockhash),
-      base58Decode(acct.program),
+      program,
     );
     sigs.push(await sendSigned(key, tx, rpc));
   }
@@ -575,7 +599,8 @@ export async function sendRouterTokens(key: RouterKey, to: string, mint: string,
   const recipient = base58Decode(to);
   for (const acct of await rpc.getTokenAccounts(key.address, mint)) {
     if (acct.amount === 0n) continue;
-    const program = base58Decode(acct.program);
+    const program = await trustedTokenAccount(key.publicKey, mint, acct);
+    if (!program) continue;
     const { blockhash } = await rpc.getLatestBlockhash();
     const tx = buildTokenSendTransaction({
       owner: key.publicKey,

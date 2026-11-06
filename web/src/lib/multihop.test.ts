@@ -383,3 +383,24 @@ describe("sweepLeftoverSol", () => {
     expect((await run(0)).sig).toBeNull();
   });
 });
+
+describe("trustedTokenAccount", () => {
+  it("accepts only the router's own ATA under a real token program", async () => {
+    const { trustedTokenAccount } = await import("./multihop");
+    const { findAssociatedTokenAddress, TOKEN_PROGRAM, TOKEN_2022_PROGRAM } = await import("./soltx");
+    const { base58Decode, base58Encode } = await import("./solana");
+    const owner = base58Decode("57pLT7WdE1oKDF4XKTiyefnncJ44hVtLUqbcPKEwT37a");
+    const mint = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+    const ata = base58Encode(await findAssociatedTokenAddress(owner, base58Decode(mint), TOKEN_PROGRAM));
+    const ata22 = base58Encode(await findAssociatedTokenAddress(owner, base58Decode(mint), TOKEN_2022_PROGRAM));
+    const tk = base58Encode(TOKEN_PROGRAM);
+    const tk22 = base58Encode(TOKEN_2022_PROGRAM);
+    expect(await trustedTokenAccount(owner, mint, { pubkey: ata, program: tk })).toEqual(TOKEN_PROGRAM);
+    expect(await trustedTokenAccount(owner, mint, { pubkey: ata22, program: tk22 })).toEqual(TOKEN_2022_PROGRAM);
+    // An attacker-chosen program, even with the right account, is refused.
+    expect(await trustedTokenAccount(owner, mint, { pubkey: ata, program: "11111111111111111111111111111111" })).toBeNull();
+    // A real program but an account that is not the router's ATA is refused.
+    expect(await trustedTokenAccount(owner, mint, { pubkey: ata22, program: tk })).toBeNull();
+    expect(await trustedTokenAccount(owner, mint, { pubkey: "29P4wwnFKaU7hmEAnKaGydGcYbywvqBuSwc4Yad5cMfx", program: tk })).toBeNull();
+  });
+});
