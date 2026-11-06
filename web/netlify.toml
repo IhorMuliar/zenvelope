@@ -26,6 +26,15 @@
 [build.environment]
   NODE_VERSION = "22"
 
+# Two small serverless functions (netlify/functions): a MultiHopper API proxy at
+# /api/mh/* and a Solana JSON-RPC relay at /api/sol. They exist so the MultiHopper
+# key and the RPC key stay out of the page bundle and so Idempotency-Key can be set
+# (a browser cannot, CORS). Both route themselves with `config.path`, which Netlify
+# evaluates before the SPA fallback below. Env var names are listed at the top of
+# each function file; values are set in the host's environment, never here.
+[functions]
+  directory = "netlify/functions"
+
 [[headers]]
   for = "/*"
 
