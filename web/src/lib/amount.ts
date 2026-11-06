@@ -166,3 +166,57 @@ export function tooSmallMessage(a: SweepAmounts): string {
   }
   return `This envelope is too small to send on: it needs at least ${min} ZEC to cover the network fee of ${zatToZecString(a.networkFeeZat)} ZEC.`;
 }
+
+/**
+ * Mirrors `MIN_SPLIT_DESTINATION_ZAT` in crates/core/src/spend.rs: when a sweep also
+ * pays a second output, the main destination must be left with at least this much.
+ */
+export const MIN_SPLIT_DESTINATION_ZAT = 546n;
+
+export interface SplitSweepAmounts extends SweepAmounts {
+  /** The fixed amount paid to the second (transparent) output. */
+  extraZat: bigint;
+}
+
+/**
+ * The ZIP-317 miner fee when a sweep also pays a second transparent output.
+ *
+ * Same arithmetic as `network_fee_zat` in crates/core/src/spend.rs: Ironwood actions
+ * are `max(spends, shielded outputs, 2)`, each transparent output (about one
+ * standard P2PKH output of bytes) is one more logical action, and the fee is
+ * 5,000 times the larger of 2 and the sum. The flat-fee output is assumed shielded,
+ * as `networkFeeFor` assumes. The extra output adds exactly 5,000 zat over
+ * `networkFeeFor(kind, spends)`.
+ */
+export function networkFeeWithExtra(kind: AddressKind, spends = 1): bigint {
+  return networkFeeFor(kind, spends) + MARGINAL_FEE_ZAT;
+}
+
+/**
+ * envelope - miner fee - flat fee - second output = what the main destination
+ * receives. Pure bigint, the preview of what `sweep_envelope` will do when it is
+ * given `extra_address` / `extra_zat`. `ok` is false when the second output leaves
+ * the main destination below zero or below {@link MIN_SPLIT_DESTINATION_ZAT}.
+ */
+export function splitSweepAmounts(
+  inEnvelopeZat: bigint,
+  kind: AddressKind,
+  extraZat: bigint,
+  serviceFeeZat: bigint = SWEEP_FEE_ZAT,
+  spends = 1,
+): SplitSweepAmounts {
+  if (extraZat <= 0n) return { ...sweepAmounts(inEnvelopeZat, kind, serviceFeeZat, spends), extraZat: 0n };
+  const networkFee = networkFeeWithExtra(kind, spends);
+  const fee = serviceFeeZat < 0n ? 0n : serviceFeeZat;
+  const receive = inEnvelopeZat - networkFee - fee - extraZat;
+  const ok = receive >= MIN_SPLIT_DESTINATION_ZAT;
+  return {
+    inEnvelopeZat,
+    networkFeeZat: networkFee,
+    serviceFeeZat: fee,
+    extraZat,
+    receiveZat: receive > 0n ? receive : 0n,
+    ok,
+    shortfallZat: ok ? 0n : MIN_SPLIT_DESTINATION_ZAT - receive,
+  };
+}

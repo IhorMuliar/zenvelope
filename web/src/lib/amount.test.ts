@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { breakdownLines, feeBreakdown, validateAmount } from "./amount";
+import { breakdownLines, feeBreakdown, networkFeeFor, networkFeeWithExtra, splitSweepAmounts, sweepAmounts, validateAmount } from "./amount";
 import { FLAT_FEE_ZAT } from "../config";
 
 describe("validateAmount", () => {
@@ -92,5 +92,35 @@ describe("feeBreakdown", () => {
     const lines = breakdownLines(feeBreakdown(1000000n));
     expect(lines).toEqual(["Envelope 0.01 ZEC + service fee 0.0003 ZEC", "= 0.0103 ZEC"]);
     expect(lines.join(" ")).toBe("Envelope 0.01 ZEC + service fee 0.0003 ZEC = 0.0103 ZEC");
+  });
+});
+
+describe("splitSweepAmounts (second output)", () => {
+  it("charges exactly 5,000 zat more miner fee than a single-destination sweep", () => {
+    expect(networkFeeWithExtra("unified_orchard")).toBe(15000n);
+    expect(networkFeeWithExtra("transparent")).toBe(20000n);
+    expect(networkFeeWithExtra("unified_orchard", 3)).toBe(networkFeeFor("unified_orchard", 3) + 5000n);
+  });
+
+  it("gives the main destination everything else", () => {
+    const a = splitSweepAmounts(200000n, "unified_orchard", 50000n, 30000n);
+    expect(a).toMatchObject({ networkFeeZat: 15000n, serviceFeeZat: 30000n, extraZat: 50000n, receiveZat: 105000n, ok: true });
+    expect(a.receiveZat + a.networkFeeZat + a.serviceFeeZat + a.extraZat).toBe(200000n);
+  });
+
+  it("with no extra is exactly sweepAmounts", () => {
+    expect(splitSweepAmounts(200000n, "unified_orchard", 0n, 30000n)).toEqual({
+      ...sweepAmounts(200000n, "unified_orchard", 30000n),
+      extraZat: 0n,
+    });
+  });
+
+  it("refuses an extra that leaves the main destination below dust or below zero", () => {
+    const edge = splitSweepAmounts(15000n + 50000n + 546n, "unified_orchard", 50000n, 0n);
+    expect(edge.ok).toBe(true);
+    const dust = splitSweepAmounts(15000n + 50000n + 545n, "unified_orchard", 50000n, 0n);
+    expect(dust).toMatchObject({ ok: false, receiveZat: 545n, shortfallZat: 1n });
+    const neg = splitSweepAmounts(10000n, "unified_orchard", 50000n, 0n);
+    expect(neg).toMatchObject({ ok: false, receiveZat: 0n });
   });
 });

@@ -47,7 +47,7 @@ use std::collections::BTreeMap;
 
 use crate::scan::parse_transaction;
 use crate::spend::{
-    build_and_prove, ironwood_action_count, network_fee_zat, plan_amounts, resolve_output,
+    build_and_prove, ironwood_action_count, network_fee_zat, plan_amounts_split, resolve_output,
     spend_keys_from_secret, SweepOutput, SweepPlan, WitnessScan, WitnessTarget,
 };
 use crate::{memo_bytes, ufvk_from_secret};
@@ -119,6 +119,10 @@ pub struct SweepRequest {
     pub fee_zat: u64,
     /// The memo on the destination output, if any.
     pub memo: Option<String>,
+    /// An optional second destination paid a fixed amount (address, zatoshi), for a
+    /// route's gas. Transparent addresses only. The main destination then receives
+    /// everything else. `None` leaves the sweep exactly as it was.
+    pub extra_output: Option<(String, u64)>,
     /// When false, the transaction is built and proved but never sent.
     pub broadcast: bool,
 }
@@ -576,7 +580,14 @@ where
     // --- stage: proving ----------------------------------------------------
     let outputs = request.plan_outputs(network)?;
     let action_count = ironwood_action_count(notes.len(), &outputs);
-    let amounts = plan_amounts(total_value_zat, request.fee_zat, notes.len(), &outputs)?;
+    let extra_zat = request.extra_output.as_ref().map_or(0, |(_, z)| *z);
+    let amounts = plan_amounts_split(
+        total_value_zat,
+        request.fee_zat,
+        extra_zat,
+        notes.len(),
+        &outputs,
+    )?;
 
     let memo = match request.memo.as_deref().filter(|m| !m.is_empty()) {
         Some(text) => memo_bytes(text)?,
@@ -587,8 +598,15 @@ where
     let mut rest = outputs.into_iter();
     let destination = rest.next().ok_or("a sweep needs a destination output")?;
     with_amounts.push((destination, amounts.amount_to_destination_zat, memo));
-    for fee_output in rest {
+    // Order is fixed by `plan_outputs`: destination, then the flat fee when there is
+    // one, then the extra output when there is one.
+    if request.fee_zat > 0 {
+        let fee_output = rest.next().ok_or("a flat fee needs a fee output")?;
         with_amounts.push((fee_output, amounts.fee_zat, MemoBytes::empty()));
+    }
+    if request.extra_output.is_some() {
+        let extra_output = rest.next().ok_or("the extra output went missing")?;
+        with_amounts.push((extra_output, extra_zat, MemoBytes::empty()));
     }
 
     on_stage(
@@ -709,19 +727,36 @@ where
 }
 
 impl SweepRequest {
-    /// Resolves the destination and, when there is a flat fee, the fee address.
+    /// Resolves the destination, the fee address when there is a flat fee, and the second
+    /// output when there is one (always last, always transparent).
     ///
     /// The destination is always first. A zero flat fee means one output and no fee
     /// address is looked at, so a caller that is not charging a fee need not supply one.
     pub fn plan_outputs(&self, network: Network) -> Result<Vec<SweepOutput>, String> {
         let destination = resolve_output(&self.destination, network)
             .map_err(|e| format!("destination address: {e}"))?;
-        if self.fee_zat == 0 {
-            return Ok(vec![destination]);
+        let mut outputs = vec![destination];
+        if self.fee_zat != 0 {
+            let fee = resolve_output(&self.fee_address, network)
+                .map_err(|e| format!("fee address: {e}"))?;
+            outputs.push(fee);
         }
-        let fee =
-            resolve_output(&self.fee_address, network).map_err(|e| format!("fee address: {e}"))?;
-        Ok(vec![destination, fee])
+        if let Some((address, zat)) = &self.extra_output {
+            if *zat == 0 {
+                return Err("second output: the amount must be more than zero".to_string());
+            }
+            let extra = resolve_output(address, network)
+                .map_err(|e| format!("second output address: {e}"))?;
+            if !matches!(extra, SweepOutput::Transparent(_)) {
+                return Err(
+                    "second output address: only a transparent address (t1... or t3...) \
+                     can be paid as a second output"
+                        .to_string(),
+                );
+            }
+            outputs.push(extra);
+        }
+        Ok(outputs)
     }
 
     /// The ZIP-317 network fee this request will pay, without touching the network.
@@ -806,5 +841,83 @@ mod tests {
     #[test]
     fn the_stage_order_is_the_documented_one() {
         assert_eq!(STAGES, ["witness", "keys", "proving", "broadcast", "done"]);
+    }
+
+    // --- the optional second output -------------------------------------------
+
+    fn t_addr(kind: u8) -> String {
+        use zcash_address::{ToAddress, ZcashAddress as Z};
+        let net = zcash_protocol::consensus::NetworkType::Main;
+        if kind == 1 {
+            Z::from_transparent_p2pkh(net, [3u8; 20]).to_string()
+        } else {
+            Z::from_transparent_p2sh(net, [4u8; 20]).to_string()
+        }
+    }
+
+    fn request(extra: Option<(String, u64)>, fee_zat: u64) -> SweepRequest {
+        let shielded = crate::derive_from_secret(
+            &crate::encode_secret(&[1u8; crate::SECRET_BYTES]),
+            Network::MainNetwork,
+        )
+        .unwrap()
+        .address;
+        SweepRequest {
+            secret_b64url: String::new(),
+            network: Network::MainNetwork,
+            notes: vec![NoteRef { txid: M1_TXID.into(), height: 1, action_index: 0 }],
+            destination: shielded.clone(),
+            fee_address: shielded,
+            fee_zat,
+            memo: None,
+            extra_output: extra,
+            broadcast: false,
+        }
+    }
+
+    #[test]
+    fn no_extra_output_changes_nothing() {
+        let r = request(None, 30_000);
+        assert_eq!(r.plan_outputs(Network::MainNetwork).unwrap().len(), 2);
+        assert_eq!(r.network_fee_zat(Network::MainNetwork).unwrap(), 10_000);
+    }
+
+    #[test]
+    fn a_transparent_extra_output_adds_one_output_and_5000_zat_of_fee() {
+        let r = request(Some((t_addr(1), 40_000)), 30_000);
+        let outs = r.plan_outputs(Network::MainNetwork).unwrap();
+        assert_eq!(outs.len(), 3);
+        assert!(matches!(outs[2], SweepOutput::Transparent(_)));
+        assert_eq!(r.network_fee_zat(Network::MainNetwork).unwrap(), 15_000);
+        // t3 is transparent too.
+        let r3 = request(Some((t_addr(3), 40_000)), 0);
+        assert_eq!(r3.plan_outputs(Network::MainNetwork).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn the_extra_output_is_last_even_without_a_flat_fee() {
+        let r = request(Some((t_addr(1), 40_000)), 0);
+        let outs = r.plan_outputs(Network::MainNetwork).unwrap();
+        assert!(matches!(outs[0], SweepOutput::Ironwood(_)));
+        assert!(matches!(outs[1], SweepOutput::Transparent(_)));
+    }
+
+    #[test]
+    fn a_shielded_zero_or_foreign_extra_output_is_refused() {
+        let shielded = request(None, 0).destination;
+        let e = request(Some((shielded, 40_000)), 0)
+            .plan_outputs(Network::MainNetwork)
+            .unwrap_err();
+        assert!(e.contains("only a transparent address"), "{e}");
+        let e = request(Some((t_addr(1), 0)), 0)
+            .plan_outputs(Network::MainNetwork)
+            .unwrap_err();
+        assert!(e.contains("more than zero"), "{e}");
+        assert!(request(Some(("nonsense".into(), 1)), 0)
+            .plan_outputs(Network::MainNetwork)
+            .is_err());
+        assert!(request(Some((t_addr(1), 1)), 0)
+            .plan_outputs(Network::TestNetwork)
+            .is_err());
     }
 }

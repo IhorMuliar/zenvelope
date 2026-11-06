@@ -421,6 +421,9 @@ pub fn warm_proving_key() -> js_sys::Promise {
 /// `on_stage(stage, detail)` fires with `"witness"`, `"keys"`, `"proving"`, `"broadcast"`
 /// and `"done"`, in that order. When `broadcast` is false the transaction is built and
 /// proved but never sent, and `raw_tx_hex` comes back for inspection.
+///
+/// `extra_address` and `extra_zat` (trailing, optional) pay a second, transparent
+/// destination a fixed amount; the main destination keeps the rest.
 #[allow(clippy::too_many_arguments)]
 #[wasm_bindgen]
 pub fn sweep_envelope(
@@ -434,6 +437,8 @@ pub fn sweep_envelope(
     memo: Option<String>,
     broadcast: bool,
     on_stage: Option<Function>,
+    extra_address: Option<String>,
+    extra_zat: Option<String>,
 ) -> js_sys::Promise {
     future_to_promise(async move {
         match sweep_envelope_inner(
@@ -447,6 +452,8 @@ pub fn sweep_envelope(
             memo,
             broadcast,
             on_stage.as_ref(),
+            extra_address,
+            extra_zat,
         )
         .await
         {
@@ -468,6 +475,8 @@ async fn sweep_envelope_inner(
     memo: Option<String>,
     broadcast: bool,
     on_stage: Option<&Function>,
+    extra_address: Option<String>,
+    extra_zat: Option<String>,
 ) -> Result<SweepOutcome, String> {
     let network = network_from_str(network)?;
     let endpoints = normalize_endpoints(lightwalletd_url)?;
@@ -480,6 +489,12 @@ async fn sweep_envelope_inner(
         fee_address,
         fee_zat: parse_zat(fee_zat)?,
         memo,
+        extra_output: match (extra_address, extra_zat) {
+            (None, None) => None,
+            (Some(a), _) if a.trim().is_empty() => None,
+            (Some(a), Some(z)) => Some((a, parse_zat(&z)?)),
+            _ => return Err("a second output needs both an address and an amount".to_string()),
+        },
         broadcast,
     };
 

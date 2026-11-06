@@ -182,6 +182,8 @@ interface WasmModule {
     memo: string | null,
     broadcast: boolean,
     on_stage: StageFn,
+    extra_address?: string,
+    extra_zat?: string,
   ): Promise<SweepResult & Disposable>;
   /** M4 build stamp: true only in the `multicore` package. */
   is_threaded?(): boolean;
@@ -227,6 +229,8 @@ function adopt(core: WasmModule): SyncCore {
       memo,
       broadcast,
       onStage,
+      extraAddress,
+      extraZat,
     ) =>
       takeSweep(
         await core.sweep_envelope(
@@ -240,6 +244,9 @@ function adopt(core: WasmModule): SyncCore {
           memo,
           broadcast,
           onStage,
+          // Option<String> on the Rust side: undefined, never null, when absent.
+          extraAddress || undefined,
+          extraAddress ? (extraZat ?? undefined) : undefined,
         ),
       ),
   };

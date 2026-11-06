@@ -617,6 +617,8 @@ export async function sweepEnvelope(
   _memo: string | null,
   broadcast: boolean,
   on_stage: StageFn,
+  extra_address?: string | null,
+  extra_zat?: string | null,
 ): Promise<SweepResult> {
   // Derive first, so a bad secret fails the same way the real core would.
   derive(secret_b64url, network);
@@ -642,15 +644,20 @@ export async function sweepEnvelope(
 
   // Ironwood charges max(spends, outputs) actions, padded to two, so the first two
   // notes are free and the third is not: the same rule the real core applies.
-  const networkFee =
-    spending.length <= 2
+  const extra = extra_address ? BigInt(extra_zat ?? "0") : 0n;
+  if (extra_address && classifyAddress(extra_address, network).kind !== "transparent") {
+    throw new Error("the second output must be a transparent address");
+  }
+  const extraFee = extra_address ? MOCK_MARGINAL_FEE_ZAT : 0n;
+  const networkFee = extraFee +
+    (spending.length <= 2
       ? kind === "transparent"
         ? MOCK_NETWORK_FEE_TRANSPARENT_ZAT
         : MOCK_NETWORK_FEE_ZAT
-      : MOCK_MARGINAL_FEE_ZAT * (BigInt(spending.length) + (kind === "transparent" ? 1n : 0n));
+      : MOCK_MARGINAL_FEE_ZAT * (BigInt(spending.length) + (kind === "transparent" ? 1n : 0n)));
   const fee = fee_address.trim() === "" ? 0n : BigInt(fee_zat.trim() || "0");
   const inEnvelope = BigInt(MOCK_NOTE.amount_zat) * BigInt(spending.length);
-  const toDestination = inEnvelope - networkFee - fee;
+  const toDestination = inEnvelope - networkFee - fee - extra;
 
   on_stage("done", "the envelope is empty");
   return {

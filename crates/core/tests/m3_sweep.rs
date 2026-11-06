@@ -112,6 +112,7 @@ async fn sweeps_the_m1_note_on_mainnet_without_broadcasting() {
         fee_address: fee_address.clone(),
         fee_zat: FEE_ZAT,
         memo: Some("Zenvelope M3".to_string()),
+        extra_output: None,
         broadcast: false,
     };
 
@@ -361,6 +362,7 @@ async fn the_same_note_twice_is_refused_before_any_network_work() {
         fee_address: String::new(),
         fee_zat: 0,
         memo: None,
+        extra_output: None,
         broadcast: false,
     };
 

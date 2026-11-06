@@ -288,6 +288,11 @@ export interface ZenvelopeCore {
    * A failure that leaves the funds untouched comes back as a resolved result
    * with `error_code` set, rather than as a rejection; the caller treats a
    * rejection as meaning the same thing.
+   *
+   * `extra_address` / `extra_zat` (trailing, optional, after `on_stage`) pay a second,
+   * transparent destination a fixed amount (a route's gas). The ZIP-317 fee counts
+   * that output, and `destination` receives everything else. Omit both, or pass
+   * null, for the ordinary single-destination sweep. See `splitSweepAmounts`.
    */
   sweep_envelope(
     secret_b64url: string,
@@ -300,6 +305,8 @@ export interface ZenvelopeCore {
     memo: string | null,
     broadcast: boolean,
     on_stage: StageFn,
+    extra_address?: string | null,
+    extra_zat?: string | null,
   ): Promise<SweepResult>;
 }
 

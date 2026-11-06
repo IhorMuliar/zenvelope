@@ -368,6 +368,11 @@ pub struct SweepAmounts {
     pub network_fee_zat: u64,
 }
 
+/// The smallest amount the main destination may be left with when a sweep also pays a
+/// second fixed output. Applies only to that case, so a sweep without one behaves as it
+/// always has. Deliberately conservative: well above any node's relay dust limit.
+pub const MIN_SPLIT_DESTINATION_ZAT: u64 = 546;
+
 /// Splits the notes' total value across the sweep's outputs, refusing to build a sweep
 /// that cannot pay for itself.
 ///
@@ -380,21 +385,55 @@ pub fn plan_amounts(
     spends: usize,
     outputs: &[SweepOutput],
 ) -> Result<SweepAmounts, String> {
+    plan_amounts_split(note_value_zat, fee_zat, 0, spends, outputs)
+}
+
+/// [`plan_amounts`] for a sweep that also pays a second fixed output of `extra_zat`.
+///
+/// The extra output must already be in `outputs` (last), so the network fee counts it;
+/// `extra_zat` is subtracted before the main destination is sized. With `extra_zat == 0`
+/// this is exactly [`plan_amounts`]. A split that leaves the destination below
+/// [`MIN_SPLIT_DESTINATION_ZAT`] is refused.
+pub fn plan_amounts_split(
+    note_value_zat: u64,
+    fee_zat: u64,
+    extra_zat: u64,
+    spends: usize,
+    outputs: &[SweepOutput],
+) -> Result<SweepAmounts, String> {
     let network_fee = network_fee_zat(spends, outputs);
     let overhead = network_fee
         .checked_add(fee_zat)
-        .ok_or("the network fee plus the flat fee overflows")?;
+        .and_then(|o| o.checked_add(extra_zat))
+        .ok_or("the network fee plus the flat fee plus the extra output overflows")?;
 
     let amount = note_value_zat
         .checked_sub(overhead)
         .filter(|a| *a > 0)
         .ok_or_else(|| {
-            format!(
-                "this envelope holds {note_value_zat} zatoshi across {spends} note(s), \
+            if extra_zat > 0 {
+                format!(
+                    "this envelope holds {note_value_zat} zatoshi across {spends} note(s), \
+                 which does not cover the {network_fee} zatoshi network fee, the \
+                 {fee_zat} zatoshi Zenvelope fee and the {extra_zat} zatoshi second output; \
+                 there would be nothing left for the main destination"
+                )
+            } else {
+                format!(
+                    "this envelope holds {note_value_zat} zatoshi across {spends} note(s), \
              which does not cover the {network_fee} zatoshi network fee plus the \
              {fee_zat} zatoshi Zenvelope fee; there would be nothing left to send"
-            )
+                )
+            }
         })?;
+
+    if extra_zat > 0 && amount < MIN_SPLIT_DESTINATION_ZAT {
+        return Err(format!(
+            "after the {network_fee} zatoshi network fee, the {fee_zat} zatoshi Zenvelope fee \
+             and the {extra_zat} zatoshi second output, only {amount} zatoshi would reach the \
+             main destination, below the {MIN_SPLIT_DESTINATION_ZAT} zatoshi minimum"
+        ));
+    }
 
     Ok(SweepAmounts {
         amount_to_destination_zat: amount,
@@ -1075,6 +1114,54 @@ abandon abandon abandon abandon abandon abandon art";
         assert_eq!(network_fee_zat(4, &two_outputs), 20_000);
         // A one-output sweep of five notes pays for five actions, not for one.
         assert_eq!(network_fee_zat(5, &[shielded()]), 25_000);
+    }
+
+    #[test]
+    fn the_second_transparent_output_costs_five_thousand_more() {
+        // shielded destination + one transparent extra: 2 ironwood + 1 transparent.
+        let one = network_fee_zat(1, &[shielded(), transparent_p2pkh()]);
+        // the same with a flat-fee output in between: still 2 ironwood + 1 transparent.
+        let with_fee = network_fee_zat(1, &[shielded(), shielded(), transparent_p2pkh()]);
+        assert_eq!(one, 15_000);
+        assert_eq!(with_fee, 15_000);
+        // transparent destination alone vs transparent destination + transparent extra.
+        let t1 = network_fee_zat(1, &[transparent_p2pkh()]);
+        let t2 = network_fee_zat(1, &[transparent_p2pkh(), transparent_p2pkh()]);
+        assert_eq!((t1, t2), (15_000, 20_000));
+        assert_eq!(t2 - t1, 5_000);
+        // against no extra at all, a shielded destination pays 5,000 more.
+        assert_eq!(one - network_fee_zat(1, &[shielded()]), 5_000);
+    }
+
+    #[test]
+    fn plan_amounts_split_with_no_extra_equals_plan_amounts() {
+        let outs = [shielded(), shielded()];
+        assert_eq!(
+            plan_amounts_split(130_000, 30_000, 0, 1, &outs),
+            plan_amounts(130_000, 30_000, 1, &outs)
+        );
+    }
+
+    #[test]
+    fn plan_amounts_split_subtracts_extra_and_counts_its_fee() {
+        let outs = [shielded(), shielded(), transparent_p2pkh()];
+        let plan = plan_amounts_split(200_000, 30_000, 50_000, 1, &outs).unwrap();
+        assert_eq!(plan.network_fee_zat, 15_000);
+        assert_eq!(plan.amount_to_destination_zat, 200_000 - 15_000 - 30_000 - 50_000);
+    }
+
+    #[test]
+    fn plan_amounts_split_refuses_a_dust_or_negative_destination() {
+        let outs = [shielded(), transparent_p2pkh()];
+        // exactly dust-minimum is fine, one less is not.
+        assert!(plan_amounts_split(15_000 + 50_000 + 546, 0, 50_000, 1, &outs).is_ok());
+        let err = plan_amounts_split(15_000 + 50_000 + 545, 0, 50_000, 1, &outs).unwrap_err();
+        assert!(err.contains("minimum"), "{err}");
+        // nothing left at all.
+        let err = plan_amounts_split(60_000, 0, 50_000, 1, &outs).unwrap_err();
+        assert!(err.contains("second output"), "{err}");
+        // overflow.
+        assert!(plan_amounts_split(u64::MAX, 1, u64::MAX, 1, &outs).is_err());
     }
 
     #[test]
