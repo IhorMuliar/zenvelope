@@ -19,7 +19,8 @@ const env: ProxyEnv = {
   SITE_ORIGINS: "https://other.example",
   SOLANA_RPC_URL: "https://rpc.example/?k=1",
 };
-const goodBody = { tokenMint: WSOL, amountRaw: "100", sourceOwner: "a", recipientWallet: "b", hops: 3, externalId: "ext_1" };
+const EXT = "e".repeat(32);
+const goodBody = { tokenMint: WSOL, amountRaw: "100", sourceOwner: "a", recipientWallet: "b", hops: 3, externalId: EXT };
 
 function upstream(status = 200, body: unknown = { ok: true }, type = "application/json") {
   return vi.fn(async (_u: string, _i?: RequestInit) =>
@@ -27,12 +28,20 @@ function upstream(status = 200, body: unknown = { ok: true }, type = "applicatio
   );
 }
 function req(method: string, path: string, body?: unknown, headers: Record<string, string> = {}) {
-  const init: RequestInit = { method, headers: { origin: ORIGIN, ...headers } };
+  const init: RequestInit = { method, headers: { origin: ORIGIN, "x-zenvelope-ext": EXT, ...headers } };
   if (body !== undefined) {
     init.body = typeof body === "string" ? body : JSON.stringify(body);
     (init.headers as Record<string, string>)["content-type"] ??= "application/json";
   }
   return new Request(`${ORIGIN}${path}`, init);
+}
+/** Answers by-external lookups as if `EXT` owned transfer `id`, and passes everything else to `f`. */
+function withOwner<F extends (u: string, i?: RequestInit) => Promise<Response>>(f: F, id: number) {
+  return vi.fn(async (u: string, i?: RequestInit) =>
+    u.includes("/by-external/")
+      ? new Response(JSON.stringify({ id }), { status: 200, headers: { "content-type": "application/json" } })
+      : f(u, i),
+  );
 }
 const call = (r: Request, f = upstream(), extra = {}) => handleMh(r, { env, fetch: f as never, ...extra });
 
@@ -43,7 +52,7 @@ describe("matchMhRoute", () => {
     expect(matchMhRoute("POST", "transfers/12/prepare")).toEqual({ kind: "prepare", id: "12" });
     expect(matchMhRoute("POST", "transfers/12/confirm-broadcast")).toEqual({ kind: "confirm", id: "12" });
     expect(matchMhRoute("GET", "transfers/12")).toEqual({ kind: "get", id: "12" });
-    expect(matchMhRoute("GET", "transfers/by-external/a-b_1")).toEqual({ kind: "byExternal", externalId: "a-b_1" });
+    expect(matchMhRoute("GET", "transfers/by-external/" + EXT)).toEqual({ kind: "byExternal", externalId: EXT });
   });
   it("rejects everything else", () => {
     for (const [m, p] of [
@@ -54,6 +63,7 @@ describe("matchMhRoute", () => {
       ["POST", "transfers/1/reclaim-rent/prepare"],
       ["GET", "transfers/1/prepare"],
       ["GET", "transfers/by-external/a.b"],
+      ["GET", "transfers/by-external/short_guessable_id"],
       ["GET", "transfers/by-external/" + "a".repeat(65)],
       ["GET", "transfers/1/../2"],
       ["GET", "usage"],
@@ -106,7 +116,7 @@ describe("origin", () => {
 describe("handleMh", () => {
   it("proxies GET with the key and strips upstream headers", async () => {
     const f = upstream(200, { id: 5 });
-    const res = await call(req("GET", "/api/mh/transfers/5?x=1"), f);
+    const res = await call(req("GET", "/api/mh/transfers/5?x=1"), withOwner(f, 5));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ id: 5 });
     const [url, init] = f.mock.calls[0];
@@ -119,7 +129,7 @@ describe("handleMh", () => {
     expect(res.headers.get("access-control-allow-origin")).toBeNull();
   });
   it("passes upstream error status and body unchanged", async () => {
-    const res = await call(req("GET", "/api/mh/transfers/5"), upstream(409, { code: "MH_035" }));
+    const res = await call(req("GET", "/api/mh/transfers/5"), withOwner(upstream(409, { code: "MH_035" }), 5));
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ code: "MH_035" });
   });
@@ -130,15 +140,15 @@ describe("handleMh", () => {
     await call(req("POST", "/api/mh/transfers", goodBody), f2, { limiter: memoryLimiter() });
     const k = (f: typeof f1) => (f.mock.calls[0][1]!.headers as Record<string, string>)["idempotency-key"];
     expect(k(f1)).toBe(k(f2));
-    expect(k(f1)).toBe(await createIdempotencyKey("ext_1"));
+    expect(k(f1)).toBe(await createIdempotencyKey(EXT));
     expect(await createIdempotencyKey("ext_2")).not.toBe(k(f1));
   });
   it("prepare and confirm use fresh keys and send {} for an empty body", async () => {
     const f = upstream();
     let n = 0;
     const uuid = () => `u${++n}`;
-    await call(req("POST", "/api/mh/transfers/7/prepare"), f, { uuid });
-    await call(req("POST", "/api/mh/transfers/7/confirm-broadcast", { signatures: ["s"] }), f, { uuid });
+    await call(req("POST", "/api/mh/transfers/7/prepare"), withOwner(f, 7), { uuid });
+    await call(req("POST", "/api/mh/transfers/7/confirm-broadcast", { signatures: ["s"] }), withOwner(f, 7), { uuid });
     const h = (i: number) => f.mock.calls[i][1]!.headers as Record<string, string>;
     expect(f.mock.calls[0][1]!.body).toBe("{}");
     expect(f.mock.calls[0][0]).toBe("https://mh.example/api/v1/transfers/7/prepare");
@@ -183,13 +193,35 @@ describe("handleMh", () => {
     const hang = vi.fn((_u: string, init?: RequestInit) =>
       new Promise<Response>((_res, rej) => init!.signal!.addEventListener("abort", () => rej(new Error("aborted")))),
     );
-    const p = call(req("GET", "/api/mh/transfers/1"), hang as never);
+    const p = call(req("GET", "/api/mh/transfers/1"), withOwner(hang, 1) as never);
     await vi.advanceTimersByTimeAsync(20_001);
     const res = await p;
     vi.useRealTimers();
     expect(res.status).toBe(504);
     expect((await res.json()).error.code).toBe("upstream_timeout");
-    expect((await call(req("GET", "/api/mh/transfers/1"), upstream(200, "x", "text/html"))).status).toBe(502);
+    expect((await call(req("GET", "/api/mh/transfers/1"), withOwner(upstream(200, "x", "text/html"), 1))).status).toBe(502);
+  });
+  it("refuses per-id routes without the externalId capability", async () => {
+    const f = upstream(200, { id: 9 });
+    const noCap = await call(req("GET", "/api/mh/transfers/9", undefined, { "x-zenvelope-ext": "" }), f);
+    expect(noCap.status).toBe(403);
+    const short = await call(req("POST", "/api/mh/transfers/9/prepare", undefined, { "x-zenvelope-ext": "abc" }), f);
+    expect(short.status).toBe(403);
+    expect(f).not.toHaveBeenCalled();
+  });
+  it("refuses a capability that belongs to another transfer, without forwarding", async () => {
+    const target = upstream(200, { id: 9 });
+    const f = withOwner(target, 8);
+    for (const r of [
+      req("GET", "/api/mh/transfers/9"),
+      req("POST", "/api/mh/transfers/9/prepare"),
+      req("POST", "/api/mh/transfers/9/confirm-broadcast", { s: 1 }),
+    ]) {
+      const res = await call(r, f);
+      expect(res.status).toBe(403);
+      expect((await res.json()).error.code).toBe("capability_mismatch");
+    }
+    expect(target).not.toHaveBeenCalled();
   });
   it("503s when unconfigured", async () => {
     const res = await handleMh(req("GET", "/api/mh/transfers/1"), { env: {}, fetch: upstream() as never });

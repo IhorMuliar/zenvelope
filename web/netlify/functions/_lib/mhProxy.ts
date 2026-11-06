@@ -41,7 +41,11 @@ export const SOL_METHODS: ReadonlySet<string> = new Set([
   "getMinimumBalanceForRentExemption",
 ]);
 
-const EXTERNAL_ID = /^[A-Za-z0-9_-]{1,64}$/;
+// externalId is the capability for a transfer: the client derives it from the envelope secret
+// (SHA-256, 32 hex chars), so 32 is the floor. Shorter, guessable ids are refused everywhere.
+const EXTERNAL_ID = /^[A-Za-z0-9_-]{32,64}$/;
+/** Header that proves the caller knows a transfer's externalId on per-id routes. */
+export const EXT_HEADER = "x-zenvelope-ext";
 const NUMERIC_ID = /^[0-9]{1,18}$/;
 
 const CREATE_FIELDS = [
@@ -310,6 +314,25 @@ export async function createIdempotencyKey(externalId: string): Promise<string> 
   return `zenvelope-create-${(await sha256Hex(externalId)).slice(0, 48)}`;
 }
 
+/** Null when the transfer found by externalId has this numeric id; otherwise the error response. */
+async function ownerCheck(
+  doFetch: typeof fetch,
+  url: string,
+  headers: Record<string, string>,
+  id: string,
+): Promise<Response | null> {
+  const res = await forward(doFetch, url, { method: "GET", headers });
+  if (!res.ok) return errorResponse(403, "capability_mismatch", "Transfer capability does not match");
+  let found: unknown;
+  try {
+    const j = (await res.json()) as Record<string, unknown>;
+    found = (j.transfer as Record<string, unknown> | undefined)?.id ?? j.id;
+  } catch {
+    return errorResponse(502, "bad_upstream", "Upstream did not answer with JSON");
+  }
+  return String(found) === id ? null : errorResponse(403, "capability_mismatch", "Transfer capability does not match");
+}
+
 export async function handleMh(req: Request, deps: ProxyDeps): Promise<Response> {
   const { env } = deps;
   const bad = checkOrigin(req, env);
@@ -328,6 +351,15 @@ export async function handleMh(req: Request, deps: ProxyDeps): Promise<Response>
   const api = `${base}/api/v1`;
   let target: string;
   let init: RequestInit;
+
+  // Per-id routes are gated on the externalId capability: without it anyone could walk the
+  // numeric ids and read every transfer of this integration (wallets, amounts, timing).
+  if (route.kind === "get" || route.kind === "prepare" || route.kind === "confirm") {
+    const ext = req.headers.get(EXT_HEADER) ?? "";
+    if (!EXTERNAL_ID.test(ext)) return errorResponse(403, "capability_required", "Transfer capability required");
+    const owner = await ownerCheck(deps.fetch ?? fetch, `${api}/transfers/by-external/${ext}`, headers, route.id);
+    if (owner) return owner;
+  }
 
   if (route.kind === "get" || route.kind === "byExternal") {
     target =
