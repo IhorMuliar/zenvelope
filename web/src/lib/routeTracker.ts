@@ -15,7 +15,7 @@ import { hopProgress, type MhPhase } from "./multihopFlow";
 import { ROUTE_SECONDS } from "./privateRoute";
 
 export type RowState = "done" | "active" | "waiting" | "stopped";
-export type RowKey = "swap" | "packed" | "hops" | "landing" | "arrived";
+export type RowKey = "swap" | "packed" | "hops" | "landing" | "arrived" | "leftover";
 
 export interface TrackerRow {
   key: RowKey;
@@ -32,6 +32,14 @@ export interface TrackerInput {
   arrived: boolean;
   /** The swap step is not part of this run (a devnet test, or a refund). */
   hideSwap?: boolean;
+  /** The unused SOL left in the router after the route; absent until there is something. */
+  leftover?: { state: "collecting" | "done"; lamports: number };
+}
+
+/** "0.031": SOL to three places, never "0.000" for a real amount. */
+export function solText(lamports: number): string {
+  const sol = lamports / 1e9;
+  return sol > 0 && sol < 0.001 ? "less than 0.001" : sol.toFixed(3);
 }
 
 export function trackerRows(i: TrackerInput): TrackerRow[] {
@@ -75,6 +83,16 @@ export function trackerRows(i: TrackerInput): TrackerRow[] {
     label: copy.arrived,
     state: stopped ? "stopped" : i.arrived ? "done" : "waiting",
   });
+  if (i.arrived && i.leftover) {
+    rows.push({
+      key: "leftover",
+      label:
+        i.leftover.state === "done"
+          ? copy.leftoverDone(solText(i.leftover.lamports))
+          : copy.leftoverCollecting(i.leftover.lamports > 0 ? solText(i.leftover.lamports) : null),
+      state: i.leftover.state === "done" ? "done" : "active",
+    });
+  }
   return rows;
 }
 

@@ -603,6 +603,12 @@ export const privateRoute = {
   landing: "Landing",
   arrived: "In your wallet",
   closeNote: "You can close this page. Open this link again any time to check.",
+  /** While the route runs: the money arrives either way; the unused network money needs the page. */
+  closeNoteRouting: (usd: string | null) =>
+    `You can close this page. Your money arrives either way. Leave it open about 3 more minutes and the unused network money${usd ? ` (about ${usd})` : ""} comes to you too, or open this link again later to collect it.`,
+  leftoverCollecting: (sol: string | null) =>
+    sol ? `Collecting about ${sol} SOL of unused network money for you…` : "Collecting the unused network money for you…",
+  leftoverDone: (sol: string) => `Done: ${sol} SOL sent to your wallet.`,
   eta: (when: string) => `Arrives ${when}`,
   etaSoon: "any moment now",
   etaIn: (minutes: number) => `in about ${minutes} min`,
@@ -638,13 +644,18 @@ export const privateRoute = {
     "This link already paid its swap into the route wallet. Paste the Solana address to send it to.",
   resumeAddress: "Solana address",
   resumeGo: "Start the route",
+  finishTitle: "Finish sending",
+  finishBody: "This link's money is waiting in its route wallet. Where should it go?",
+  finishGo: "Send it",
+  swappingNote:
+    "If you sent this one to Solana, your money is being swapped. Open this link again in a few minutes.",
 
   /* ------------------------------------------------------------- devnet */
 
   devnetTitle: "Test the private route",
   devnetBadge: "Devnet test build. No real money.",
   devnetBody:
-    "Send devnet SOL or USDC here to test. SOL: send at least 0.1 SOL; about 0.06 SOL stays behind for route costs and comes back to the recipient at the end. USDC: send the USDC plus about 0.09 SOL for route costs.",
+    "Send devnet SOL or USDC here to test. SOL: send at least 0.1 SOL. The route costs about 0.04 SOL; anything unused comes back to the recipient at the end. USDC: send the USDC plus about 0.09 SOL for route costs; what is not used comes back the same way.",
   devnetLabel: "Route wallet address",
   devnetWaiting: "Waiting for devnet funds to arrive. This page checks every few seconds.",
   devnetNote:

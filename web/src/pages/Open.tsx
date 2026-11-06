@@ -23,10 +23,8 @@ import { parseMemo } from "../lib/memo";
 import { CopyField } from "../components/CopyField";
 import { Envelope } from "../components/Envelope";
 import { SendOn } from "../components/SendOn";
-import { MultihopTracker } from "../components/MultihopTracker";
-import { createMhClient, createSolRpc, externalIdFor } from "../lib/multihop";
-import { deriveRouterKey, secretBytesFromB64url } from "../lib/router";
-import { holdsFunds, readHoldings } from "../lib/routeRun";
+import { RouteResume } from "../components/RouteResume";
+import { probeRoute, resumeScreen, type RouteProbe } from "../lib/resume";
 
 interface Link {
   /** The address the sender paid. Safe to show: it reveals nothing and cannot spend. */
@@ -60,6 +58,12 @@ export function Open() {
    */
   const secret = useRef<string | null>(null);
   const core = useRef<LoadedCore | null>(null);
+  /**
+   * What the route's witnesses say about this link (a MultiHopper transfer, the router
+   * wallet's balances). null until asked. Asked once, quietly, after the link is read: the
+   * envelope renders first and nothing here can block or break opening it.
+   */
+  const [probe, setProbe] = useState<RouteProbe | null>(null);
   /** Bumped per scan, so a superseded run cannot write over a newer one. */
   const runId = useRef(0);
 
@@ -102,6 +106,16 @@ export function Open() {
       alive = false;
     };
   }, []);
+
+  useEffect(() => {
+    const s = secret.current;
+    if (!link || !s) return;
+    let alive = true;
+    void probeRoute(s).then((p) => alive && setProbe(p));
+    return () => {
+      alive = false;
+    };
+  }, [link]);
 
   const scan = useCallback(async () => {
     const c = core.current;
@@ -186,6 +200,28 @@ export function Open() {
     );
   }
 
+  // A route is under way, or money waits in the route wallet: that is what this link is for now.
+  const routeScreen = probe ? resumeScreen({ transfer: probe.transfer, held: probe.held, spent: false }) : "none";
+  if (probe && (routeScreen === "tracker" || routeScreen === "finish")) {
+    return (
+      <>
+        {badge}
+        <RouteResume
+          getSecret={getSecret}
+          probe={probe}
+          footer={
+            <>
+              <p className="fine" data-testid="link-forgotten">
+                {LINK_FORGOTTEN_COPY}
+              </p>
+              {provingFooter}
+            </>
+          }
+        />
+      </>
+    );
+  }
+
   if (state.phase === "sealed") {
     return (
       <section className="stack center open-sealed">
@@ -252,7 +288,7 @@ export function Open() {
   if (state.phase === "spent" && state.result) {
     return (
       <SpentOrRoute
-        getSecret={getSecret}
+        probe={probe}
         notes={state.result.notes}
         network={link.network}
         badge={badge}
@@ -333,73 +369,36 @@ export function Open() {
 }
 
 /**
- * A swept envelope may still have a private route in flight. The router wallet and the
- * route's external id both come from the link, so reopening it can find them: if the
- * router holds money or MultiHopper knows a transfer, show the tracker; otherwise this
- * is the plain "already opened" screen. Any trouble asking (no proxy, offline) falls
- * back to the plain screen, which is also what every ordinary swept envelope gets.
+ * A swept envelope. The route check has already had its say (a transfer or funds in the
+ * router replace this screen above), so what is left is the plain "already opened", with
+ * one extra line when the spend is recent enough that a swap may still be on its way to the
+ * route wallet. The check not having answered yet shows a short wait; if it fails it
+ * answers "nothing", so this never hangs.
  */
 function SpentOrRoute(props: {
-  getSecret: () => string | null;
+  probe: RouteProbe | null;
   notes: FoundNote[];
   network: Network;
   badge: React.ReactNode;
   provingFooter: React.ReactNode;
 }) {
-  const [probe, setProbe] = useState<"checking" | "route" | "spent">("checking");
-  const { getSecret } = props;
-
-  useEffect(() => {
-    let alive = true;
-    void (async () => {
-      let found = false;
-      try {
-        const secret = getSecret();
-        if (secret) {
-          const bytes = secretBytesFromB64url(secret);
-          const [key, externalId] = await Promise.all([deriveRouterKey(bytes), externalIdFor(bytes)]);
-          const [transfer, held] = await Promise.all([
-            createMhClient(undefined, externalId).byExternal(externalId).catch(() => null),
-            readHoldings(createSolRpc(), key).catch(() => null),
-          ]);
-          found = transfer !== null || (held !== null && holdsFunds(held));
-        }
-      } catch {
-        found = false;
-      }
-      if (alive) setProbe(found ? "route" : "spent");
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [getSecret]);
-
-  if (probe === "checking") {
+  if (props.probe === null) {
     return (
       <section className="stack">
         <h1 data-testid="route-probe">{routeCopy.resumeChecking}</h1>
       </section>
     );
   }
-  if (probe === "route") {
-    return (
-      <section className="stack" data-testid="route-resume">
-        <h1>{routeCopy.resumeTitle}</h1>
-        {props.badge}
-        <MultihopTracker getSecret={getSecret} recipient={null} asset={null} mode="resume" />
-        <p className="fine" data-testid="link-forgotten">
-          {LINK_FORGOTTEN_COPY}
-        </p>
-        {props.provingFooter}
-      </section>
-    );
-  }
+  const spentAt = latestSpend(props.notes)?.time ?? null;
+  const swapping =
+    resumeScreen({ transfer: null, held: props.probe.held, spent: true, spentAtSec: spentAt }) === "swapping";
   return (
     <AlreadyOpened
       notes={props.notes}
       network={props.network}
       badge={props.badge}
       provingFooter={props.provingFooter}
+      swapping={swapping}
     />
   );
 }
@@ -414,11 +413,14 @@ function AlreadyOpened({
   network,
   badge,
   provingFooter,
+  swapping = false,
 }: {
   notes: FoundNote[];
   network: Network;
   badge: React.ReactNode;
   provingFooter: React.ReactNode;
+  /** The spend is recent: a swap to Solana may still be in flight. */
+  swapping?: boolean;
 }) {
   const spend = latestSpend(notes);
   const received = sumZat(notes.map((n) => n.amount_zat));
@@ -457,6 +459,11 @@ function AlreadyOpened({
           {alreadyOpened.received(formatZecAmount(received))}
         </p>
       </div>
+      {swapping ? (
+        <p className="hint" data-testid="route-swapping">
+          {routeCopy.swappingNote}
+        </p>
+      ) : null}
       <p className="fine">{alreadyOpened.notYou}</p>
       <p className="fine" data-testid="link-forgotten">
         {LINK_FORGOTTEN_COPY}

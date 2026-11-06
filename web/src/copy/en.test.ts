@@ -454,6 +454,35 @@ describe("the private route", () => {
   });
 });
 
+describe("the private route, reopened and finished", () => {
+  it("says what is true about the SOL that comes back", () => {
+    expect(privateRoute.devnetBody).not.toMatch(/0\.06/);
+    expect(privateRoute.devnetBody).toMatch(/costs about 0\.04 SOL/);
+    expect(privateRoute.devnetBody).toMatch(/unused comes back to the recipient/);
+    for (const text of allStrings()) expect(text).not.toMatch(/stays behind/i);
+  });
+
+  it("the routing close note promises the money either way and the leftover only if the page stays", () => {
+    const withUsd = privateRoute.closeNoteRouting("$1.80");
+    expect(withUsd).toContain("Your money arrives either way.");
+    expect(withUsd).toContain("about 3 more minutes");
+    expect(withUsd).toContain("(about $1.80)");
+    expect(withUsd).toContain("open this link again later to collect it");
+    expect(privateRoute.closeNoteRouting(null)).not.toMatch(/about \$/);
+  });
+
+  it("the leftover step reads Collecting, then Done", () => {
+    expect(privateRoute.leftoverCollecting("0.031")).toBe("Collecting about 0.031 SOL of unused network money for you…");
+    expect(privateRoute.leftoverDone("0.031")).toBe("Done: 0.031 SOL sent to your wallet.");
+  });
+
+  it("the finish card and the swapping note do not claim certainty", () => {
+    expect(privateRoute.finishBody).toBe("This link's money is waiting in its route wallet. Where should it go?");
+    expect(privateRoute.swappingNote).toMatch(/^If you sent this one to Solana/);
+    expect(privateRoute.swappingNote).toMatch(/Open this link again in a few minutes\./);
+  });
+});
+
 describe("group envelopes", () => {
   it("warns that a link is the money", () => {
     expect(group.warn).toMatch(/anyone holding one can open/i);

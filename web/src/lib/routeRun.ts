@@ -135,6 +135,8 @@ export interface RunInfo {
   finalSignatures?: string[];
   /** A soft problem on this poll; the run carries on. */
   note?: string | null;
+  /** The unused SOL left in the router after the route: being collected, or sent. */
+  leftover?: { state: "collecting" | "done"; lamports: number };
 }
 
 export interface RunEnv {
@@ -144,6 +146,8 @@ export interface RunEnv {
   externalId: string;
   clock?: Clock;
   pollMs: number;
+  /** How long to watch for the keeper's late refund after a finished route. */
+  leftoverWaitMs?: number;
   cluster?: SolanaCluster;
   alive(): boolean;
   emit(event: MhEvent): void;
@@ -156,26 +160,62 @@ export interface RunEnv {
 
 const errMsg = (e: unknown) => (e instanceof Error && e.message ? e.message : "something went wrong");
 
-/** Sweeps the router out after a completed route, twice: the keeper refunds rent late. */
+/** Below this the router's SOL is dust: not worth a sweep transaction. */
+export const LEFTOVER_MIN_LAMPORTS = 2_000_000;
+/** How long a page that just saw the route finish keeps watching for the keeper's late refund. */
+export const LEFTOVER_WAIT_MS = 180_000;
+/** A route that finished longer ago than this has had its refund already. */
+const LEFTOVER_FRESH_MS = 10 * 60_000;
+/** The keeper's refund lands once; two sweeps (now, and after it) cover it. */
+const MAX_LEFTOVER_SWEEPS = 2;
+
+/**
+ * Sends the router's unused SOL (and, for a token route, closes its empty token accounts)
+ * to the recipient after a completed route. The money itself has arrived at that point, so
+ * "In your wallet" is reported first; this is the second, smaller step:
+ *
+ *   sweep what is there  ->  keep watching for the keeper's late rent refund  ->  sweep it
+ *
+ * The watch lasts {@link LEFTOVER_WAIT_MS} for a route that has just finished, and not at
+ * all for an old one, so reopening a link next week does one check and stops.
+ */
 export async function finishRoute(env: RunEnv, transfer: MhTransfer, recipient: string): Promise<string[]> {
   const clock = env.clock ?? realClock;
   const mint = transfer.tokenMint;
   const sigs: string[] = [];
-  const pass = async () => {
-    const r = await emptyRouter(env.key, recipient, mint, env.rpc, { sendTokens: true });
-    sigs.push(...r.tokens, ...r.closed, ...(r.sol ? [r.sol] : []));
-  };
-  await pass();
-  env.info({ arrived: true, finalSignatures: [...sigs] });
-  // The keeper's rent refund can land a little after `completed`; a second pass sends it.
-  await clock.sleep(Math.min(20_000, env.pollMs * 2));
-  if (env.alive()) {
+  env.info({ arrived: true });
+
+  const finishedAt = Date.parse(transfer.completedAt ?? transfer.createdAt ?? "");
+  const age = Number.isFinite(finishedAt) ? clock.now() - finishedAt : 0;
+  const waitMs = age > LEFTOVER_FRESH_MS ? 0 : (env.leftoverWaitMs ?? LEFTOVER_WAIT_MS);
+  const looks = Math.ceil(waitMs / Math.max(env.pollMs, 1));
+
+  let sweeps = 0;
+  let sentLamports = 0;
+  for (let i = 0; i <= looks && env.alive() && sweeps < MAX_LEFTOVER_SWEEPS; i += 1) {
+    let balance = 0;
     try {
-      await pass();
-      env.info({ finalSignatures: [...sigs] });
+      balance = await env.rpc.getBalance(env.key.address);
     } catch {
-      /* the first pass already delivered the money */
+      /* look again next time round */
     }
+    // A token route's empty accounts hold rent that only a close releases: always try once.
+    if (balance > LEFTOVER_MIN_LAMPORTS || (i === 0 && mint !== WSOL_MINT)) {
+      env.info({ leftover: { state: "collecting", lamports: balance } });
+      try {
+        const r = await emptyRouter(env.key, recipient, mint, env.rpc, { sendTokens: true });
+        sigs.push(...r.tokens, ...r.closed, ...(r.sol ? [r.sol] : []));
+        sweeps += 1;
+        if (r.sol) sentLamports += Math.max(0, balance - 5000);
+        env.info({
+          leftover: { state: "done", lamports: sentLamports },
+          finalSignatures: [...sigs],
+        });
+      } catch (e) {
+        env.info({ note: errMsg(e) });
+      }
+    }
+    if (i < looks && sweeps < MAX_LEFTOVER_SWEEPS) await clock.sleep(env.pollMs);
   }
   return sigs;
 }

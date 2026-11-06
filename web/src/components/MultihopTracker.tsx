@@ -17,7 +17,7 @@
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { privateRoute as copy } from "../copy/en";
-import { SOLANA_CLUSTER, solscanAccount, solscanTx } from "../lib/cluster";
+import { SOLANA_CLUSTER, oneClickAvailable, solscanAccount, solscanTx } from "../lib/cluster";
 import { truncateMiddle } from "../lib/format";
 import {
   createMhClient,
@@ -27,7 +27,7 @@ import {
   type MhTransfer,
 } from "../lib/multihop";
 import { initialMhState, mhReducer } from "../lib/multihopFlow";
-import type { SolanaAsset } from "../lib/oneclick";
+import { SOLANA_ASSETS, formatUsd, oneClickTokens, type SolanaAsset } from "../lib/oneclick";
 import type { RouterKey } from "../lib/router";
 import { deriveRouterKey, secretBytesFromB64url } from "../lib/router";
 import { assetForMint, mintFor, runRoute, type RunInfo } from "../lib/routeRun";
@@ -35,6 +35,9 @@ import { etaWords, routeEta, routePollMs, trackerRows } from "../lib/routeTracke
 import { checkSolanaAddress } from "../lib/solana";
 import { CopyField } from "./CopyField";
 import { Qr } from "./Qr";
+
+/** What a route usually leaves unused, measured on SOL routes (0.02 to 0.08 SOL): the low end. */
+const LEFTOVER_ESTIMATE_SOL = 0.02;
 
 export type TrackerMode = "route" | "resume" | "devnet";
 
@@ -62,6 +65,7 @@ export function MultihopTracker({ getSecret, recipient, asset, mode, pollMs = ro
   const [routerAddress, setRouterAddress] = useState<string | null>(null);
   const [refund, setRefund] = useState<Refund>("idle");
   const [now, setNow] = useState(() => Date.now());
+  const [solUsd, setSolUsd] = useState<number | null>(null);
   const router = useRef<RouterKey | null>(null);
   const rpc = useMemo(() => createSolRpc(), []);
 
@@ -108,6 +112,21 @@ export function MultihopTracker({ getSecret, recipient, asset, mode, pollMs = ro
     };
   }, [getSecret, to, asset, pollMs, rpc, runKey]);
 
+  // SOL's dollar price, only to say what the unused network money is worth. Best effort.
+  useEffect(() => {
+    if (!oneClickAvailable()) return;
+    let alive = true;
+    oneClickTokens()
+      .then((tokens) => {
+        const p = tokens.find((t) => t.assetId === SOLANA_ASSETS.sol.id)?.price;
+        if (alive && typeof p === "number" && p > 0) setSolUsd(p);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   // A slow clock for "about N min" and for the late notice.
   useEffect(() => {
     const t = window.setInterval(() => setNow(Date.now()), 5000);
@@ -124,6 +143,7 @@ export function MultihopTracker({ getSecret, recipient, asset, mode, pollMs = ro
     transfer,
     arrived,
     hideSwap: mode === "devnet",
+    leftover: info.leftover,
   });
   const eta = routeEta(transfer, now);
   const recipientShown = transfer?.recipientWallet ?? to;
@@ -292,7 +312,9 @@ export function MultihopTracker({ getSecret, recipient, asset, mode, pollMs = ro
       ) : null}
 
       <p className="hint" data-testid="route-close-note">
-        {copy.closeNote}
+        {phase === "refunded" || phase === "failed" || (arrived && info.leftover?.state === "done")
+          ? copy.closeNote
+          : copy.closeNoteRouting(solUsd === null ? null : formatUsd(solUsd * LEFTOVER_ESTIMATE_SOL))}
       </p>
 
       <details data-testid="route-details">

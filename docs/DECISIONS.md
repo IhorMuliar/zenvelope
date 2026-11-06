@@ -13,7 +13,11 @@ the evidence it rests on. If something here contradicts another doc, this file w
 
 **Consequence for public copy.** "We will never ask for ... a wallet connection" became "... a wallet connection that can sign anything", and README/PRODUCT say the same. `en.test.ts` allows exactly one string, "Connect my wallet".
 
-**Known limits.** A link reopened after its swap was paid but before the router was funded still shows "already opened" (nothing yet to find). The leftover-SOL sweep runs twice, 20 s apart, because the keeper's rent refund can land after `completed`; the timing is not yet measured on mainnet.
+**Reopening resumes the route.** Opening any link (spent or not) quietly asks, in parallel and with an 8 s ceiling, `byExternal` and the router's SOL/USDC balances (`lib/resume.ts`); a failure answers "nothing" and never blocks the envelope. A transfer shows the tracker at once (recipient from the transfer); no transfer but a funded router shows "Finish sending" (the same paste / connect / new-wallet choices, `DestinationChoices`), then runs the route; otherwise the page is unchanged. A spent envelope with an empty router and a spend under 30 minutes old gets one extra line that its money may still be swapping: the 1Click deposit address is not derivable from the link, so its status cannot be asked and the line is worded as a maybe.
+
+**Leftover SOL.** The router keeps the route's unused SOL (measured 0.02-0.08 SOL; route costs about 0.04 SOL net). After "In your wallet" the tracker shows "Collecting about X SOL ..." then "Done: X SOL sent to your wallet.", and a page left open about 3 minutes after completion sweeps the keeper's late rent refund too (at most two sweeps). A page closed earlier leaves it in the router until the link is opened again; reopening a finished route sweeps anything above 0.002 SOL. Copy says "anything unused comes back to the recipient", never a fixed amount.
+
+**Known limits.** A link reopened after its swap was paid but before the router was funded shows "already opened" (with the swapping line when the spend is recent). The refund timing is not yet measured on mainnet.
 
 ### D20 Sweep can pay a second fixed output (route gas)
 

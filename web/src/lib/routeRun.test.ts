@@ -109,6 +109,34 @@ describe("runRoute: resume from the link", () => {
     expect(sent).toHaveLength(2);
   });
 
+  it("shows the leftover step: arrived first, then collecting, then done with the amount", async () => {
+    const { rpc } = fakeRpc({ lamports: 40_000_000 });
+    const { e, infos } = await env({ rpc, mh: { byExternal: async () => done } });
+    await runRoute(e);
+    const keys = infos.map((i) => (i.arrived ? "arrived" : i.leftover ? i.leftover.state : "other"));
+    expect(keys.indexOf("arrived")).toBeLessThan(keys.indexOf("collecting"));
+    expect(keys.indexOf("collecting")).toBeLessThan(keys.indexOf("done"));
+    expect(infos.filter((i) => i.leftover?.state === "done").at(-1)!.leftover!.lamports).toBeGreaterThan(30_000_000);
+  });
+
+  it("an old finished route with only dust left does one check and sends nothing", async () => {
+    const old = { ...done, completedAt: "2020-01-01T00:00:00Z" } as MhTransfer;
+    const { rpc, sent } = fakeRpc({ lamports: 1_000_000 });
+    const { e, infos } = await env({ rpc, mh: { byExternal: async () => old }, clock: { now: () => Date.now(), sleep: async () => {} } });
+    await runRoute(e);
+    expect(sent).toHaveLength(0);
+    expect(infos.some((i) => i.arrived)).toBe(true);
+    expect(infos.some((i) => i.leftover)).toBe(false);
+  });
+
+  it("a reopened old route that still holds SOL collects it", async () => {
+    const old = { ...done, completedAt: "2020-01-01T00:00:00Z" } as MhTransfer;
+    const { rpc, sent } = fakeRpc({ lamports: 25_000_000 });
+    const { e } = await env({ rpc, mh: { byExternal: async () => old }, clock: { now: () => Date.now(), sleep: async () => {} } });
+    await runRoute(e);
+    expect(sent.length).toBeGreaterThanOrEqual(1);
+  });
+
   it("a completed USDC route closes the empty token account before sweeping SOL", async () => {
     const usdcDone = { ...done, tokenMint: usdcMint(), tokenSymbol: "USDC" } as MhTransfer;
     // The router's own USDC ATA: anything else is refused by trustedTokenAccount.

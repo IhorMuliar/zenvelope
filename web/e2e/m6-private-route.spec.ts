@@ -486,11 +486,50 @@ describeOnMock("M6: the tracker and resuming from the link", () => {
   test.skip(DEVNET, "covered by the mainnet build");
 
   /** A swept link whose route is already under way; the world decides what MultiHopper says. */
-  async function reopen(page: Page, world: World) {
+  async function reopen(page: Page, world: World, fragment = SPENT_FRAGMENT, click = false) {
     await mockChain(page, world);
-    await page.goto(`/e?poll=150#${SPENT_FRAGMENT}`);
-    await page.getByTestId("open-envelope").click();
+    // SOL's dollar price, for the "(about $X)" in the close note.
+    await page.route("**/1click.chaindefuser.com/**/tokens", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([{ assetId: "nep141:sol.omft.near", decimals: 9, blockchain: "sol", symbol: "SOL", price: 90 }]),
+      }),
+    );
+    await page.goto(`/e?poll=150#${fragment}`);
+    if (click) await page.getByTestId("open-envelope").click();
   }
+
+  test("reopening a link whose route runs shows the tracker at once, without entering the flow", async ({ page }) => {
+    // An envelope that is NOT spent: the route check alone brings the tracker, no tap needed.
+    const world = newWorld({
+      lamports: 40_000_000,
+      transfer: transferAt({ status: "active", executed: 1, ageSec: 50 }),
+    });
+    await reopen(page, world, FRAGMENT, false);
+    await expect(page.getByTestId("route-tracker")).toBeVisible();
+    await expect(page.getByTestId("open-envelope")).toHaveCount(0);
+    await expect(page.locator('[data-stage="hops"]')).toHaveText(/Hop 2 of 3/);
+    await expect(page.getByTestId("route-recipient")).toBeVisible();
+    await expect(page.getByTestId("route-close-note")).toHaveText(
+      "You can close this page. Your money arrives either way. Leave it open about 3 more minutes and the unused network money (about $1.80) comes to you too, or open this link again later to collect it.",
+    );
+  });
+
+  test("reopening with a funded router and no transfer shows 'Finish sending', then runs the route", async ({ page }) => {
+    const world = newWorld({ lamports: 1_000_000_000 });
+    await reopen(page, world, FRAGMENT, false);
+    await expect(page.getByTestId("route-finish")).toContainText(
+      "This link's money is waiting in its route wallet. Where should it go?",
+    );
+    await expect(page.getByTestId("route-finish-go")).toBeDisabled();
+    await page.getByTestId("swap-mode-paste").click();
+    await page.getByTestId("swap-address-input").fill(RECIPIENT);
+    await page.getByTestId("route-finish-go").click();
+    await expect.poll(() => world.creates.length).toBe(1);
+    expect(world.creates[0].recipientWallet).toBe(RECIPIENT);
+    await expect(page.getByTestId("route-tracker")).toBeVisible();
+  });
 
   test("an already-swept link with a route shows the tracker, not 'already opened'", async ({ page }) => {
     const world = newWorld({
@@ -509,9 +548,7 @@ describeOnMock("M6: the tracker and resuming from the link", () => {
     await expect(rows.nth(1)).toHaveAttribute("data-state", "done");
     await expect(page.locator('[data-stage="hops"]')).toHaveText(/Hop 1 of 3/);
     await expect(page.locator('[data-stage="hops"]')).toHaveAttribute("data-state", "active");
-    await expect(page.getByTestId("route-close-note")).toHaveText(
-      "You can close this page. Open this link again any time to check.",
-    );
+    await expect(page.getByTestId("route-close-note")).toContainText("Your money arrives either way.");
     await expect(page.getByTestId("route-status-line")).toContainText("Arrives");
     await expect(page.getByTestId("route-late")).toHaveCount(0);
     await shot(page, "tracker-hop-1");
@@ -531,6 +568,11 @@ describeOnMock("M6: the tracker and resuming from the link", () => {
     await expect(page.locator('[data-stage="arrived"]')).toHaveAttribute("data-state", "done");
     await expect(page.getByTestId("route-status-line")).toHaveText("It arrived. The route is finished.");
     expect(world.sent.length).toBeGreaterThanOrEqual(1);
+    // The leftover step follows "In your wallet": collecting, then done with the amount.
+    await expect(page.locator('[data-stage="leftover"]')).toHaveText(/Done: 0\.040 SOL sent to your wallet\./);
+    await expect(page.getByTestId("route-close-note")).toHaveText(
+      "You can close this page. Open this link again any time to check.",
+    );
 
     // Explorer links sit behind "See details", with the cluster suffix only on devnet.
     await page.getByTestId("route-details").locator("summary").click();
@@ -571,13 +613,14 @@ describeOnMock("M6: the tracker and resuming from the link", () => {
     expect(world.sent).toHaveLength(1);
   });
 
-  test("a funded router with no transfer yet asks where to send it, then starts the route", async ({ page }) => {
+  test("a swept link with a funded router and no transfer asks where to send it, then starts the route", async ({ page }) => {
     const world = newWorld({ lamports: 1_000_000_000 });
     await reopen(page, world);
-    await expect(page.getByTestId("route-resume-ask")).toBeVisible();
-    await expect(page.getByTestId("route-resume-go")).toBeDisabled();
-    await page.getByTestId("route-resume-input").fill(RECIPIENT);
-    await page.getByTestId("route-resume-go").click();
+    await expect(page.getByTestId("route-finish")).toBeVisible();
+    await expect(page.getByTestId("route-finish-go")).toBeDisabled();
+    await page.getByTestId("swap-mode-paste").click();
+    await page.getByTestId("swap-address-input").fill(RECIPIENT);
+    await page.getByTestId("route-finish-go").click();
 
     // It sized the route from the balance and created exactly one transfer for this link.
     await expect.poll(() => world.creates.length).toBe(1);
@@ -592,7 +635,7 @@ describeOnMock("M6: the tracker and resuming from the link", () => {
   });
 
   test("a swept link with nothing in flight is still just 'already opened'", async ({ page }) => {
-    await reopen(page, newWorld());
+    await reopen(page, newWorld(), SPENT_FRAGMENT, true);
     await expect(page.getByTestId("already-opened")).toBeVisible();
     await expect(page.getByTestId("route-tracker")).toHaveCount(0);
   });

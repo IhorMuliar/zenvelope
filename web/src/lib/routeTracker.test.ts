@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import byExternal from "./__fixtures__/mh-by-external-sol.json";
 import polls from "./__fixtures__/mh-polls-sol.json";
 import type { MhTransfer } from "./multihop";
-import { etaWords, routeEta, routePollMs, trackerRows } from "./routeTracker";
+import { etaWords, routeEta, routePollMs, solText, trackerRows } from "./routeTracker";
 
 const completed = byExternal as unknown as MhTransfer;
 const fresh = polls[0] as unknown as MhTransfer; // 0 of 3 hops executed
@@ -83,5 +83,32 @@ describe("routePollMs", () => {
     expect(routePollMs("?poll=300")).toBe(300);
     expect(routePollMs("?poll=999999")).toBe(15_000);
     expect(routePollMs("?poll=5")).toBe(100);
+  });
+});
+
+describe("the leftover SOL step", () => {
+  const rows = (leftover?: { state: "collecting" | "done"; lamports: number }) =>
+    trackerRows({ swapping: false, phase: "done", transfer: completed, arrived: true, leftover });
+
+  it("is absent until the page has something to collect", () => {
+    expect(rows().map((r) => r.key)).not.toContain("leftover");
+  });
+
+  it("shows after 'In your wallet': collecting, then done", () => {
+    const c = rows({ state: "collecting", lamports: 31_000_000 });
+    expect(c.at(-1)).toMatchObject({ key: "leftover", state: "active", label: "Collecting about 0.031 SOL of unused network money for you…" });
+    expect(c.at(-2)!.key).toBe("arrived");
+    const d = rows({ state: "done", lamports: 31_000_000 });
+    expect(d.at(-1)).toMatchObject({ state: "done", label: "Done: 0.031 SOL sent to your wallet." });
+  });
+
+  it("is not shown before the money has arrived", () => {
+    const r = trackerRows({ swapping: false, phase: "routing", transfer: fresh, arrived: false, leftover: { state: "collecting", lamports: 1 } });
+    expect(r.map((x) => x.key)).not.toContain("leftover");
+  });
+
+  it("formats SOL to three places", () => {
+    expect(solText(31_400_000)).toBe("0.031");
+    expect(solText(400_000)).toBe("less than 0.001");
   });
 });
