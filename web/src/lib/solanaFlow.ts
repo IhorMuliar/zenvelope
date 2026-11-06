@@ -31,8 +31,11 @@ import type { AddressKind } from "../core/types";
 
 export type SolanaPhase = "trust" | "asset" | "destination" | "quote" | "deposit";
 
-/** How the recipient gets a Solana address: they have one, or the page makes one. */
-export type DestinationMode = "paste" | "generate";
+/**
+ * How the recipient gets a Solana address: a wallet they connect (read-only, only the
+ * public address is taken), one they paste, or one the page makes.
+ */
+export type DestinationMode = "paste" | "generate" | "connect";
 
 /** The verdict on the refund override. See {@link SolanaExitState.refundStatus}. */
 export type RefundStatus = "default" | "checking" | "ok" | "bad";
@@ -63,8 +66,14 @@ export interface SolanaExitState {
   pasted: string;
   /** Generated here, shown once, stored nowhere. */
   keypair: SolanaKeypair | null;
-  /** "I saved it". Required before a generated key may be used. */
-  savedKey: boolean;
+  /**
+   * What was typed to prove the generated key was copied: its last
+   * {@link KEY_TAIL_CHARS} characters. Required before the key may be used.
+   */
+  keyConfirm: string;
+  /** The address a connected wallet shared, and the wallet's name. */
+  connectedAddress: string;
+  connectedName: string;
   keypairError: string | null;
   /**
    * Where a failed swap sends the ZEC back. Empty means the envelope's own
@@ -98,7 +107,9 @@ export const initialSolanaExitState: SolanaExitState = {
   mode: null,
   pasted: "",
   keypair: null,
-  savedKey: false,
+  keyConfirm: "",
+  connectedAddress: "",
+  connectedName: "",
   keypairError: null,
   refundOverride: "",
   refundStatus: "default",
@@ -118,7 +129,8 @@ export type SolanaExitEvent =
   | { type: "pasted"; value: string }
   | { type: "keypair"; keypair: SolanaKeypair }
   | { type: "keypairError"; message: string }
-  | { type: "savedKey"; value: boolean }
+  | { type: "keyConfirm"; value: string }
+  | { type: "connected"; address: string; name: string }
   | { type: "refund"; value: string }
   | { type: "refundVerdict"; input: string; ok: boolean; message: string | null }
   | { type: "busy" }
@@ -168,21 +180,32 @@ export function solanaExitReducer(
         // Switching away from a generated key drops it: it was never usable
         // anywhere else, and leaving it in state would keep it on screen.
         keypair: event.mode === "generate" ? state.keypair : null,
-        savedKey: event.mode === "generate" ? state.savedKey : false,
+        keyConfirm: event.mode === "generate" ? state.keyConfirm : "",
         pasted: event.mode === "paste" ? state.pasted : "",
+        connectedAddress: event.mode === "connect" ? state.connectedAddress : "",
+        connectedName: event.mode === "connect" ? state.connectedName : "",
       };
 
     case "pasted":
       return { ...state, pasted: event.value, error: null };
 
     case "keypair":
-      return { ...state, keypair: event.keypair, keypairError: null, savedKey: false };
+      return { ...state, keypair: event.keypair, keypairError: null, keyConfirm: "" };
 
     case "keypairError":
       return { ...state, keypair: null, keypairError: event.message };
 
-    case "savedKey":
-      return { ...state, savedKey: event.value };
+    case "keyConfirm":
+      return { ...state, keyConfirm: event.value };
+
+    case "connected":
+      return {
+        ...state,
+        mode: "connect",
+        connectedAddress: event.address,
+        connectedName: event.name,
+        error: null,
+      };
 
     case "refund":
       return {
@@ -241,20 +264,40 @@ export function solanaExitReducer(
 /** The Solana address the rail would pay out to. "" when there is not one yet. */
 export function recipientAddress(state: SolanaExitState): string {
   if (state.mode === "generate") return state.keypair?.address ?? "";
+  if (state.mode === "connect") return state.connectedAddress.trim();
   return state.pasted.trim();
 }
 
 /**
  * True when there is a usable Solana destination.
  *
- * A generated key counts only once "I saved it" is ticked: a payout to a key
- * nobody wrote down is a payout to nobody.
+ * A generated key counts only once the last {@link KEY_TAIL_CHARS} characters of it
+ * have been typed back: a payout to a key nobody copied is a payout to nobody.
  */
 export function destinationReady(state: SolanaExitState): boolean {
   const addr = recipientAddress(state);
   if (checkSolanaAddress(addr) !== null) return false;
-  if (state.mode === "generate") return state.savedKey;
-  return state.mode === "paste";
+  if (state.mode === "generate") {
+    return state.keypair !== null && keyTailMatches(state.keypair.secretKeyBase58, state.keyConfirm);
+  }
+  return state.mode === "paste" || state.mode === "connect";
+}
+
+/** How many trailing characters of a generated key must be typed back. */
+export const KEY_TAIL_CHARS = 4;
+
+/** The last {@link KEY_TAIL_CHARS} characters of `key`. */
+export function keyTail(key: string): string {
+  return key.slice(-KEY_TAIL_CHARS);
+}
+
+/**
+ * True when `typed` is exactly the key's last four characters (surrounding spaces
+ * ignored, case kept: base58 is case-sensitive, and a lazy "any 4" check proves nothing).
+ */
+export function keyTailMatches(key: string, typed: string): boolean {
+  const t = typed.trim();
+  return key.length >= KEY_TAIL_CHARS && t.length === KEY_TAIL_CHARS && t === keyTail(key);
 }
 
 /** True when the refund address is one the rail could actually pay (M4). */

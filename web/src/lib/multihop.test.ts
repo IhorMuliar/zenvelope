@@ -23,6 +23,7 @@ import { base64ToBytes, buildTransferTransaction, signTransaction } from "./solt
 
 const seed = Uint8Array.from(Buffer.from(vectors.seedHex, "hex"));
 const T = vectors.txs;
+const EXT = "e".repeat(32);
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 const mhErr = (status: number, code: string) => json(status, { error: { code, message: code } });
@@ -91,6 +92,10 @@ function world(key: RouterKey, transfer: Record<string, unknown> = {}): World {
     }
     const path = url.replace("/api/mh/", "");
     w.log.push(`${init?.method} ${path}`);
+    // Per-transfer routes carry the capability header (proxy requires it).
+    if (/^transfers\/\d+/.test(path)) {
+      expect((init?.headers as Record<string, string> | undefined)?.["x-zenvelope-ext"]).toBe(EXT);
+    }
     if (path.endsWith("/prepare")) {
       expect(body).toEqual({});
       const next = w.prepared.shift();
@@ -113,7 +118,7 @@ async function setup(transfer: Record<string, unknown> = {}) {
   const w = world(key, transfer);
   const clock = fastClock();
   const opts = {
-    mh: createMhClient({ fetch: w.fetch }),
+    mh: createMhClient({ fetch: w.fetch }, EXT),
     rpc: createSolRpc({ fetch: w.fetch }, clock),
     key,
     clock,
@@ -212,7 +217,7 @@ describe("runBroadcast: the measured sequence", () => {
     w.prepared.push(() => fullPrepared({ routeInitTxs: [], orchestratorInitTx: null, sessionInitTxs: [] }));
     w.prepared.push(() => fullPrepared({ keeperFundingTx: null, routeInitTxs: [], orchestratorInitTx: null, sessionInitTxs: [] }));
     const out = await runBroadcast(1583, {
-      mh: createMhClient({ fetch: fetchStuck }),
+      mh: createMhClient({ fetch: fetchStuck }, EXT),
       rpc: createSolRpc({ fetch: fetchStuck }, clock),
       key,
       clock,
@@ -303,8 +308,12 @@ describe("client", () => {
       body = init.body;
       return mhErr(409, "MH_082");
     }) as unknown as typeof fetch;
-    await expect(createMhClient({ fetch: f }).prepare(1)).rejects.toMatchObject({ code: "MH_082", status: 409 });
+    await expect(createMhClient({ fetch: f }, EXT).prepare(1)).rejects.toMatchObject({ code: "MH_082", status: 409 });
     expect(body).toBe("{}");
+  });
+  it("refuses per-transfer calls without an externalId", async () => {
+    const f = (async () => json(200, create)) as unknown as typeof fetch;
+    await expect(createMhClient({ fetch: f }).get(1)).rejects.toThrow(/externalId/);
   });
   it("keeps the prepare fixture shape we rely on", () => {
     expect(prepareSol.preparedTxs.routeInitTxs[0].base64).toBeTypeOf("string");

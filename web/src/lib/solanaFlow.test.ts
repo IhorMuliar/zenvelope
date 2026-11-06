@@ -23,6 +23,8 @@ import {
   swapStatusLine,
   type SolanaExitEvent,
   type SolanaExitState,
+  keyTail,
+  keyTailMatches,
 } from "./solanaFlow";
 
 const ADDRESS = "9XgwdBnkmJzRyQhM3bAkYqekuG9u2w9eJfjCe2T3HyrS";
@@ -138,26 +140,51 @@ describe("the destination", () => {
     expect(canQuote(state)).toBe(false);
   });
 
-  it("will not use a generated key until it is saved", () => {
-    const keypair = { address: ADDRESS, secretKeyBase58: "x".repeat(88) };
+  it("will not use a generated key until its last 4 characters are typed back", () => {
+    const keypair = { address: ADDRESS, secretKeyBase58: "x".repeat(84) + "aB3z" };
     const base = run([
       ...TO_QUOTE.slice(0, 3),
       { type: "mode", mode: "generate" },
       { type: "keypair", keypair },
     ]);
     expect(recipientAddress(base)).toBe(ADDRESS);
-    expect(base.savedKey).toBe(false);
+    expect(base.keyConfirm).toBe("");
     expect(destinationReady(base)).toBe(false);
     expect(canQuote(base)).toBe(false);
 
-    const saved = solanaExitReducer(base, { type: "savedKey", value: true });
-    expect(destinationReady(saved)).toBe(true);
-    expect(canQuote(saved)).toBe(true);
+    // Wrong tail, wrong case and a partial tail all stay blocked.
+    for (const wrong of ["xxxx", "ab3z", "B3z", "aB3zz", "  "]) {
+      const s = solanaExitReducer(base, { type: "keyConfirm", value: wrong });
+      expect(destinationReady(s), wrong).toBe(false);
+    }
+
+    const typed = solanaExitReducer(base, { type: "keyConfirm", value: " aB3z " });
+    expect(destinationReady(typed)).toBe(true);
+    expect(canQuote(typed)).toBe(true);
 
     // And it is a gate, not a one-way door.
-    expect(destinationReady(solanaExitReducer(saved, { type: "savedKey", value: false }))).toBe(
-      false,
-    );
+    expect(destinationReady(solanaExitReducer(typed, { type: "keyConfirm", value: "aB3" }))).toBe(false);
+  });
+
+  it("keyTailMatches is exact", () => {
+    expect(keyTail("abcdefgh")).toBe("efgh");
+    expect(keyTailMatches("abcdefgh", "efgh")).toBe(true);
+    expect(keyTailMatches("abcdefgh", "EFGH")).toBe(false);
+    expect(keyTailMatches("abc", "abc")).toBe(false);
+  });
+
+  it("a connected wallet's address is the destination, and switching away drops it", () => {
+    const connected = run([
+      ...TO_QUOTE.slice(0, 3),
+      { type: "mode", mode: "connect" },
+      { type: "connected", address: ADDRESS, name: "Phantom" },
+    ]);
+    expect(recipientAddress(connected)).toBe(ADDRESS);
+    expect(destinationReady(connected)).toBe(true);
+    const none = run([...TO_QUOTE.slice(0, 3), { type: "mode", mode: "connect" }]);
+    expect(destinationReady(none)).toBe(false);
+    const away = solanaExitReducer(connected, { type: "mode", mode: "paste" });
+    expect(away.connectedAddress).toBe("");
   });
 
   it("drops a generated key when the mode changes away from it", () => {
@@ -166,11 +193,11 @@ describe("the destination", () => {
       ...TO_QUOTE.slice(0, 3),
       { type: "mode", mode: "generate" },
       { type: "keypair", keypair },
-      { type: "savedKey", value: true },
+      { type: "keyConfirm", value: "xxxx" },
       { type: "mode", mode: "paste" },
     ]);
     expect(state.keypair).toBeNull();
-    expect(state.savedKey).toBe(false);
+    expect(state.keyConfirm).toBe("");
     expect(recipientAddress(state)).toBe("");
   });
 

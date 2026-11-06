@@ -5,6 +5,16 @@ the evidence it rests on. If something here contradicts another doc, this file w
 
 ## 2026-11-06
 
+### D21 Private route UI: optional read-only wallet connect, router-held funds, devnet switch
+
+**Decision.** The Solana exit gains (1) an optional "Connect my wallet" that discovers Wallet Standard wallets with the two window events (no dependency), calls only `standard:connect` and keeps the first account's public address; (2) a reworked new-wallet path (one key, "Copy my key", a Phantom import guide, and the last 4 characters typed back instead of a tick); (3) a "Private route" switch on the quote screen, off by default, behind its own tick-to-continue gate (MultiHopper, TRM screening, contracts not yet audited). With the route on, the 1Click quotes pay the **router wallet** (derived from the link, D19's plan) instead of the recipient: a USDC gift adds a second SOL quote as the sweep's extra output (D20), a SOL gift one quote that also covers the overhead. The page then starts the route from the router, polls it, closes the router's empty USDC account and sends the leftover SOL to the recipient. `VITE_SOLANA_CLUSTER=devnet` selects the devnet USDC mint and Solscan `?cluster=devnet`, and skips the swap and the ZEC sweep: the tester funds the router address directly.
+
+**Why.** The router always signs, so a connected wallet is never asked to sign anything. The route's fixed SOL cost (about 0.04-0.05 SOL) only makes sense on larger gifts, so the switch appears only when the overhead is at most 5% of the gift and the gift is at most $1,000 while the contracts are unaudited. Nothing is stored: the router key and the transfer id both come from the link, so reopening a swept link finds the route (router balance, or `byExternal`) instead of "already opened".
+
+**Consequence for public copy.** "We will never ask for ... a wallet connection" became "... a wallet connection that can sign anything", and README/PRODUCT say the same. `en.test.ts` allows exactly one string, "Connect my wallet".
+
+**Known limits.** A link reopened after its swap was paid but before the router was funded still shows "already opened" (nothing yet to find). The leftover-SOL sweep runs twice, 20 s apart, because the keeper's rent refund can land after `completed`; the timing is not yet measured on mainnet.
+
 ### D20 Sweep can pay a second fixed output (route gas)
 
 **Decision.** `SweepRequest` has an optional `extra_output: (address, zatoshi)`. When set, the sweep pays that fixed amount to a second **transparent** address (`t1` or `t3`; shielded is refused), and the main destination receives everything else: total minus the flat fee, the network fee and the extra amount. With no extra output nothing changes. `sweep_envelope` takes it as two trailing optional arguments after `on_stage` (`extra_address`, `extra_zat`), so the callback keeps its slot. The page previews it with `splitSweepAmounts` in `web/src/lib/amount.ts`.

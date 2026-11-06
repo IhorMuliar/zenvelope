@@ -17,6 +17,8 @@ import {
   group,
   how,
   landing,
+  privateRoute,
+  privateRouteBoundary,
   receive,
   revealed,
   sealed,
@@ -36,8 +38,15 @@ const strings = allStrings();
  */
 const SAFETY_LINES = [NEVER_ASK, ONLY_ASK, how.neverAskFine];
 
+/**
+ * The one optional button that reads a public address from a wallet extension. It is
+ * allowed to say "Connect my wallet" because the line under it, and the test below,
+ * pin down that it never signs and never moves money.
+ */
+const CONNECT_LINES: string[] = [solanaExit.connectTitle];
+
 function body(s: string): boolean {
-  return !SAFETY_LINES.includes(s);
+  return !SAFETY_LINES.includes(s) && !CONNECT_LINES.includes(s);
 }
 
 describe("rule 1: never the word claim", () => {
@@ -363,8 +372,34 @@ describe("the Solana exit", () => {
   it("tells a generated secret key holder that it is shown once and stored nowhere", () => {
     expect(solanaExit.secretOnce).toMatch(/once/i);
     expect(solanaExit.secretOnce).toMatch(/saved nowhere/i);
-    expect(solanaExit.importHint).toMatch(/Phantom/);
     expect(solanaExit.importHint).toMatch(/Solflare/);
+  });
+
+  it("gives one warning, a copy button and a three-step Phantom import guide", () => {
+    expect(solanaExit.keyWarning).toBe(
+      "Anyone with this key can take the money. Keep it in a password manager.",
+    );
+    expect(solanaExit.keyCopyButton).toBe("Copy my key");
+    expect(solanaExit.guideTitle).toBe("Import into Phantom");
+    expect(solanaExit.guideSteps).toHaveLength(3);
+    expect(solanaExit.guideSteps.join(" ")).toMatch(/Settings/);
+    expect(solanaExit.guideSteps.join(" ")).toMatch(/Manage accounts/);
+    expect(solanaExit.guideSteps.join(" ")).toMatch(/Import private key/);
+    expect(solanaExit.keyConfirmLabel).toMatch(/last 4 characters/);
+  });
+
+  it("connect is read-only and says so; with no wallet the paste box says where to copy from", () => {
+    expect(solanaExit.connectTitle).toBe("Connect my wallet");
+    expect(solanaExit.connectBody).toBe("We only see your public address. We can't move your money.");
+    expect(solanaExit.pasteTitle).toBe("Paste an address");
+    expect(solanaExit.pasteBodyNoWallet).toBe("Copy your address from your wallet app");
+  });
+
+  it("connect is the only place a wallet connection is mentioned, and nothing asks to sign", () => {
+    const offenders = strings.filter(
+      (s) => !SAFETY_LINES.includes(s) && /\b(sign|approve)\b/i.test(s) && /wallet/i.test(s),
+    );
+    expect(offenders, offenders.join(" | ")).toEqual([]);
   });
 
   it("explains the default refund address rather than demanding one", () => {
@@ -378,6 +413,44 @@ describe("the Solana exit", () => {
       "Dry run: deposit address obtained, transaction built, nothing sent",
     );
     expect(solanaExit.dryRunNote).toMatch(/still in the envelope/i);
+  });
+});
+
+describe("the private route", () => {
+  it("has its own tick-to-continue gate that names the service, the screening and the audit", () => {
+    expect(privateRouteBoundary.points).toHaveLength(4);
+    const all = privateRouteBoundary.points.map((p) => `${p.title} ${p.body}`).join(" ");
+    expect(all).toMatch(/MultiHopper/);
+    expect(all).toMatch(/TRM/);
+    expect(all).toContain("a safety check may send the money back to this link");
+    expect(all).toMatch(/not yet audited/i);
+    expect(all).toMatch(/not impossible/i);
+    expect(privateRouteBoundary.checkbox).toMatch(/^I understand/);
+    expect(privateRouteBoundary.blockedHint).toMatch(/tick the box/i);
+  });
+
+  it("states the benefit and the caveat in one breath, and never promises anonymity", () => {
+    expect(privateRoute.toggleBody).toBe(
+      "Extra privacy: your money takes a longer route, so it's harder to trace. Solana is public, so this isn't a guarantee.",
+    );
+    const text = Object.values(privateRoute).filter((v) => typeof v === "string").join(" ");
+    expect(text).not.toMatch(/\b(anonymous|untraceable|mixer|hidden)\b/i);
+  });
+
+  it("prints the figures as the spec words them", () => {
+    expect(privateRoute.numbers("$24.62", 6, "$0.38")).toBe(
+      "You'll receive about $24.62 · arrives in about 6 min · costs: 0.5% + about $0.38 network",
+    );
+    expect(privateRoute.availableOver("$65")).toBe("Private route is available for gifts over $65");
+  });
+
+  it("the tracker reads Swapping, Packed, Hop i of n, Landing, In your wallet", () => {
+    expect([privateRoute.swapping, privateRoute.packed, privateRoute.hop(2, 3), privateRoute.landing, privateRoute.arrived]).toEqual([
+      "Swapping", "Packed", "Hop 2 of 3", "Landing", "In your wallet",
+    ]);
+    expect(privateRoute.closeNote).toBe("You can close this page. Open this link again any time to check.");
+    expect(privateRoute.late).toBe("Taking longer than usual. Your money is safe.");
+    expect(privateRoute.refunded).toBe("The safety check sent the money back to this link's wallet");
   });
 });
 

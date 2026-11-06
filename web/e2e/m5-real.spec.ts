@@ -223,7 +223,8 @@ describeReal("M5: the Solana exit against the live 1Click API, dry run", () => {
     const generated = (await page.getByTestId("swap-keypair-address").innerText()).trim();
     console.log(`M5 generated Solana address: ${generated}`);
     expect(generated.length).toBeGreaterThanOrEqual(32);
-    await page.getByTestId("swap-saved-key").check();
+    const generatedKey = (await page.getByTestId("swap-secret-key").innerText()).trim();
+    await page.getByTestId("swap-key-confirm").fill(generatedKey.slice(-4));
 
     /* --------------------------------------- 2. a live dry quote for 0.0009 ZEC
      *

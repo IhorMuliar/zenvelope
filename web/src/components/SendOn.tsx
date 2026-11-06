@@ -25,7 +25,8 @@ import {
   explorerTxUrl,
 } from "../config";
 import type { FoundNote, LoadedCore, Network, NewWallet } from "../core/types";
-import { sweepAmounts, tooSmallMessage } from "../lib/amount";
+import { splitSweepAmounts, sweepAmounts, tooSmallMessage } from "../lib/amount";
+import { deriveRouterKeyFromLinkSecret } from "../lib/router";
 import {
   classifyDestinationAsync,
   emptyDestination,
@@ -38,6 +39,7 @@ import {
   doneCopy,
   exchangeBoundary as exchangeCopy,
   receive as copy,
+  privateRoute as routeCopy,
   revealed,
   solanaExit as swapCopy,
   transparentBoundary as transparentCopy,
@@ -61,7 +63,8 @@ import {
 import { checkSwapPlan } from "../lib/solanaFlow";
 import { CopyButton } from "./CopyButton";
 import { CopyField } from "./CopyField";
-import { SolanaExit, type SwapPlan } from "./SolanaExit";
+import { MultihopTracker } from "./MultihopTracker";
+import { SolanaExit, type DevnetPlan, type SwapPlan } from "./SolanaExit";
 import { SwapTracker } from "./SwapTracker";
 import { TrustBoundary } from "./TrustBoundary";
 
@@ -180,6 +183,14 @@ export function SendOn({
    */
   const [swapError, setSwapError] = useState<string | null>(null);
   /**
+   * The router wallet's address for the private route, worked out from the link. It is
+   * derived only once the Solana exit is open, and stays null if this browser cannot
+   * do Ed25519, in which case the exit simply does not offer the route.
+   */
+  const [routerAddress, setRouterAddress] = useState<string | null>(null);
+  /** A devnet test: no swap and no sweep, the tester funds the router wallet directly. */
+  const [devnetPlan, setDevnetPlan] = useState<DevnetPlan | null>(null);
+  /**
    * The transparent trust boundary (M7). A pasted `t1` leaves the shielded pool
    * as permanently as the Solana exit does, so it goes through the same
    * component and the same tick before the review screen.
@@ -263,13 +274,42 @@ export function SendOn({
     };
   }, [wallet, core, network]);
 
+  useEffect(() => {
+    if (choice !== "solana" || routerAddress !== null) return;
+    const secret = getSecret();
+    if (!secret) return;
+    let alive = true;
+    deriveRouterKeyFromLinkSecret(secret)
+      .then((key) => {
+        if (alive) setRouterAddress(key.address);
+      })
+      .catch(() => {
+        /* no Ed25519 here: the private route is not offered */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [choice, routerAddress, getSecret]);
+
   const active = choice === "wallet" ? walletDest : choice === null ? null : dest;
   const destination = active?.input.trim() ?? "";
-  const amounts = sweepAmounts(
-    inEnvelopeZat,
-    active?.kind ?? "unified_orchard",
-    SWEEP_FEE_ZAT,
-    notes.length,
+  // A private route's USDC gift also pays a second, fixed output to buy SOL for the
+  // route: the preview and the sweep use the same split arithmetic.
+  const extraZat = swap?.route?.extra?.extraZat ?? 0n;
+  const amounts = extraZat > 0n
+    ? splitSweepAmounts(inEnvelopeZat, "transparent", extraZat, SWEEP_FEE_ZAT, notes.length)
+    : sweepAmounts(
+        inEnvelopeZat,
+        active?.kind ?? "unified_orchard",
+        SWEEP_FEE_ZAT,
+        notes.length,
+      );
+  const splitFor = useCallback(
+    (extra: bigint) => {
+      const a = splitSweepAmounts(inEnvelopeZat, "transparent", extra, SWEEP_FEE_ZAT, notes.length);
+      return { ok: a.ok, receiveZat: a.receiveZat };
+    },
+    [inEnvelopeZat, notes.length],
   );
 
   /**
@@ -310,11 +350,34 @@ export function SendOn({
         recipient: plan.recipient,
         refundTo: plan.refundTo,
       });
-      if (problem !== null) {
+      // The private route's pieces get the same treatment: the second deposit is a
+      // transparent address of this network that echoes the router as its payout, and
+      // the router is the wallet this page derived, not whatever the plan says.
+      let routeProblem: string | null = null;
+      if (plan.route) {
+        const r = plan.route;
+        if (r.routerAddress !== routerAddress || plan.recipient !== r.routerAddress) {
+          routeProblem = swapCopy.depositMismatch("payout address");
+        } else if (r.extra) {
+          const second = await classifyDestinationAsync(
+            r.extra.reservation.address,
+            core.classify_address,
+            network,
+          );
+          routeProblem = checkSwapPlan({
+            depositKind: second.kind,
+            quoteRequest: r.extra.reservation.quoteRequest,
+            asset: "sol",
+            recipient: r.routerAddress,
+            refundTo: plan.refundTo,
+          });
+        }
+      }
+      if (problem !== null || routeProblem !== null) {
         setSwap(null);
         setDest(emptyDestination);
         setChoice(null);
-        setSwapError(problem);
+        setSwapError(problem ?? routeProblem);
         return;
       }
       setSwapError(null);
@@ -322,7 +385,7 @@ export function SendOn({
       setDest(classified);
       dispatch({ type: "review" });
     },
-    [core, network],
+    [core, network, routerAddress],
   );
 
   const ready =
@@ -375,6 +438,9 @@ export function SendOn({
         (stage, detail) => {
           if (id === runId.current) dispatch({ type: "stage", stage, detail, at: Date.now() });
         },
+        // The private route's second deposit, paid in the same transaction.
+        swap?.route?.extra ? swap.route.extra.reservation.address : null,
+        swap?.route?.extra ? swap.route.extra.extraZat.toString() : null,
       );
       if (id === runId.current) dispatch({ type: "result", result, at: Date.now() });
     } catch (err) {
@@ -383,7 +449,7 @@ export function SendOn({
         dispatch({ type: "failed", message: message ? message : SWEEP_FAILED_COPY });
       }
     }
-  }, [core, getSecret, network, notes, destination, dryRun, amounts.ok]);
+  }, [core, getSecret, network, notes, destination, dryRun, amounts.ok, swap]);
 
   /* --------------------------------------------- keep the screen and the tab */
 
@@ -441,6 +507,7 @@ export function SendOn({
     dispatch({ type: "choose" });
     setSwap(null);
     setSwapError(null);
+    setDevnetPlan(null);
     setChoice(null);
     setDest(emptyDestination);
     setWroteDown(false);
@@ -521,7 +588,9 @@ export function SendOn({
               <p className="lede done-where" data-testid="done-where">
                 {doneCopy[choice ?? "app"].where}
               </p>
-              <p data-testid="done-next">{doneCopy[choice ?? "app"].next}</p>
+              <p data-testid="done-next">
+                {swap?.route ? doneCopy.solanaRoute.next : doneCopy[choice ?? "app"].next}
+              </p>
             </div>
           )}
           <CopyField
@@ -543,6 +612,13 @@ export function SendOn({
                     value={swap.reservation.address}
                     testId="dry-run-deposit-address"
                   />
+                  {swap.route?.extra ? (
+                    <CopyField
+                      label={swapCopy.depositLabel}
+                      value={swap.route.extra.reservation.address}
+                      testId="dry-run-extra-deposit-address"
+                    />
+                  ) : null}
                   <p className="fine" data-testid="dry-run-swap-note">
                     {swapCopy.dryRunNote}
                   </p>
@@ -603,7 +679,18 @@ export function SendOn({
           a destination that is still the Solana exit's. Neither the tracker nor
           the dry-run deposit lines may survive a change of destination (M3).
         */}
-        {showSwapUi(choice, swap) && !dry ? <SwapTracker plan={swap!} /> : null}
+        {showSwapUi(choice, swap) && !dry ? (
+          swap!.route ? (
+            <MultihopTracker
+              getSecret={getSecret}
+              recipient={swap!.route.finalRecipient}
+              asset={swap!.asset}
+              mode="route"
+            />
+          ) : (
+            <SwapTracker plan={swap!} />
+          )
+        ) : null}
       </>
     );
   }
@@ -721,6 +808,18 @@ export function SendOn({
 
   // The Solana exit owns the whole screen while it runs: a trust boundary that
   // shares a page with two shielded destinations is a trust boundary nobody reads.
+  if (choice === "solana" && devnetPlan) {
+    return (
+      <MultihopTracker
+        getSecret={getSecret}
+        recipient={devnetPlan.recipient}
+        asset={devnetPlan.asset}
+        mode="devnet"
+        onBack={() => setDevnetPlan(null)}
+      />
+    );
+  }
+
   if (choice === "solana" && !swap) {
     return (
       <SolanaExit
@@ -729,7 +828,10 @@ export function SendOn({
         zcashFeesZat={swapZcashFeesZat}
         classify={core.classify_address}
         network={network}
+        routerAddress={routerAddress}
+        splitFor={splitFor}
         onPlan={(plan) => void onSwapPlan(plan)}
+        onDevnet={setDevnetPlan}
         onBack={() => {
           setChoice(null);
           // Backing out of the exit throws the plan away with it (M3).
@@ -1065,6 +1167,19 @@ function SwapReview({ plan }: { plan: SwapPlan }) {
   const cost = effectiveCost(plan.reservation.quote, appFeeBps(plan.reservation));
   return (
     <>
+      {plan.route ? (
+        <>
+          <p className="row">
+            <span className="label">{routeCopy.finalRow}</span>
+            <span className="mono" data-testid="review-final-recipient">
+              {truncateMiddle(plan.route.finalRecipient, 10)}
+            </span>
+          </p>
+          <p className="fine" data-testid="review-route-note">
+            {routeCopy.toggleBody}
+          </p>
+        </>
+      ) : null}
       <p className="row receive">
         <span className="label">{swapCopy.amountOutLabel}</span>
         <strong data-testid="review-swap-out">

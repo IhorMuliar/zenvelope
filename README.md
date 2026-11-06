@@ -84,7 +84,8 @@ in about 0.6 s. Transcripts: [M1](web/docs/M1-VERIFICATION.md), [M2](web/docs/M2
   stored. Nothing persists in the browser.
 - **Nothing reaches a server.** The site is static: no backend, no analytics, no cookies, no
   server keys, no custody. Strict CSP, COOP/COEP and HSTS are set.
-- **No screen asks for a seed phrase or a wallet connection.** There is no wallet-connect code.
+- **No screen asks for a seed phrase or a wallet that can sign.** The one optional "Connect my wallet"
+  button on the Solana exit only reads a public address; the page never asks a wallet to sign.
 - **Solana is not private.** The swap service sees the amount, the Solana address and the
   requesting IP. The page says so before the recipient chooses it.
 - **Take-back is a race.** It works only while nobody has opened the envelope. Once the money

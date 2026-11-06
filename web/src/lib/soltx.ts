@@ -14,7 +14,7 @@
  * Signers are the first `numRequiredSignatures` static keys, in signature-slot order.
  */
 
-import { base58Encode } from "./solana";
+import { base58Decode, base58Encode } from "./solana";
 
 export const SIGNATURE_BYTES = 64;
 /** Fee of a one-signature transaction with no priority fee. */
@@ -181,4 +181,242 @@ export function buildTransferTransaction(
   tx[0] = 1;
   tx.set(message, 1 + SIGNATURE_BYTES);
   return bytesToBase64(tx);
+}
+
+// ---------------------------------------------------------------------------
+// Token instructions: close an empty account, send tokens, derive an ATA.
+//
+// A tiny legacy-message compiler is enough for these: one fee payer who is also the
+// only signer, a handful of instructions, no lookup tables.
+
+export const TOKEN_PROGRAM = base58Decode("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+export const TOKEN_2022_PROGRAM = base58Decode("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+export const ATA_PROGRAM = base58Decode("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+
+export interface AccountMeta {
+  pubkey: Uint8Array;
+  signer?: boolean;
+  writable?: boolean;
+}
+export interface Instruction {
+  programId: Uint8Array;
+  keys: AccountMeta[];
+  data: Uint8Array;
+}
+
+const hex = (b: Uint8Array) => [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+
+/**
+ * Compiles `instructions` into an unsigned legacy transaction (base64) whose only
+ * signer is `feePayer`. Accounts are de-duplicated and ordered the way the runtime
+ * wants: signer+writable, signer+readonly, writable, readonly. Programs are readonly.
+ */
+export function compileLegacyTransaction(
+  feePayer: Uint8Array,
+  instructions: Instruction[],
+  recentBlockhash: Uint8Array,
+): string {
+  if (feePayer.length !== 32 || recentBlockhash.length !== 32) throw new Error("keys and blockhash are 32 bytes");
+  const metas = new Map<string, { pubkey: Uint8Array; signer: boolean; writable: boolean }>();
+  const touch = (pubkey: Uint8Array, signer: boolean, writable: boolean) => {
+    const id = hex(pubkey);
+    const m = metas.get(id);
+    if (m) {
+      m.signer ||= signer;
+      m.writable ||= writable;
+    } else metas.set(id, { pubkey, signer, writable });
+  };
+  touch(feePayer, true, true);
+  for (const ix of instructions) {
+    for (const k of ix.keys) touch(k.pubkey, !!k.signer, !!k.writable);
+    touch(ix.programId, false, false);
+  }
+  const all = [...metas.values()];
+  const rank = (m: { signer: boolean; writable: boolean }) => (m.signer ? (m.writable ? 0 : 1) : m.writable ? 2 : 3);
+  const feeId = hex(feePayer);
+  all.sort((a, b) => (hex(a.pubkey) === feeId ? -1 : hex(b.pubkey) === feeId ? 1 : rank(a) - rank(b)));
+  const index = new Map(all.map((m, i) => [hex(m.pubkey), i]));
+  const nSigners = all.filter((m) => m.signer).length;
+  const roSigned = all.filter((m) => m.signer && !m.writable).length;
+  const roUnsigned = all.filter((m) => !m.signer && !m.writable).length;
+  if (nSigners !== 1) throw new Error("only a single signer is supported");
+
+  const message: number[] = [nSigners, roSigned, roUnsigned, ...writeCompactU16(all.length)];
+  for (const m of all) message.push(...m.pubkey);
+  message.push(...recentBlockhash, ...writeCompactU16(instructions.length));
+  for (const ix of instructions) {
+    message.push(index.get(hex(ix.programId))!, ...writeCompactU16(ix.keys.length));
+    for (const k of ix.keys) message.push(index.get(hex(k.pubkey))!);
+    message.push(...writeCompactU16(ix.data.length), ...ix.data);
+  }
+  const tx = new Uint8Array(1 + SIGNATURE_BYTES + message.length);
+  tx[0] = 1;
+  tx.set(message, 1 + SIGNATURE_BYTES);
+  return bytesToBase64(tx);
+}
+
+/**
+ * SPL Token `CloseAccount` (instruction 9): closes the empty token account
+ * `tokenAccount` owned by `owner` and sends its rent to `destination`. The runtime
+ * refuses it while the account still holds tokens.
+ */
+export function buildCloseAccountTransaction(
+  owner: Uint8Array,
+  tokenAccount: Uint8Array,
+  destination: Uint8Array,
+  recentBlockhash: Uint8Array,
+  tokenProgram: Uint8Array = TOKEN_PROGRAM,
+): string {
+  return compileLegacyTransaction(
+    owner,
+    [
+      {
+        programId: tokenProgram,
+        keys: [
+          { pubkey: tokenAccount, writable: true },
+          { pubkey: destination, writable: true },
+          { pubkey: owner, signer: true },
+        ],
+        data: Uint8Array.of(9),
+      },
+    ],
+    recentBlockhash,
+  );
+}
+
+function transferCheckedIx(
+  source: Uint8Array,
+  mint: Uint8Array,
+  dest: Uint8Array,
+  owner: Uint8Array,
+  amount: bigint,
+  decimals: number,
+  tokenProgram: Uint8Array,
+): Instruction {
+  if (amount <= 0n || amount >= 1n << 64n) throw new Error("token amount out of range");
+  const data = new Uint8Array(10);
+  data[0] = 12;
+  new DataView(data.buffer).setBigUint64(1, amount, true);
+  data[9] = decimals;
+  return {
+    programId: tokenProgram,
+    keys: [
+      { pubkey: source, writable: true },
+      { pubkey: mint },
+      { pubkey: dest, writable: true },
+      { pubkey: owner, signer: true },
+    ],
+    data,
+  };
+}
+
+function createAtaIdempotentIx(
+  payer: Uint8Array,
+  ata: Uint8Array,
+  owner: Uint8Array,
+  mint: Uint8Array,
+  tokenProgram: Uint8Array,
+): Instruction {
+  return {
+    programId: ATA_PROGRAM,
+    keys: [
+      { pubkey: payer, signer: true, writable: true },
+      { pubkey: ata, writable: true },
+      { pubkey: owner },
+      { pubkey: mint },
+      { pubkey: SYSTEM_PROGRAM },
+      { pubkey: tokenProgram },
+    ],
+    data: Uint8Array.of(1),
+  };
+}
+
+/**
+ * Sends `amount` of `mint` from `sourceAccount` (owned by `owner`) to the recipient's
+ * associated token account `destAta`, creating that account first if it is missing
+ * (the owner pays its rent). One transaction, `owner` signs.
+ */
+export function buildTokenSendTransaction(p: {
+  owner: Uint8Array;
+  sourceAccount: Uint8Array;
+  mint: Uint8Array;
+  decimals: number;
+  amount: bigint;
+  recipient: Uint8Array;
+  recipientAta: Uint8Array;
+  tokenProgram?: Uint8Array;
+  recentBlockhash: Uint8Array;
+}): string {
+  const program = p.tokenProgram ?? TOKEN_PROGRAM;
+  return compileLegacyTransaction(
+    p.owner,
+    [
+      createAtaIdempotentIx(p.owner, p.recipientAta, p.recipient, p.mint, program),
+      transferCheckedIx(p.sourceAccount, p.mint, p.recipientAta, p.owner, p.amount, p.decimals, program),
+    ],
+    p.recentBlockhash,
+  );
+}
+
+// -- associated token address (a program-derived address) -------------------
+
+const P = (1n << 255n) - 19n;
+const D = 37095705934669439343138083508754565189542113879843219016388785533085940283555n;
+
+function modPow(base: bigint, exp: bigint, mod: bigint): bigint {
+  let result = 1n;
+  let b = base % mod;
+  let e = exp;
+  while (e > 0n) {
+    if (e & 1n) result = (result * b) % mod;
+    b = (b * b) % mod;
+    e >>= 1n;
+  }
+  return result;
+}
+
+/** True when the 32 bytes decode to a point on the ed25519 curve. */
+export function isOnCurve(bytes: Uint8Array): boolean {
+  if (bytes.length !== 32) return false;
+  let y = 0n;
+  for (let i = 31; i >= 0; i -= 1) y = (y << 8n) | BigInt(i === 31 ? bytes[i] & 0x7f : bytes[i]);
+  if (y >= P) return false;
+  const y2 = (y * y) % P;
+  const num = (y2 - 1n + P) % P;
+  const den = (D * y2 + 1n) % P;
+  const x2 = (num * modPow(den, P - 2n, P)) % P;
+  if (x2 === 0n) return true;
+  // x2 is a square mod P iff x2^((P-1)/2) == 1 (Euler's criterion).
+  return modPow(x2, (P - 1n) / 2n, P) === 1n;
+}
+
+/** `findProgramAddress`: the first bump, from 255 down, whose hash is off the curve. */
+export async function findProgramAddress(
+  seeds: Uint8Array[],
+  programId: Uint8Array,
+  subtle: SubtleCrypto = globalThis.crypto.subtle,
+): Promise<Uint8Array> {
+  const tag = new TextEncoder().encode("ProgramDerivedAddress");
+  for (let bump = 255; bump >= 0; bump -= 1) {
+    const parts = [...seeds, Uint8Array.of(bump), programId, tag];
+    const input = new Uint8Array(parts.reduce((n, s) => n + s.length, 0));
+    let o = 0;
+    for (const s of parts) {
+      input.set(s, o);
+      o += s.length;
+    }
+    const hash = new Uint8Array(await subtle.digest("SHA-256", input as BufferSource));
+    if (!isOnCurve(hash)) return hash;
+  }
+  throw new Error("no program address found");
+}
+
+/** The associated token account of `owner` for `mint`. */
+export function findAssociatedTokenAddress(
+  owner: Uint8Array,
+  mint: Uint8Array,
+  tokenProgram: Uint8Array = TOKEN_PROGRAM,
+  subtle?: SubtleCrypto,
+): Promise<Uint8Array> {
+  return findProgramAddress([owner, tokenProgram, mint], ATA_PROGRAM, subtle);
 }

@@ -52,4 +52,4 @@ caching the proving key between visits.
 
 ## Copy rules
 The usual drainer lure word is banned on every screen (`web/src/copy/en.test.ts`). Use
-"open", "receive", "unwrap". Never ask for a seed phrase or a wallet connection.
+"open", "receive", "unwrap". Never ask for a seed phrase or a wallet that signs (the optional "Connect my wallet" on the Solana exit only reads a public address).

@@ -6,6 +6,11 @@
  *
  *   trust -> asset -> destination -> quote -> deposit
  *
+ * The quote screen can also offer an opt-in "Private route" (off by default): the swap
+ * then pays a router wallet this page controls instead of the recipient, and
+ * MultiHopper carries the money on (see MultihopTracker). It adds a gate of its own
+ * (privateRouteBoundary) before any deposit address is asked for.
+ *
  * and then it stops. The last thing it does is hand its caller a transparent
  * `t1` deposit address; the money moves with the ordinary sweep, unchanged, to
  * that address. Nothing here sees the envelope secret, builds a transaction or
@@ -16,8 +21,9 @@
  * (TrustBoundary), and the first thing it shows after that is what it costs.
  */
 
-import { useCallback, useEffect, useState } from "react";
-import { solanaExit as copy } from "../copy/en";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { privateRoute as routeCopy, privateRouteBoundary, solanaExit as copy } from "../copy/en";
+import { SOLANA_CLUSTER, oneClickAvailable } from "../lib/cluster";
 import type { Network } from "../core/types";
 import { classifyDestinationAsync, type ClassifyAsync } from "../lib/destination";
 import { formatZec, formatZecAmount } from "../lib/format";
@@ -29,16 +35,38 @@ import {
   formatTimeEstimate,
   formatUsd,
   oneClickQuote,
+  type OneClickQuote,
   type OneClickQuoteResponse,
   type SolanaAsset,
 } from "../lib/oneclick";
+import { createMhClient, type MhEstimate } from "../lib/multihop";
+import {
+  MAX_ROUTE_USD,
+  MIN_OFFER_USD,
+  extraLamportsNeeded,
+  guessExtraZat,
+  pricePrivateRoute,
+  routeSolFloor,
+  sizeExtraZat,
+  solUsdFromQuote,
+  type RoutePricing,
+} from "../lib/privateRoute";
+import { SOL_DECIMALS, USDC_DECIMALS, mintFor } from "../lib/routeRun";
 import { ED25519_UNAVAILABLE, checkSolanaAddress, generateSolanaKeypair } from "../lib/solana";
+import {
+  WalletConnectError,
+  connectWallet,
+  watchWallets,
+  type DiscoveredWallet,
+} from "../lib/walletStandard";
 import {
   belowMinimum,
   canGetDeposit,
   canQuote,
   destinationReady,
   initialSolanaExitState,
+  keyTail,
+  keyTailMatches,
   quoteAcceptable,
   recipientAddress,
   refundAddress,
@@ -47,17 +75,40 @@ import {
   type DepositReservation,
   type SolanaExitState,
 } from "../lib/solanaFlow";
+import { CopyButton } from "./CopyButton";
 import { CopyField } from "./CopyField";
 import { TrustBoundary } from "./TrustBoundary";
+
+/** The private route's part of a plan: the swap pays the router, MultiHopper pays `finalRecipient`. */
+export interface PrivateRoutePlan {
+  routerAddress: string;
+  /** The wallet the money ends in. */
+  finalRecipient: string;
+  /**
+   * The second deposit (a USDC gift also buys SOL for the route's costs). null for a SOL
+   * gift, whose single swap covers both.
+   */
+  extra: { reservation: DepositReservation; extraZat: bigint } | null;
+}
 
 /** What the caller needs to know once the rail has reserved an address. */
 export interface SwapPlan {
   reservation: DepositReservation;
   asset: SolanaAsset;
-  /** The Solana address the rail will pay out to. */
+  /**
+   * The Solana address the rail will pay out to. With a private route this is the
+   * router wallet, and the real destination is in {@link route}.
+   */
   recipient: string;
   /** Where a refund goes, as it was actually sent (DECISIONS D14). */
   refundTo: string;
+  route?: PrivateRoutePlan;
+}
+
+/** A devnet test: no swap, no sweep; the tester funds the router wallet directly. */
+export interface DevnetPlan {
+  asset: SolanaAsset;
+  recipient: string;
 }
 
 interface Props {
@@ -84,8 +135,37 @@ interface Props {
    */
   classify: ClassifyAsync;
   network: Network;
+  /**
+   * The router wallet's address, derived from the link, or null while it is being worked
+   * out. Without it the private route is not offered.
+   */
+  routerAddress?: string | null;
+  /**
+   * What the main swap would be left with if the sweep also paid `extraZat` to a second
+   * deposit address (the ZIP-317 fee rises by one output). From the same arithmetic the
+   * sweep itself uses.
+   */
+  splitFor?: (extraZat: bigint) => { ok: boolean; receiveZat: bigint };
   onPlan(plan: SwapPlan): void;
+  /** Devnet only: skip the swap and go straight to funding the router wallet. */
+  onDevnet?(plan: DevnetPlan): void;
   onBack(): void;
+}
+
+/** What the quote screen knows about the private route. */
+type RouteOffer =
+  | { status: "off" }
+  | { status: "loading" }
+  | { status: "ready"; pricing: RoutePricing; estimate: MhEstimate; probe: OneClickQuote | null };
+
+function toReservation(r: OneClickQuoteResponse): DepositReservation {
+  return {
+    address: r.quote.depositAddress ?? "",
+    deadline: r.quote.deadline ?? r.quote.timeWhenInactive ?? null,
+    quote: r.quote,
+    quoteRequest: r.quoteRequest,
+    appFees: r.appFees,
+  };
 }
 
 /** ISO to something a person reads, in their own time zone. */
@@ -102,10 +182,25 @@ export function SolanaExit({
   zcashFeesZat,
   classify,
   network,
+  routerAddress = null,
+  splitFor,
   onPlan,
+  onDevnet,
   onBack,
 }: Props) {
   const [state, setState] = useState<SolanaExitState>(initialSolanaExitState);
+  const devnet = !oneClickAvailable(SOLANA_CLUSTER);
+  const mh = useMemo(() => createMhClient(), []);
+  // Wallet Standard wallets found in this browser (read-only: addresses, no signing).
+  const [wallets, setWallets] = useState<DiscoveredWallet[]>([]);
+  const [connecting, setConnecting] = useState<string | null>(null);
+  const [connectError, setConnectError] = useState<string | null>(null);
+  // The private route: off by default, behind its own tick.
+  const [offer, setOffer] = useState<RouteOffer>({ status: "off" });
+  const [privateOn, setPrivateOn] = useState(false);
+  const [routeAck, setRouteAck] = useState(false);
+  const [atRouteGate, setAtRouteGate] = useState(false);
+  const [extra, setExtra] = useState<PrivateRoutePlan["extra"]>(null);
   const dispatch = useCallback(
     (event: Parameters<typeof solanaExitReducer>[1]) =>
       setState((s) => solanaExitReducer(s, event)),
@@ -158,6 +253,161 @@ export function SolanaExit({
     [dispatch],
   );
 
+  // Wallet Standard discovery. Nothing is requested until the recipient presses a wallet.
+  useEffect(() => {
+    const registry = watchWallets(window, setWallets);
+    setWallets(registry.list());
+    return () => registry.stop();
+  }, []);
+
+  // Leaving the quote screen backwards takes the route choice with it.
+  useEffect(() => {
+    if (state.phase === "trust" || state.phase === "asset" || state.phase === "destination") {
+      setPrivateOn(false);
+      setRouteAck(false);
+      setAtRouteGate(false);
+      setExtra(null);
+    }
+  }, [state.phase]);
+
+  /**
+   * Is the private route worth offering for this quote? Needs the gift's USD value (the
+   * quote), SOL's USD price (a dry SOL quote, or the quote itself for a SOL gift) and
+   * MultiHopper's estimate for this amount. Any failure just hides the switch: the
+   * ordinary swap is unaffected.
+   */
+  const quoted = state.quote;
+  const quotedAsset = state.asset;
+  useEffect(() => {
+    // The deposit screen is the offer's consequence, not a reason to ask again.
+    if (state.phase === "deposit") return;
+    setOffer({ status: "off" });
+    if (state.phase !== "quote" || !quoted || !quotedAsset) return;
+    if (devnet || !routerAddress) return;
+    let alive = true;
+    setOffer({ status: "loading" });
+    void (async () => {
+      try {
+        const q = quoted.quote;
+        const cost = effectiveCost(q);
+        if (!cost.ok || cost.amountOutUsd < MIN_OFFER_USD) throw new Error("not worth asking");
+        let probe: OneClickQuote | null = null;
+        let solUsd: number;
+        if (quotedAsset === "sol") solUsd = solUsdFromQuote(q);
+        else {
+          const sq = await oneClickQuote({
+            dry: true,
+            asset: "sol",
+            amountZat,
+            refundTo: envelopeAddress,
+            recipient: routerAddress,
+          });
+          probe = sq.quote;
+          solUsd = solUsdFromQuote(sq.quote);
+        }
+        const estimate = await mh.estimate({
+          tokenMint: mintFor(quotedAsset),
+          tokenDecimals: quotedAsset === "sol" ? SOL_DECIMALS : USDC_DECIMALS,
+          tokenSymbol: quotedAsset === "sol" ? "SOL" : "USDC",
+          amountRaw: q.amountOut,
+          hops: 3,
+          arrivalSeconds: 120,
+        });
+        const pricing = pricePrivateRoute({
+          estimate,
+          giftUsd: cost.amountOutUsd,
+          solUsd,
+          isSolRoute: quotedAsset === "sol",
+          oneClickSeconds: q.timeEstimate,
+        });
+        if (alive) setOffer({ status: "ready", pricing, estimate, probe });
+      } catch {
+        if (alive) setOffer({ status: "off" });
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [state.phase, quoted, quotedAsset, devnet, routerAddress, amountZat, envelopeAddress, mh]);
+
+  const pickWallet = useCallback(
+    async (wallet: DiscoveredWallet) => {
+      setConnectError(null);
+      setConnecting(wallet.name);
+      try {
+        const address = await connectWallet(wallet);
+        dispatch({ type: "connected", address, name: wallet.name });
+      } catch (err) {
+        setConnectError(err instanceof WalletConnectError && err.message ? err.message : copy.connectFailed);
+      } finally {
+        setConnecting(null);
+      }
+    },
+    [dispatch],
+  );
+
+  /**
+   * Real quotes for a private route. The swap pays the router wallet. A USDC gift also
+   * buys SOL for the route's costs, as a second deposit the sweep pays in the same
+   * transaction; a SOL gift needs nothing more, because the route amount is the balance
+   * less the overhead.
+   */
+  const askPrivate = useCallback(
+    async (current: SolanaExitState) => {
+      if (current.asset === null || offer.status !== "ready" || !routerAddress) return;
+      dispatch({ type: "busy" });
+      try {
+        const refundTo = refundAddress(current, envelopeAddress);
+        let mainZat = amountZat;
+        let second: PrivateRoutePlan["extra"] = null;
+        if (current.asset === "usdc") {
+          if (!offer.probe || !splitFor) throw new Error(routeCopy.checking);
+          const need = extraLamportsNeeded(offer.estimate);
+          const dryMin = async (zat: bigint) =>
+            BigInt(
+              (
+                await oneClickQuote({ dry: true, asset: "sol", amountZat: zat, refundTo, recipient: routerAddress })
+              ).quote.minAmountOut,
+            );
+          const zat = await sizeExtraZat(
+            need,
+            guessExtraZat(need, amountZat, BigInt(offer.probe.minAmountOut)),
+            dryMin,
+          );
+          const split = splitFor(zat);
+          if (!split.ok) throw new Error(routeCopy.routeTooSmall);
+          mainZat = split.receiveZat;
+          const real = await oneClickQuote({
+            dry: false,
+            asset: "sol",
+            amountZat: zat,
+            refundTo,
+            recipient: routerAddress,
+          });
+          // The route's SOL is not a gift, so no spread cap; it must simply be enough.
+          if (BigInt(real.quote.minAmountOut) < BigInt(routeSolFloor(offer.estimate))) {
+            throw new Error(copy.quoteShortfall);
+          }
+          second = { reservation: toReservation(real), extraZat: zat };
+        }
+        const main = await oneClickQuote({
+          dry: false,
+          asset: current.asset,
+          amountZat: mainZat,
+          refundTo,
+          recipient: routerAddress,
+        });
+        const verdict = quoteAcceptable(main.quote);
+        if (!verdict.ok) throw new Error(verdict.reason ?? copy.quoteUnreadable);
+        setExtra(second);
+        dispatch({ type: "deposit", reservation: toReservation(main) });
+      } catch (err) {
+        failQuote(err);
+      }
+    },
+    [amountZat, dispatch, envelopeAddress, failQuote, offer, routerAddress, splitFor],
+  );
+
   const askQuote = useCallback(
     async (dry: boolean, current: SolanaExitState) => {
       if (current.asset === null) return;
@@ -202,6 +452,24 @@ export function SolanaExit({
   }, [dispatch]);
 
   const back = () => (state.phase === "trust" ? onBack() : dispatch({ type: "back" }));
+
+  /* ----------------------------------------------------- the private-route gate */
+
+  if (atRouteGate) {
+    return (
+      <TrustBoundary
+        content={privateRouteBoundary}
+        testId="private-route-boundary"
+        acknowledged={routeAck}
+        onAcknowledgedChange={setRouteAck}
+        onContinue={() => {
+          setAtRouteGate(false);
+          void askPrivate(state);
+        }}
+        onBack={() => setAtRouteGate(false)}
+      />
+    );
+  }
 
   /* ----------------------------------------------------------------- trust */
 
@@ -273,6 +541,70 @@ export function SolanaExit({
         <h2>{copy.destinationTitle}</h2>
 
         <ul className="next-steps">
+          {/*
+            Connect is optional and read-only: it only fetches a public address. It
+            is listed only when a Wallet Standard wallet is in this browser. Without
+            one (iOS Safari, most phones) paste leads, with a hint for where to copy
+            the address from.
+          */}
+          {wallets.length > 0 ? (
+            <li>
+              <button
+                type="button"
+                onClick={() => dispatch({ type: "mode", mode: "connect" })}
+                aria-pressed={state.mode === "connect"}
+                data-testid="swap-mode-connect"
+              >
+                <span className="next-title">{copy.connectTitle}</span>
+                <span className="hint">{copy.connectBody}</span>
+              </button>
+              {state.mode === "connect" ? (
+                <div className="stack dest-panel" data-testid="swap-connect-panel">
+                  {state.connectedAddress ? (
+                    <>
+                      <p className="hint">{copy.connectedLine(state.connectedName)}</p>
+                      <code className="value mono" data-testid="swap-connected-address">
+                        {state.connectedAddress}
+                      </code>
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() => dispatch({ type: "mode", mode: "connect" })}
+                        data-testid="swap-connect-another"
+                      >
+                        {copy.connectAnother}
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <p className="label">{copy.connectPick}</p>
+                      <div className="wallet-list">
+                        {wallets.map((w) => (
+                          <button
+                            type="button"
+                            className="ghost wallet-pick"
+                            key={w.name}
+                            disabled={connecting !== null}
+                            onClick={() => void pickWallet(w)}
+                            data-testid="swap-wallet"
+                          >
+                            {w.icon ? <img src={w.icon} alt="" width={24} height={24} /> : null}
+                            <span>{connecting === w.name ? copy.connectBusy(w.name) : w.name}</span>
+                          </button>
+                        ))}
+                      </div>
+                      {connectError ? (
+                        <p className="error" data-testid="swap-connect-error">
+                          {connectError}
+                        </p>
+                      ) : null}
+                    </>
+                  )}
+                </div>
+              ) : null}
+            </li>
+          ) : null}
+
           <li>
             <button
               type="button"
@@ -281,7 +613,9 @@ export function SolanaExit({
               data-testid="swap-mode-paste"
             >
               <span className="next-title">{copy.pasteTitle}</span>
-              <span className="hint">{copy.pasteBody}</span>
+              <span className="hint">
+                {wallets.length > 0 ? copy.pasteBody : copy.pasteBodyNoWallet}
+              </span>
             </button>
             {state.mode === "paste" ? (
               <div className="stack dest-panel">
@@ -334,36 +668,67 @@ export function SolanaExit({
                 ) : null}
                 {state.keypair ? (
                   <>
-                    <p className="warn" data-testid="swap-secret-once">
+                    <div className="copy-field">
+                      <div className="copy-field-head">
+                        <span className="label">{copy.secretLabel}</span>
+                        <CopyButton
+                          value={state.keypair.secretKeyBase58}
+                          label={copy.keyCopyButton}
+                          face={copy.keyCopyButton}
+                          className="ghost"
+                          testId="swap-copy-key"
+                        />
+                      </div>
+                      <code className="value mono" data-testid="swap-secret-key">
+                        {state.keypair.secretKeyBase58}
+                      </code>
+                    </div>
+                    <p className="warn" data-testid="swap-key-warning">
+                      {copy.keyWarning}
+                    </p>
+                    <p className="fine" data-testid="swap-secret-once">
                       {copy.secretOnce}
                     </p>
-                    <CopyField
-                      label={copy.secretLabel}
-                      value={state.keypair.secretKeyBase58}
-                      testId="swap-secret-key"
-                    />
+                    <h3 className="guide-title">{copy.guideTitle}</h3>
+                    <ol className="numbered small" data-testid="swap-import-guide">
+                      {copy.guideSteps.map((step) => (
+                        <li key={step}>{step}</li>
+                      ))}
+                    </ol>
+                    <p className="hint" data-testid="swap-import-hint">
+                      {copy.importHint}
+                    </p>
                     <CopyField
                       label={copy.addressLabel}
                       value={state.keypair.address}
                       testId="swap-keypair-address"
                     />
-                    <p className="hint" data-testid="swap-import-hint">
-                      {copy.importHint}
-                    </p>
-                    <label className="check">
+                    <label className="field">
+                      <span className="label">{copy.keyConfirmLabel}</span>
                       <input
-                        type="checkbox"
-                        checked={state.savedKey}
-                        onChange={(e) => dispatch({ type: "savedKey", value: e.target.checked })}
-                        data-testid="swap-saved-key"
+                        type="text"
+                        autoComplete="off"
+                        autoCapitalize="off"
+                        spellCheck={false}
+                        maxLength={8}
+                        value={state.keyConfirm}
+                        onChange={(e) => dispatch({ type: "keyConfirm", value: e.target.value })}
+                        data-testid="swap-key-confirm"
                       />
-                      <span>{copy.savedCheckbox}</span>
                     </label>
-                    {!state.savedKey ? (
-                      <p className="hint" data-testid="swap-saved-blocked">
-                        {copy.savedBlockedHint}
+                    {keyTailMatches(state.keypair.secretKeyBase58, state.keyConfirm) ? (
+                      <p className="hint" data-status="ok" data-testid="swap-key-confirm-ok">
+                        {copy.keyConfirmOk}
                       </p>
-                    ) : null}
+                    ) : state.keyConfirm.trim().length >= keyTail(state.keypair.secretKeyBase58).length ? (
+                      <p className="error" data-status="error" data-testid="swap-key-confirm-wrong">
+                        {copy.keyConfirmWrong}
+                      </p>
+                    ) : (
+                      <p className="hint" data-testid="swap-saved-blocked">
+                        {copy.keyConfirmBlocked}
+                      </p>
+                    )}
                   </>
                 ) : null}
               </div>
@@ -372,6 +737,7 @@ export function SolanaExit({
         </ul>
 
         {/* The refund address. Default: this envelope's own (DECISIONS D14). */}
+        {devnet ? null : (
         <details className="stack" data-testid="swap-refund">
           <summary>{copy.refundTitle}</summary>
           <p className="hint" data-testid="swap-refund-default">
@@ -406,6 +772,7 @@ export function SolanaExit({
           ) : null}
           <p className="fine">{copy.refundOverrideHint}</p>
         </details>
+        )}
 
         {/*
           The floor is the common failure, and it deserves the product's own
@@ -431,17 +798,24 @@ export function SolanaExit({
           type="button"
           className="primary"
           disabled={!canQuote(state)}
-          onClick={() => void askQuote(true, state)}
+          onClick={() => {
+            // Devnet has no swap rail: the tester funds the router wallet directly.
+            if (devnet && state.asset && onDevnet) {
+              onDevnet({ asset: state.asset, recipient: recipientAddress(state) });
+              return;
+            }
+            void askQuote(true, state);
+          }}
           data-testid="swap-get-quote"
         >
-          {state.busy ? copy.quoteBusy : copy.quoteButton}
+          {devnet ? copy.continueButton : state.busy ? copy.quoteBusy : copy.quoteButton}
         </button>
         {!destinationReady(state) || !refundReady(state) ? (
           <p className="fine" data-testid="swap-destination-blocked">
             {!refundReady(state)
               ? copy.refundInvalid
               : state.mode === "generate"
-                ? copy.savedBlockedHint
+                ? copy.keyConfirmBlocked
                 : copy.pasteBody}
           </p>
         ) : null}
@@ -503,6 +877,50 @@ export function SolanaExit({
           {copy.spreadNote}
         </p>
 
+        {/*
+          The private route: off by default, and only when its fixed SOL cost is a small
+          share of the gift. Below that, one line says where it starts.
+        */}
+        {offer.status === "loading" ? (
+          <p className="fine" data-testid="route-checking">
+            {routeCopy.checking}
+          </p>
+        ) : null}
+        {offer.status === "ready" && offer.pricing.available ? (
+          <div className="stack route-offer" data-testid="route-offer">
+            <label className="check">
+              <input
+                type="checkbox"
+                role="switch"
+                checked={privateOn}
+                onChange={(e) => setPrivateOn(e.target.checked)}
+                data-testid="route-toggle"
+              />
+              <span>
+                <strong>{routeCopy.toggleLabel}</strong>
+                <br />
+                <span className="hint">{routeCopy.toggleBody}</span>
+              </span>
+            </label>
+            {privateOn ? (
+              <p className="fine" data-testid="route-numbers">
+                {routeCopy.numbers(
+                  formatUsd(offer.pricing.receiveUsd),
+                  offer.pricing.minutes,
+                  formatUsd(offer.pricing.networkUsd),
+                )}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+        {offer.status === "ready" && !offer.pricing.available && offer.pricing.reason ? (
+          <p className="fine" data-testid="route-unavailable">
+            {offer.pricing.reason === "large"
+              ? routeCopy.availableUpTo(`$${MAX_ROUTE_USD}`)
+              : routeCopy.availableOver(`$${offer.pricing.thresholdUsd}`)}
+          </p>
+        ) : null}
+
         <details data-testid="swap-provider-sees">
           <summary>{copy.providerSeesTitle}</summary>
           <p className="hint">{copy.providerSees}</p>
@@ -535,7 +953,15 @@ export function SolanaExit({
           type="button"
           className="primary"
           disabled={!canGetDeposit(state, amountZat)}
-          onClick={() => void askQuote(false, state)}
+          onClick={() => {
+            if (privateOn && offer.status === "ready" && offer.pricing.available) {
+              // Its own gate first: MultiHopper, its screening and its audit status.
+              if (routeAck) void askPrivate(state);
+              else setAtRouteGate(true);
+              return;
+            }
+            void askQuote(false, state);
+          }}
           data-testid="swap-get-deposit"
         >
           {state.busy ? copy.quoteBusy : "Get deposit address"}
@@ -550,11 +976,15 @@ export function SolanaExit({
   /* --------------------------------------------------------------- deposit */
 
   if (state.phase === "deposit" && state.deposit && state.asset) {
+    const viaRoute = privateOn && routerAddress !== null && offer.status === "ready";
     const plan: SwapPlan = {
       reservation: state.deposit,
       asset: state.asset,
-      recipient: recipientAddress(state),
+      recipient: viaRoute ? routerAddress! : recipientAddress(state),
       refundTo: refundAddress(state, envelopeAddress),
+      route: viaRoute
+        ? { routerAddress: routerAddress!, finalRecipient: recipientAddress(state), extra }
+        : undefined,
     };
     return (
       <div className="card stack" data-testid="swap-deposit">
@@ -580,12 +1010,40 @@ export function SolanaExit({
             {formatAssetAmount(state.deposit.quote, state.asset)}
           </strong>
         </p>
-        <p className="row">
-          <span className="label">Pays out to</span>
-          <span className="mono" data-testid="swap-recipient">
-            {plan.recipient}
-          </span>
-        </p>
+        {plan.route ? (
+          <>
+            <p className="row">
+              <span className="label">{routeCopy.routerRow}</span>
+              <span className="mono" data-testid="swap-recipient">
+                {plan.recipient}
+              </span>
+            </p>
+            <p className="row">
+              <span className="label">{routeCopy.finalRow}</span>
+              <span className="mono" data-testid="swap-final-recipient">
+                {plan.route.finalRecipient}
+              </span>
+            </p>
+            {plan.route.extra ? (
+              <>
+                <p className="row">
+                  <span className="label">{routeCopy.extraRow}</span>
+                  <span data-testid="swap-extra-out">
+                    {formatAssetAmount(plan.route.extra.reservation.quote, "sol")}
+                  </span>
+                </p>
+                <p className="fine">{routeCopy.extraNote}</p>
+              </>
+            ) : null}
+          </>
+        ) : (
+          <p className="row">
+            <span className="label">Pays out to</span>
+            <span className="mono" data-testid="swap-recipient">
+              {plan.recipient}
+            </span>
+          </p>
+        )}
 
         <p className="fine" data-testid="swap-not-provider">
           {copy.notProvider}

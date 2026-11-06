@@ -20,7 +20,15 @@
 
 import { base58Decode } from "./solana";
 import type { RouterKey } from "./router";
-import { BASE_FEE_LAMPORTS, buildTransferTransaction, signTransaction } from "./soltx";
+import { MIN_SYSTEM_BALANCE_LAMPORTS } from "./privateRoute";
+import {
+  BASE_FEE_LAMPORTS,
+  buildCloseAccountTransaction,
+  buildTokenSendTransaction,
+  buildTransferTransaction,
+  findAssociatedTokenAddress,
+  signTransaction,
+} from "./soltx";
 
 // ---------------------------------------------------------------------------
 // Types (only the fields we read; the API returns more)
@@ -51,6 +59,17 @@ export interface MhTransfer {
   lastError?: unknown;
   recovery?: unknown;
   completedAt?: string | null;
+  createdAt?: string | null;
+  quotedAt?: string | null;
+}
+
+/** One SPL token account held by a wallet. */
+export interface TokenAccount {
+  pubkey: string;
+  /** The token program that owns the account (Token or Token-2022). */
+  program: string;
+  amount: bigint;
+  decimals: number;
 }
 
 export interface MhEstimate {
@@ -191,17 +210,30 @@ export interface MhClient {
   byExternal(externalId: string): Promise<MhTransfer | null>;
 }
 
-export function createMhClient(http: Http = defaultHttp()): MhClient {
+/** Header the proxy requires on per-transfer routes (get, prepare, confirm-broadcast). */
+export const EXT_HEADER = "x-zenvelope-ext";
+
+/**
+ * `externalId` is the capability for per-transfer calls: the proxy checks upstream that it
+ * owns the numeric id. Estimate, create and by-external do not need it.
+ */
+export function createMhClient(http: Http = defaultHttp(), externalId?: string): MhClient {
   const base = http.base ?? "";
-  const call = async (method: "GET" | "POST", path: string, body?: unknown) => {
+  const call = async (method: "GET" | "POST", path: string, body?: unknown, withExt = false) => {
+    if (withExt && !externalId) throw new Error("this call needs the transfer's externalId");
+    const headers: Record<string, string> = {};
+    if (method === "POST") headers["content-type"] = "application/json";
+    if (withExt && externalId) headers[EXT_HEADER] = externalId;
     const res = await http.fetch(`${base}/api/mh/${path}`, {
       method,
-      headers: method === "POST" ? { "content-type": "application/json" } : undefined,
+      headers: Object.keys(headers).length ? headers : undefined,
       // `{}`, never an empty body: the API answers FST_ERR_CTP_EMPTY_JSON_BODY to a bodyless POST.
       body: method === "POST" ? JSON.stringify(body ?? {}) : undefined,
     });
     const json = await readJson(res);
-    if (!res.ok) throw toApiError(res.status, json);
+    // A host with no proxy answers every path with the app's HTML: not an API reply.
+    const notJson = (json as { error?: { code?: string } })?.error?.code === "bad_response";
+    if (!res.ok || notJson) throw toApiError(res.status, json);
     return json;
   };
   return {
@@ -218,17 +250,17 @@ export function createMhClient(http: Http = defaultHttp()): MhClient {
       })) as MhTransfer;
     },
     async prepare(id) {
-      return (await call("POST", `transfers/${id}/prepare`, {})) as {
+      return (await call("POST", `transfers/${id}/prepare`, {}, true)) as {
         transfer: MhTransfer;
         preparedTxs: PreparedTxs;
       };
     },
     async confirmBroadcast(id, body) {
-      const r = (await call("POST", `transfers/${id}/confirm-broadcast`, body)) as { transfer: MhTransfer };
+      const r = (await call("POST", `transfers/${id}/confirm-broadcast`, body, true)) as { transfer: MhTransfer };
       return r.transfer;
     },
     async get(id) {
-      return (await call("GET", `transfers/${id}`)) as MhTransfer;
+      return (await call("GET", `transfers/${id}`, undefined, true)) as MhTransfer;
     },
     async byExternal(externalId) {
       try {
@@ -264,6 +296,8 @@ export interface SolRpc {
   getBalance(address: string): Promise<number>;
   /** Raw token units held by `owner` in `mint`, summed over accounts. */
   getTokenBalance(owner: string, mint: string): Promise<bigint>;
+  /** Every token account `owner` has for `mint`, empty ones included. */
+  getTokenAccounts(owner: string, mint: string): Promise<TokenAccount[]>;
 }
 
 export function createSolRpc(http: Http = defaultHttp(), clock: Clock = realClock): SolRpc {
@@ -317,6 +351,23 @@ export function createSolRpc(http: Http = defaultHttp(), clock: Clock = realCloc
     async getBalance(address) {
       const r = await call<{ value: number }>("getBalance", [address, { commitment: "confirmed" }]);
       return r.value;
+    },
+    async getTokenAccounts(owner, mint) {
+      const r = await call<{
+        value: {
+          pubkey: string;
+          account: {
+            owner: string;
+            data: { parsed: { info: { tokenAmount: { amount: string; decimals: number } } } };
+          };
+        }[];
+      }>("getTokenAccountsByOwner", [owner, { mint }, { encoding: "jsonParsed", commitment: "confirmed" }]);
+      return (r.value ?? []).map((a) => ({
+        pubkey: a.pubkey,
+        program: a.account.owner,
+        amount: BigInt(a.account.data.parsed.info.tokenAmount.amount),
+        decimals: a.account.data.parsed.info.tokenAmount.decimals,
+      }));
     },
     async getTokenBalance(owner, mint) {
       const r = await call<{
@@ -471,6 +522,9 @@ export async function sweepLeftoverSol(
   const balance = await rpc.getBalance(key.address);
   const amount = balance - BASE_FEE_LAMPORTS;
   if (amount <= 0) return null;
+  // A brand-new wallet cannot be opened with less than the rent-exempt minimum; the
+  // transfer would fail, so leave the dust in the router rather than error.
+  if (amount < MIN_SYSTEM_BALANCE_LAMPORTS && (await rpc.getBalance(to)) === 0) return null;
   const { blockhash } = await rpc.getLatestBlockhash();
   const unsigned = buildTransferTransaction(key.publicKey, base58Decode(to), BigInt(amount), base58Decode(blockhash));
   const signed = await signTransaction(unsigned, key);
@@ -478,3 +532,88 @@ export async function sweepLeftoverSol(
   await rpc.confirm(sig);
   return sig;
 }
+
+// ---------------------------------------------------------------------------
+// Emptying the router wallet
+
+async function sendSigned(key: RouterKey, unsigned: string, rpc: SolRpc): Promise<string> {
+  const signed = await signTransaction(unsigned, key);
+  const sig = await rpc.sendTransaction(signed.base64);
+  await rpc.confirm(sig);
+  return sig;
+}
+
+/**
+ * Closes the router's empty token accounts for `mint`, so their rent comes back to the
+ * router (and from there to the recipient with the leftover SOL). Accounts that still
+ * hold tokens are left alone: the runtime would refuse to close them anyway.
+ */
+export async function closeEmptyTokenAccounts(key: RouterKey, mint: string, rpc: SolRpc): Promise<string[]> {
+  const sigs: string[] = [];
+  for (const acct of await rpc.getTokenAccounts(key.address, mint)) {
+    if (acct.amount !== 0n) continue;
+    const { blockhash } = await rpc.getLatestBlockhash();
+    const tx = buildCloseAccountTransaction(
+      key.publicKey,
+      base58Decode(acct.pubkey),
+      key.publicKey,
+      base58Decode(blockhash),
+      base58Decode(acct.program),
+    );
+    sigs.push(await sendSigned(key, tx, rpc));
+  }
+  return sigs;
+}
+
+/**
+ * Sends every token the router still holds in `mint` to `to`'s associated token account
+ * (created in the same transaction if it is missing; the router pays that rent). This is
+ * the refund path: a plain send, no MultiHopper.
+ */
+export async function sendRouterTokens(key: RouterKey, to: string, mint: string, rpc: SolRpc): Promise<string[]> {
+  const sigs: string[] = [];
+  const recipient = base58Decode(to);
+  for (const acct of await rpc.getTokenAccounts(key.address, mint)) {
+    if (acct.amount === 0n) continue;
+    const program = base58Decode(acct.program);
+    const { blockhash } = await rpc.getLatestBlockhash();
+    const tx = buildTokenSendTransaction({
+      owner: key.publicKey,
+      sourceAccount: base58Decode(acct.pubkey),
+      mint: base58Decode(mint),
+      decimals: acct.decimals,
+      amount: acct.amount,
+      recipient,
+      recipientAta: await findAssociatedTokenAddress(recipient, base58Decode(mint), program),
+      tokenProgram: program,
+      recentBlockhash: base58Decode(blockhash),
+    });
+    sigs.push(await sendSigned(key, tx, rpc));
+  }
+  return sigs;
+}
+
+/**
+ * Hands everything the router holds to `to`: tokens first (only when `sendTokens`; a
+ * finished route has none left), then the now-empty token accounts are closed for their
+ * rent, then the SOL goes with `sweepLeftoverSol`. Safe to run again: each step does
+ * nothing when there is nothing left to do.
+ */
+export async function emptyRouter(
+  key: RouterKey,
+  to: string,
+  mint: string | null,
+  rpc: SolRpc,
+  opts: { sendTokens?: boolean } = {},
+): Promise<{ tokens: string[]; closed: string[]; sol: string | null }> {
+  let tokens: string[] = [];
+  let closed: string[] = [];
+  if (mint && mint !== WSOL) {
+    if (opts.sendTokens) tokens = await sendRouterTokens(key, to, mint, rpc);
+    closed = await closeEmptyTokenAccounts(key, mint, rpc);
+  }
+  const sol = await sweepLeftoverSol(key, to, rpc);
+  return { tokens, closed, sol };
+}
+
+const WSOL = "So11111111111111111111111111111111111111112";

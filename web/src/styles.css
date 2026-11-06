@@ -2779,3 +2779,43 @@ progress.scan-bar:indeterminate::-webkit-progress-bar {
     background-position: 50% 0;
   }
 }
+
+/* ---------------------------------------------------------- private route */
+
+/* Wallet Standard wallets found in this browser: name and a data-URI icon. */
+.wallet-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.wallet-pick {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  justify-content: flex-start;
+  width: 100%;
+  text-align: left;
+}
+
+.wallet-pick img {
+  border-radius: 6px;
+  flex: 0 0 auto;
+}
+
+.guide-title {
+  margin: 0.25rem 0 0;
+  font-size: 1rem;
+}
+
+/* The switch on the quote screen: a card inside the card, off by default. */
+.route-offer {
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-sunk);
+}
+
+.route-offer .check strong {
+  font-weight: 600;
+}

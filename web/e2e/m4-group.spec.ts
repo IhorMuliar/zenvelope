@@ -37,7 +37,7 @@ const REAL_CORE = existsSync(resolve(HERE, "../src/wasm/core/zenvelope_core.js")
 const describeOnMock = REAL_CORE ? test.describe.skip : test.describe;
 
 const NEVER_ASK =
-  "We will never ask for your seed phrase, your wallet password, or a wallet connection.";
+  "We will never ask for your seed phrase, your wallet password, or a wallet connection that can sign anything.";
 
 /** A secret is 43 base64url characters. Any of them turning up is a leak. */
 const SECRET_RE = /[A-Za-z0-9_-]{43}/g;

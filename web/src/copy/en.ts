@@ -41,10 +41,12 @@ export const CANONICAL_HOST_HINT =
  *
  * It is a promise about behaviour, not a feature: there is nowhere in the
  * product that could ask for any of these three things, because the app has no
- * wallet-connect code path and never accepts key material typed by a person.
+ * signing code path for a connected wallet and never accepts key material typed by a
+ * person. The one optional "Connect my wallet" button on the Solana exit only reads a
+ * public address (see {@link solanaExit.connectBody}).
  */
 export const NEVER_ASK =
-  "We will never ask for your seed phrase, your wallet password, or a wallet connection.";
+  "We will never ask for your seed phrase, your wallet password, or a wallet connection that can sign anything.";
 
 /** The one thing the open page does ask for, said plainly next to NEVER_ASK. */
 export const ONLY_ASK =
@@ -366,8 +368,10 @@ export const solanaExit = {
   /* --------------------------------------------------------- the destination */
 
   destinationTitle: "Where on Solana?",
-  pasteTitle: "A Solana address",
+  pasteTitle: "Paste an address",
   pasteBody: "Paste an address from Phantom, Solflare or any Solana wallet.",
+  /** Where no wallet extension was found (iOS Safari, most phones): the paste box leads. */
+  pasteBodyNoWallet: "Copy your address from your wallet app",
   pasteLabel: "Solana address",
   invalidCharset:
     "That is not a Solana address: it has a character no Solana address can contain. Check that you copied all of it and nothing else.",
@@ -375,17 +379,41 @@ export const solanaExit = {
     "That is not a Solana address. A Solana address is 32 to 44 characters and decodes to 32 bytes.",
   valid: "That is a valid Solana address. Check it against your wallet before you go on.",
 
-  generateTitle: "A new Solana wallet, made here",
+  /* ---------------------------------------- connect a wallet (read-only) */
+
+  connectTitle: "Connect my wallet",
+  /** The promise, word for word. Connecting only reads a public address. */
+  connectBody: "We only see your public address. We can't move your money.",
+  connectPick: "Pick your wallet",
+  connectBusy: (name: string) => `Waiting for ${name}…`,
+  connectFailed: "The wallet did not share an address. You can paste it instead.",
+  connectedLine: (name: string) => `${name} shared this address:`,
+  connectedLabel: "Your address",
+  connectAnother: "Use another wallet",
+
+  /* ------------------------------------------------------ a new wallet */
+
+  generateTitle: "Give me a new wallet",
   generateBody:
-    "This page makes a new Solana key and gives you the secret to keep. Nothing is stored and nothing is sent.",
+    "This page makes a new Solana wallet. You copy its key into Phantom. Nothing is stored and nothing is sent.",
   secretLabel: "Secret key",
   addressLabel: "Solana address",
-  secretOnce:
-    "This key is the money. It is shown once, saved nowhere, and gone when you close this tab. Write it down or put it in a password manager now.",
+  keyCopyButton: "Copy my key",
+  /** The one warning, in a neutral tone. */
+  keyWarning: "Anyone with this key can take the money. Keep it in a password manager.",
+  secretOnce: "The key is shown once and saved nowhere. It is gone when you close this tab.",
+  guideTitle: "Import into Phantom",
+  guideSteps: [
+    "Open Phantom. Go to Settings, then Manage accounts.",
+    "Tap Add / Connect, then Import private key, and choose Solana.",
+    "Paste the key, name the account and save.",
+  ] as readonly string[],
   importHint:
-    "To use it, install Phantom or Solflare, choose “Import private key” and paste this key. It is in the 64-byte base58 format both apps expect.",
-  savedCheckbox: "I saved this key",
-  savedBlockedHint: "Tick the box above once the key is somewhere safe.",
+    "Solflare and other Solana wallets have the same option. The key is in the 64-byte base58 format they expect.",
+  keyConfirmLabel: "Type the last 4 characters of the key to continue",
+  keyConfirmBlocked: "Type the last 4 characters of your key to continue.",
+  keyConfirmWrong: "Those are not the last 4 characters of the key. Check what you copied.",
+  keyConfirmOk: "That matches.",
 
   /* ------------------------------------------------------------- the refund */
 
@@ -407,6 +435,8 @@ export const solanaExit = {
   quoteTitle: "What you would get",
   quoteButton: "See what you would get",
   quoteBusy: "Asking the swap service…",
+  /** Devnet test build: no quote to ask for. */
+  continueButton: "Continue",
   amountOutLabel: "You would receive",
   /** On the tracker: what the quote promised. */
   quotedLabel: "Quoted",
@@ -505,6 +535,120 @@ export const solanaExit = {
     "The quote and the deposit address are real, and the transaction was built and proved. Nothing went to the Zcash network, so the money is still in the envelope and this link still works.",
 
   back: "Keep it shielded instead",
+} as const;
+
+/* ------------------------------------------------------- the private route */
+
+/**
+ * The private route: the swap lands in a wallet this page holds (derived from the link),
+ * and MultiHopper carries it to the recipient's wallet over several hops. These are the
+ * words on the quote screen, the gate, the funding step and the tracker.
+ *
+ * The caveat sits in the same sentence as the benefit, and no line promises anonymity:
+ * Solana is public, and the service screens routes and can stop one.
+ */
+export const privateRouteBoundary = {
+  title: "Your money takes a longer route",
+  lede: "The private route makes your money harder to trace. It does not hide it. Read these four points first.",
+
+  points: [
+    {
+      title: "A service we do not run carries it",
+      body: "MultiHopper passes the money through several wallets on Solana before it reaches yours. Its contracts are not yet audited.",
+    },
+    {
+      title: "A safety check can stop it",
+      body: "MultiHopper screens every route with TRM Labs. If a check flags it, a safety check may send the money back to this link. Open this link again and you can send it on to your wallet.",
+    },
+    {
+      title: "Harder to trace is not hidden",
+      body: "Solana is public. A longer route makes tracing harder, not impossible, and your wallet's own history stays visible.",
+    },
+    {
+      title: "It costs more and takes longer",
+      body: "MultiHopper takes 0.5%, and Solana network costs apply. It takes a few minutes more. You see the numbers before you start.",
+    },
+  ] as Step[],
+
+  checkbox: "I understand how the private route works",
+  blockedHint: "Tick the box above to continue.",
+  continue: "Use the private route",
+  back: "Go back",
+} as const;
+
+export const privateRoute = {
+  toggleLabel: "Private route",
+  toggleBody:
+    "Extra privacy: your money takes a longer route, so it's harder to trace. Solana is public, so this isn't a guarantee.",
+  checking: "Checking whether the private route is worth it…",
+  numbers: (receive: string, minutes: number, network: string) =>
+    `You'll receive about ${receive} · arrives in about ${minutes} min · costs: 0.5% + about ${network} network`,
+  routeTooSmall: "This envelope is too small to pay for the private route as well.",
+  availableOver: (usd: string) => `Private route is available for gifts over ${usd}`,
+  availableUpTo: (usd: string) => `Private route is available for gifts up to ${usd}`,
+
+  /** The deposit step, when the route is on. */
+  routerRow: "Lands first in",
+  finalRow: "Then goes to",
+  extraRow: "Also pays for the route",
+  extraNote: "A little SOL for the route's Solana costs. What is left over comes to your wallet.",
+
+  /* ------------------------------------------------------------ the tracker */
+
+  trackerTitle: "On its way",
+  swapping: "Swapping",
+  packed: "Packed",
+  hop: (i: number, n: number) => `Hop ${i} of ${n}`,
+  hopWaiting: "Hops",
+  landing: "Landing",
+  arrived: "In your wallet",
+  closeNote: "You can close this page. Open this link again any time to check.",
+  eta: (when: string) => `Arrives ${when}`,
+  etaSoon: "any moment now",
+  etaIn: (minutes: number) => `in about ${minutes} min`,
+  late: "Taking longer than usual. Your money is safe.",
+  waitingFunds: "Waiting for the swap to reach the route wallet.",
+  working: "Setting up the route. Keep this page open for a minute.",
+  signing: (i: number, n: number) => `Signing step ${i} of ${n}`,
+  arrivedLine: "It arrived. The route is finished.",
+  receivedLabel: "Sent to",
+  details: "See details",
+  routerLabel: "Route wallet",
+  swapTx: "Solana transaction",
+  hopTx: (i: number) => `Hop ${i}`,
+  failedLine: "The route stopped. Your money is safe in the route wallet, which this link controls.",
+  retry: "Try again",
+  stuckHint:
+    "The route wallet holds your money. Opening this link again picks up where it stopped.",
+
+  refundedTitle: "The money came back",
+  refunded: "The safety check sent the money back to this link's wallet",
+  refundedBody: "It is safe. You can send it on to your wallet now.",
+  refundSend: "Send it to my wallet",
+  refundSending: "Sending…",
+  refundDone: "Sent to your wallet.",
+  refundFailed: "We could not send it just now. Try again in a minute.",
+
+  /* ------------------------------------------------------- opened again */
+
+  resumeTitle: "Your money is on its way",
+  resumeChecking: "Checking this link…",
+  resumeAsk: "Where should it go?",
+  resumeAskBody:
+    "This link already paid its swap into the route wallet. Paste the Solana address to send it to.",
+  resumeAddress: "Solana address",
+  resumeGo: "Start the route",
+
+  /* ------------------------------------------------------------- devnet */
+
+  devnetTitle: "Test the private route",
+  devnetBadge: "Devnet test build. No real money.",
+  devnetBody: "Send devnet SOL or USDC here to test",
+  devnetLabel: "Route wallet address",
+  devnetWaiting: "Waiting for devnet funds to arrive. This page checks every few seconds.",
+  devnetNote:
+    "The swap and the Zcash payment are skipped on devnet. Whatever you send to this address goes through the route to the address you chose.",
+  devnetSkip: "Back",
 } as const;
 
 /* -------------------------------------------- group envelopes (M6 preview) */
@@ -730,6 +874,11 @@ export const doneCopy = {
     where: "The ZEC is on its way to the swap service.",
     next: "The USDC arrives in your Solana wallet when the swap finishes. This page follows it below.",
   },
+  /** The private route: the swap lands in a route wallet first, then travels on. */
+  solanaRoute: {
+    where: "The ZEC is on its way to the swap service.",
+    next: "The swap pays a route wallet this link controls, and the money travels on from there to your wallet. This page follows it below. You can close it and open this link again any time.",
+  },
 } as const;
 
 /**
@@ -824,6 +973,8 @@ export function allStrings(): string[] {
     receive,
     doneCopy,
     solanaExit,
+    privateRouteBoundary,
+    privateRoute,
     group,
     single,
     alreadyOpened,

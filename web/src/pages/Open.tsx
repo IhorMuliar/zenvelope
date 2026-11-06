@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { LIGHTWALLETD, LIGHTWALLETD_FALLBACK, explorerTxUrl } from "../config";
-import { alreadyOpened, noteCopy, revealed, sealed, spendCheck } from "../copy/en";
+import { alreadyOpened, noteCopy, privateRoute as routeCopy, revealed, sealed, spendCheck } from "../copy/en";
 import { loadCore, provingNote } from "../core";
 import type { FoundNote, LoadedCore, Network } from "../core/types";
 import {
@@ -23,6 +23,10 @@ import { parseMemo } from "../lib/memo";
 import { CopyField } from "../components/CopyField";
 import { Envelope } from "../components/Envelope";
 import { SendOn } from "../components/SendOn";
+import { MultihopTracker } from "../components/MultihopTracker";
+import { createMhClient, createSolRpc, externalIdFor } from "../lib/multihop";
+import { deriveRouterKey, secretBytesFromB64url } from "../lib/router";
+import { holdsFunds, readHoldings } from "../lib/routeRun";
 
 interface Link {
   /** The address the sender paid. Safe to show: it reveals nothing and cannot spend. */
@@ -247,7 +251,8 @@ export function Open() {
 
   if (state.phase === "spent" && state.result) {
     return (
-      <AlreadyOpened
+      <SpentOrRoute
+        getSecret={getSecret}
         notes={state.result.notes}
         network={link.network}
         badge={badge}
@@ -324,6 +329,78 @@ export function Open() {
       </p>
       {provingFooter}
     </section>
+  );
+}
+
+/**
+ * A swept envelope may still have a private route in flight. The router wallet and the
+ * route's external id both come from the link, so reopening it can find them: if the
+ * router holds money or MultiHopper knows a transfer, show the tracker; otherwise this
+ * is the plain "already opened" screen. Any trouble asking (no proxy, offline) falls
+ * back to the plain screen, which is also what every ordinary swept envelope gets.
+ */
+function SpentOrRoute(props: {
+  getSecret: () => string | null;
+  notes: FoundNote[];
+  network: Network;
+  badge: React.ReactNode;
+  provingFooter: React.ReactNode;
+}) {
+  const [probe, setProbe] = useState<"checking" | "route" | "spent">("checking");
+  const { getSecret } = props;
+
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      let found = false;
+      try {
+        const secret = getSecret();
+        if (secret) {
+          const bytes = secretBytesFromB64url(secret);
+          const [key, externalId] = await Promise.all([deriveRouterKey(bytes), externalIdFor(bytes)]);
+          const [transfer, held] = await Promise.all([
+            createMhClient(undefined, externalId).byExternal(externalId).catch(() => null),
+            readHoldings(createSolRpc(), key).catch(() => null),
+          ]);
+          found = transfer !== null || (held !== null && holdsFunds(held));
+        }
+      } catch {
+        found = false;
+      }
+      if (alive) setProbe(found ? "route" : "spent");
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [getSecret]);
+
+  if (probe === "checking") {
+    return (
+      <section className="stack">
+        <h1 data-testid="route-probe">{routeCopy.resumeChecking}</h1>
+      </section>
+    );
+  }
+  if (probe === "route") {
+    return (
+      <section className="stack" data-testid="route-resume">
+        <h1>{routeCopy.resumeTitle}</h1>
+        {props.badge}
+        <MultihopTracker getSecret={getSecret} recipient={null} asset={null} mode="resume" />
+        <p className="fine" data-testid="link-forgotten">
+          {LINK_FORGOTTEN_COPY}
+        </p>
+        {props.provingFooter}
+      </section>
+    );
+  }
+  return (
+    <AlreadyOpened
+      notes={props.notes}
+      network={props.network}
+      badge={props.badge}
+      provingFooter={props.provingFooter}
+    />
   );
 }
 

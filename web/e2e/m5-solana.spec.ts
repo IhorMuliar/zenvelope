@@ -449,18 +449,26 @@ describeOnMock("M5: the Solana exit", () => {
     expect(secret).not.toBe(address);
 
     await expect(page.getByTestId("swap-secret-once")).toContainText("saved nowhere");
-    await expect(page.getByTestId("swap-import-hint")).toContainText("Phantom");
+    await expect(page.getByTestId("swap-key-warning")).toHaveText(
+      "Anyone with this key can take the money. Keep it in a password manager.",
+    );
+    await expect(page.getByTestId("swap-copy-key")).toHaveText("Copy my key");
+    await expect(page.getByTestId("swap-import-guide").locator("li")).toHaveCount(3);
+    await expect(page.getByTestId("swap-import-guide")).toContainText("Import private key");
     await expect(page.getByTestId("swap-import-hint")).toContainText("Solflare");
 
-    // The gate: the key has to be saved before there is a way forward.
-    await expect(page.getByTestId("swap-saved-key")).not.toBeChecked();
+    // The gate: the last 4 characters of the key have to be typed back.
+    const tail = secret.slice(-4);
     await expect(page.getByTestId("swap-get-quote")).toBeDisabled();
-    await page.getByTestId("swap-saved-key").check();
+    await page.getByTestId("swap-key-confirm").fill(tail === "aaaa" ? "bbbb" : "aaaa");
+    await expect(page.getByTestId("swap-key-confirm-wrong")).toBeVisible();
+    await expect(page.getByTestId("swap-get-quote")).toBeDisabled();
+    await page.getByTestId("swap-key-confirm").fill(tail);
     await expect(page.getByTestId("swap-get-quote")).toBeEnabled();
     // And it is a gate, not a one-way door.
-    await page.getByTestId("swap-saved-key").uncheck();
+    await page.getByTestId("swap-key-confirm").fill(tail.slice(0, 3));
     await expect(page.getByTestId("swap-get-quote")).toBeDisabled();
-    await page.getByTestId("swap-saved-key").check();
+    await page.getByTestId("swap-key-confirm").fill(tail);
 
     await page.getByTestId("swap-get-quote").click();
     await expect(page.getByTestId("swap-quote")).toBeVisible();
